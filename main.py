@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, timedelta
 
 from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
@@ -18,6 +18,8 @@ class TodoCreate(BaseModel):
     title: str
     category: str | None = None
     priority: str = "medium"
+    due_date: str | None = None
+    recurrence: str | None = None  # None or "daily"
 
 
 class DiaryUpsert(BaseModel):
@@ -35,23 +37,58 @@ class GoalCreate(BaseModel):
     title: str
 
 
+def next_occurrence(base: date, recurrence: str) -> date:
+    next_date = base + timedelta(days=1)
+    if recurrence == "weekdays":
+        while next_date.weekday() >= 5:  # 5=Sat, 6=Sun
+            next_date += timedelta(days=1)
+    return next_date
+
+
 # ---------- todos ----------
 
 @app.get("/api/todos")
 def list_todos():
     conn = get_connection()
-    cur = conn.execute("SELECT * FROM todos ORDER BY done ASC, created_at DESC")
+    cur = conn.execute(
+        """
+        SELECT * FROM todos
+        ORDER BY done ASC, (due_date IS NULL) ASC, due_date ASC,
+                 CASE priority WHEN 'high' THEN 0 WHEN 'medium' THEN 1 WHEN 'low' THEN 2 ELSE 1 END ASC,
+                 created_at DESC
+        """
+    )
     result = rows_to_dicts(cur)
     conn.close()
     return result
+
+
+@app.get("/api/todos/stats")
+def todo_stats():
+    conn = get_connection()
+    total = conn.execute("SELECT COUNT(*) FROM todos").fetchone()[0]
+    done_count = conn.execute("SELECT COUNT(*) FROM todos WHERE done = 1").fetchone()[0]
+    cur = conn.execute(
+        """
+        SELECT date(completed_at) AS d, COUNT(*) AS c
+        FROM todos
+        WHERE done = 1 AND completed_at >= datetime('now', '-6 days')
+        GROUP BY d
+        ORDER BY d
+        """
+    )
+    daily = rows_to_dicts(cur)
+    conn.close()
+    rate = round(done_count / total * 100) if total else 0
+    return {"total": total, "done": done_count, "rate": rate, "daily": daily}
 
 
 @app.post("/api/todos")
 def create_todo(todo: TodoCreate):
     conn = get_connection()
     cur = conn.execute(
-        "INSERT INTO todos (title, category, priority) VALUES (?, ?, ?)",
-        (todo.title, todo.category, todo.priority),
+        "INSERT INTO todos (title, category, priority, due_date, recurrence) VALUES (?, ?, ?, ?, ?)",
+        (todo.title, todo.category, todo.priority, todo.due_date, todo.recurrence),
     )
     conn.commit()
     new_id = cur.lastrowid
@@ -62,16 +99,28 @@ def create_todo(todo: TodoCreate):
 @app.post("/api/todos/{todo_id}/toggle")
 def toggle_todo(todo_id: int):
     conn = get_connection()
-    row = conn.execute("SELECT done FROM todos WHERE id = ?", (todo_id,)).fetchone()
+    row = conn.execute(
+        "SELECT done, title, category, priority, due_date, recurrence FROM todos WHERE id = ?",
+        (todo_id,),
+    ).fetchone()
     if row is None:
         conn.close()
         raise HTTPException(status_code=404, detail="todo not found")
-    new_done = 0 if row[0] else 1
+    done, title, category, priority, due_date, recurrence = row
+    new_done = 0 if done else 1
     completed_at = "datetime('now')" if new_done else "NULL"
     conn.execute(
         f"UPDATE todos SET done = ?, completed_at = {completed_at} WHERE id = ?",
         (new_done, todo_id),
     )
+    if new_done and recurrence in ("daily", "weekdays"):
+        base = date.fromisoformat(due_date) if due_date else date.today()
+        base = max(base, date.today())
+        next_due = next_occurrence(base, recurrence)
+        conn.execute(
+            "INSERT INTO todos (title, category, priority, due_date, recurrence) VALUES (?, ?, ?, ?, ?)",
+            (title, category, priority, next_due.isoformat(), recurrence),
+        )
     conn.commit()
     conn.close()
     return {"id": todo_id, "done": bool(new_done)}

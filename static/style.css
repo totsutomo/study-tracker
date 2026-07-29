@@ -53,6 +53,85 @@ h3 { font-size: 14px; color: #555; margin-top: 24px; }
   text-decoration: line-through;
 }
 
+.list li.overdue {
+  border-left: 4px solid #d33;
+}
+
+.list li.due-today {
+  border-left: 4px solid #2563eb;
+}
+
+.list li.priority-high span:first-of-type {
+  font-weight: bold;
+}
+
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+  color: #555;
+}
+
+.add-form input[type="date"] {
+  padding: 8px;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+}
+
+.filter-bar {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.filter-bar input[type="text"] {
+  flex: 1;
+  min-width: 100px;
+  padding: 8px;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+}
+
+.filter-bar select {
+  padding: 8px;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+}
+
+#todo-stats {
+  background: white;
+  border-radius: 8px;
+  padding: 12px;
+  font-size: 13px;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.06);
+}
+
+#todo-stats p {
+  margin: 4px 0;
+}
+
+.stat-bar-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 4px 0;
+}
+
+.stat-bar-track {
+  flex: 1;
+  background: #eee;
+  border-radius: 4px;
+  height: 8px;
+  overflow: hidden;
+}
+
+.stat-bar-fill {
+  background: #2563eb;
+  height: 100%;
+}
+
 .list li .meta {
   margin-left: auto;
   font-size: 12px;

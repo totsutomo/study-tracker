@@ -17,8 +17,22 @@
 <main id="app">
 
   <section id="tab-todo" class="tab-panel active">
-    <h2>今日のToDo</h2>
-    <ul id="todo-list" class="list"></ul>
+    <h2>ToDo</h2>
+
+    <div class="filter-bar">
+      <input type="text" id="todo-search" placeholder="🔍 検索">
+      <select id="todo-filter-category">
+        <option value="">カテゴリ: すべて</option>
+        <option value="英語">英語</option>
+        <option value="数学">数学</option>
+        <option value="世界史">世界史</option>
+        <option value="その他">その他</option>
+      </select>
+      <label class="checkbox-label"><input type="checkbox" id="todo-filter-today"> 今日の分だけ</label>
+    </div>
+
+    <div id="todo-groups"></div>
+
     <form id="todo-form" class="add-form">
       <input type="text" id="todo-title" placeholder="タスク名" required>
       <select id="todo-category">
@@ -27,8 +41,22 @@
         <option value="世界史">世界史</option>
         <option value="その他">その他</option>
       </select>
+      <select id="todo-priority">
+        <option value="high">優先度: 高</option>
+        <option value="medium" selected>優先度: 中</option>
+        <option value="low">優先度: 低</option>
+      </select>
+      <input type="date" id="todo-due-date">
+      <select id="todo-recurrence">
+        <option value="">繰り返しなし</option>
+        <option value="daily">毎日</option>
+        <option value="weekdays">平日のみ</option>
+      </select>
       <button type="submit">+ 追加</button>
     </form>
+
+    <h3>完了実績</h3>
+    <div id="todo-stats"></div>
   </section>
 
   <section id="tab-diary" class="tab-panel">

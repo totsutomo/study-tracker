@@ -37,41 +37,138 @@ function todayStr() {
 
 // ---------- todos ----------
 
-async function loadTodos() {
-  const todos = await api("/api/todos");
-  const list = document.getElementById("todo-list");
-  list.innerHTML = "";
-  todos.forEach((t) => {
-    const li = document.createElement("li");
-    if (t.done) li.classList.add("done");
-    li.innerHTML = `
-      <input type="checkbox" ${t.done ? "checked" : ""}>
-      <span>${escapeHtml(t.title)}</span>
-      <span class="meta">${t.category || ""}</span>
-      <button class="delete-btn" title="削除">×</button>
-    `;
-    li.querySelector("input").addEventListener("click", async () => {
-      await api(`/api/todos/${t.id}/toggle`, { method: "POST" });
-      loadTodos();
-    });
-    li.querySelector(".delete-btn").addEventListener("click", async () => {
-      await api(`/api/todos/${t.id}`, { method: "DELETE" });
-      loadTodos();
-    });
-    list.appendChild(li);
+const PRIORITY_LABEL = { high: "高", medium: "中", low: "低" };
+
+function renderTodoItem(t, list) {
+  const li = document.createElement("li");
+  if (t.done) li.classList.add("done");
+  if (!t.done && t.due_date && t.due_date < todayStr()) li.classList.add("overdue");
+  if (!t.done && t.due_date === todayStr()) li.classList.add("due-today");
+  if (t.priority === "high") li.classList.add("priority-high");
+  const dueLabel = t.due_date ? `📅 ${t.due_date}` : "";
+  const recurLabel = t.recurrence === "daily" ? " 🔁毎日" : t.recurrence === "weekdays" ? " 🔁平日" : "";
+  const priorityLabel = t.priority && t.priority !== "medium" ? `[${PRIORITY_LABEL[t.priority] || t.priority}] ` : "";
+  li.innerHTML = `
+    <input type="checkbox" ${t.done ? "checked" : ""}>
+    <span>${priorityLabel}${escapeHtml(t.title)}</span>
+    <span class="meta">${t.category || ""} ${dueLabel}${recurLabel}</span>
+    <button class="delete-btn" title="削除">×</button>
+  `;
+  li.querySelector("input").addEventListener("click", async () => {
+    await api(`/api/todos/${t.id}/toggle`, { method: "POST" });
+    loadTodos();
+    loadTodoStats();
   });
+  li.querySelector(".delete-btn").addEventListener("click", async () => {
+    await api(`/api/todos/${t.id}`, { method: "DELETE" });
+    loadTodos();
+  });
+  list.appendChild(li);
+}
+
+function todoGroupOf(t) {
+  if (t.done) return "done";
+  if (!t.due_date) return "none";
+  const today = todayStr();
+  if (t.due_date < today) return "overdue";
+  if (t.due_date === today) return "today";
+  const weekAhead = new Date();
+  weekAhead.setDate(weekAhead.getDate() + 7);
+  if (t.due_date <= weekAhead.toISOString().slice(0, 10)) return "week";
+  return "later";
+}
+
+let allTodos = [];
+
+function applyTodoFilters(todos) {
+  const search = document.getElementById("todo-search").value.trim().toLowerCase();
+  const category = document.getElementById("todo-filter-category").value;
+  const todayOnly = document.getElementById("todo-filter-today").checked;
+  const today = todayStr();
+  return todos.filter((t) => {
+    if (search && !t.title.toLowerCase().includes(search)) return false;
+    if (category && t.category !== category) return false;
+    if (todayOnly && !(t.due_date === today || (!t.due_date && !t.done))) return false;
+    return true;
+  });
+}
+
+function renderTodos() {
+  const todos = applyTodoFilters(allTodos);
+  const groupsEl = document.getElementById("todo-groups");
+  groupsEl.innerHTML = "";
+
+  const groups = { overdue: [], today: [], week: [], later: [], none: [], done: [] };
+  todos.forEach((t) => groups[todoGroupOf(t)].push(t));
+
+  const sections = [
+    ["overdue", "期限切れ"],
+    ["today", "今日"],
+    ["week", "今週"],
+    ["later", "それ以降"],
+    ["none", "期限なし"],
+    ["done", "完了"],
+  ];
+
+  sections.forEach(([key, label]) => {
+    if (groups[key].length === 0) return;
+    const h = document.createElement("h3");
+    h.textContent = `${label}(${groups[key].length})`;
+    groupsEl.appendChild(h);
+    const ul = document.createElement("ul");
+    ul.className = "list";
+    groups[key].forEach((t) => renderTodoItem(t, ul));
+    groupsEl.appendChild(ul);
+  });
+
+  if (todos.length === 0) {
+    groupsEl.innerHTML = "<p class='meta'>該当するタスクがありません</p>";
+  }
+}
+
+async function loadTodos() {
+  allTodos = await api("/api/todos");
+  renderTodos();
+}
+
+["todo-search", "todo-filter-category", "todo-filter-today"].forEach((id) => {
+  document.getElementById(id).addEventListener("input", renderTodos);
+});
+
+async function loadTodoStats() {
+  const stats = await api("/api/todos/stats");
+  const el = document.getElementById("todo-stats");
+  const maxDaily = Math.max(1, ...stats.daily.map((d) => d.c));
+  const barsHtml = stats.daily
+    .map((d) => `
+      <div class="stat-bar-row">
+        <span class="meta">${d.d.slice(5)}</span>
+        <div class="stat-bar-track"><div class="stat-bar-fill" style="width:${(d.c / maxDaily) * 100}%"></div></div>
+        <span class="meta">${d.c}件</span>
+      </div>
+    `)
+    .join("");
+  el.innerHTML = `
+    <p>累計達成: ${stats.done}/${stats.total}件(達成率 ${stats.rate}%)</p>
+    ${stats.daily.length ? `<p class="meta">直近7日の完了数</p>${barsHtml}` : ""}
+  `;
 }
 
 document.getElementById("todo-form").addEventListener("submit", async (e) => {
   e.preventDefault();
   const title = document.getElementById("todo-title").value.trim();
   const category = document.getElementById("todo-category").value;
+  const priority = document.getElementById("todo-priority").value;
+  const due_date = document.getElementById("todo-due-date").value || null;
+  const recurrence = document.getElementById("todo-recurrence").value || null;
   if (!title) return;
   await api("/api/todos", {
     method: "POST",
-    body: JSON.stringify({ title, category }),
+    body: JSON.stringify({ title, category, priority, due_date, recurrence }),
   });
   document.getElementById("todo-title").value = "";
+  document.getElementById("todo-due-date").value = "";
+  document.getElementById("todo-recurrence").value = "";
   loadTodos();
 });
 
@@ -236,6 +333,7 @@ document.getElementById("goal-form").addEventListener("submit", async (e) => {
 // ---------- init ----------
 
 loadTodos();
+loadTodoStats();
 loadDiaryEditor(todayStr());
 loadDiaryList();
 loadStudySummary();

@@ -15,7 +15,9 @@ CREATE TABLE IF NOT EXISTS todos (
     priority TEXT DEFAULT 'medium',
     done INTEGER DEFAULT 0,
     created_at TEXT DEFAULT (datetime('now')),
-    completed_at TEXT
+    completed_at TEXT,
+    due_date TEXT,
+    recurrence TEXT
 );
 
 CREATE TABLE IF NOT EXISTS diary_entries (
@@ -64,4 +66,14 @@ def init_db():
     conn = get_connection()
     conn.executescript(SCHEMA)
     conn.commit()
+    _migrate(conn)
     conn.close()
+
+
+def _migrate(conn):
+    cols = [row[1] for row in conn.execute("PRAGMA table_info(todos)").fetchall()]
+    if "due_date" not in cols:
+        conn.execute("ALTER TABLE todos ADD COLUMN due_date TEXT")
+    if "recurrence" not in cols:
+        conn.execute("ALTER TABLE todos ADD COLUMN recurrence TEXT")
+    conn.commit()
