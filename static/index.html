@@ -46,17 +46,19 @@
       </div>
       <form id="todo-form" class="add-form">
         <input type="text" id="todo-title" placeholder="タスク名" required>
-        <select id="todo-category">
-          <option value="英語">英語</option>
-          <option value="数学">数学</option>
-          <option value="世界史">世界史</option>
-          <option value="その他">その他</option>
-        </select>
-        <select id="todo-priority">
-          <option value="high">優先度: 高</option>
-          <option value="medium" selected>優先度: 中</option>
-          <option value="low">優先度: 低</option>
-        </select>
+        <div class="form-row">
+          <select id="todo-category">
+            <option value="英語">英語</option>
+            <option value="数学">数学</option>
+            <option value="世界史">世界史</option>
+            <option value="その他">その他</option>
+          </select>
+          <select id="todo-priority">
+            <option value="high">優先度: 高</option>
+            <option value="medium" selected>優先度: 中</option>
+            <option value="low">優先度: 低</option>
+          </select>
+        </div>
         <div class="due-row">
           <input type="date" id="todo-due-date">
           <button type="button" class="quick-date-btn" data-quick="today">今日</button>
