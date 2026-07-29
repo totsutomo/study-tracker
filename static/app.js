@@ -78,6 +78,7 @@ function renderTodoItem(t, list) {
     <input type="checkbox" ${t.done ? "checked" : ""}>
     <span>${priorityLabel}${escapeHtml(t.title)}</span>
     <span class="meta">${t.category || ""} ${dueLabel}${recurLabel}</span>
+    ${!t.done && t.category ? `<button class="play-btn" title="記録開始">▶</button>` : ""}
     <button class="delete-btn" title="削除">×</button>
   `;
   li.querySelector("input").addEventListener("click", async () => {
@@ -85,6 +86,10 @@ function renderTodoItem(t, list) {
     loadTodos();
     loadTodoStats();
   });
+  const playBtn = li.querySelector(".play-btn");
+  if (playBtn) {
+    playBtn.addEventListener("click", () => startTimerForTodo(t));
+  }
   li.querySelector(".delete-btn").addEventListener("click", async () => {
     await api(`/api/todos/${t.id}`, { method: "DELETE" });
     loadTodos();
@@ -259,8 +264,24 @@ document.querySelectorAll("[data-recur-preset]").forEach((btn) => {
 
 // ---------- category management ----------
 
+const CATEGORY_COLOR_PALETTE = ["#3987e5", "#d95926", "#199e70", "#c98500", "#d55181", "#9085e9", "#e66767"];
+let allCategories = [];
+let categoryColorMap = {};
+
+function colorFor(subjectName) {
+  return categoryColorMap[subjectName] || "#6b7280";
+}
+
 async function loadCategories() {
   const cats = await api("/api/categories");
+  allCategories = cats;
+
+  categoryColorMap = {};
+  cats.forEach((c, i) => {
+    categoryColorMap[c.name] = CATEGORY_COLOR_PALETTE[i % CATEGORY_COLOR_PALETTE.length];
+  });
+
+  renderStudyButtons(cats);
 
   const list = document.getElementById("category-list");
   list.innerHTML = "";
@@ -426,13 +447,41 @@ document.getElementById("diary-save").addEventListener("click", async () => {
 
 // ---------- study logs ----------
 
-const SUBJECT_COLORS = { "英語": "#3987e5", "数学": "#d95926", "世界史": "#199e70" };
-const SUBJECTS = ["英語", "数学", "世界史"];
+function renderStudyButtons(cats) {
+  const container = document.getElementById("study-buttons");
+  container.innerHTML = cats
+    .map(
+      (c) =>
+        `<button type="button" class="subject-btn" data-subject="${escapeHtml(c.name)}" style="--subject-color:${colorFor(c.name)}">${escapeHtml(c.name)}</button>`
+    )
+    .join("");
+  container.querySelectorAll(".subject-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      if (timerSubject) return; // a session is already running
+      timerSubject = btn.dataset.subject;
+      activeTodoId = null;
+      accumulatedMs = 0;
+      segmentStart = Date.now();
+      isPaused = false;
+      openFocusOverlay();
+      startTimerTick();
+    });
+  });
+}
 
-document.querySelectorAll(".subject-btn").forEach((btn) => {
-  const color = SUBJECT_COLORS[btn.dataset.subject];
-  if (color) btn.style.setProperty("--subject-color", color);
-});
+function startTimerForTodo(todo) {
+  if (timerSubject) {
+    alert("すでにタイマーが動いています");
+    return;
+  }
+  timerSubject = todo.category;
+  activeTodoId = todo.id;
+  accumulatedMs = 0;
+  segmentStart = Date.now();
+  isPaused = false;
+  openFocusOverlay();
+  startTimerTick();
+}
 
 function formatElapsed(ms) {
   const totalSec = Math.floor(ms / 1000);
@@ -445,6 +494,7 @@ function formatElapsed(ms) {
 
 let timerInterval = null;
 let timerSubject = null;
+let activeTodoId = null;
 let accumulatedMs = 0;
 let segmentStart = null;
 let isPaused = false;
@@ -476,12 +526,10 @@ function stopTimerTick() {
 }
 
 function openFocusOverlay() {
-  const color = SUBJECT_COLORS[timerSubject] || "";
+  const color = colorFor(timerSubject);
   document.getElementById("focus-subject-name").textContent = timerSubject;
-  if (color) {
-    document.getElementById("focus-timer").style.color = color;
-    document.getElementById("focus-ring-fill").style.stroke = color;
-  }
+  document.getElementById("focus-timer").style.color = color;
+  document.getElementById("focus-ring-fill").style.stroke = color;
   document.getElementById("focus-pause-btn").textContent = "一時停止";
   const overlay = document.getElementById("focus-overlay");
   overlay.classList.remove("hidden");
@@ -491,18 +539,6 @@ function openFocusOverlay() {
 function closeFocusOverlay() {
   document.getElementById("focus-overlay").classList.add("hidden");
 }
-
-document.querySelectorAll(".subject-btn").forEach((btn) => {
-  btn.addEventListener("click", () => {
-    if (timerSubject) return; // a session is already running
-    timerSubject = btn.dataset.subject;
-    accumulatedMs = 0;
-    segmentStart = Date.now();
-    isPaused = false;
-    openFocusOverlay();
-    startTimerTick();
-  });
-});
 
 document.getElementById("focus-pause-btn").addEventListener("click", () => {
   if (!timerSubject) return;
@@ -530,7 +566,9 @@ document.getElementById("focus-stop-btn").addEventListener("click", async () => 
   stopTimerTick();
   const elapsedMinutes = Math.max(1, Math.round(totalMs / 60000));
   const subject = timerSubject;
+  const todoId = activeTodoId;
   timerSubject = null;
+  activeTodoId = null;
   accumulatedMs = 0;
   segmentStart = null;
   isPaused = false;
@@ -539,6 +577,11 @@ document.getElementById("focus-stop-btn").addEventListener("click", async () => 
     method: "POST",
     body: JSON.stringify({ subject, minutes: elapsedMinutes }),
   });
+  if (todoId && confirm("このタスクを完了にする?")) {
+    await api(`/api/todos/${todoId}/toggle`, { method: "POST" });
+    loadTodos();
+    loadTodoStats();
+  }
   loadStudySummary();
   loadStudyLogList();
   loadStudyChart();
@@ -560,21 +603,26 @@ function last14Dates() {
 async function loadStudyChart() {
   const raw = await api("/api/study-logs/daily");
   const dates = last14Dates();
+  const subjectNames = allCategories.map((c) => c.name);
+  raw.forEach((row) => {
+    if (!subjectNames.includes(row.subject)) subjectNames.push(row.subject);
+  });
   const byDate = {};
   dates.forEach((d) => {
-    byDate[d] = { 英語: 0, 数学: 0, 世界史: 0 };
+    byDate[d] = {};
+    subjectNames.forEach((s) => {
+      byDate[d][s] = 0;
+    });
   });
   raw.forEach((row) => {
-    if (byDate[row.d] && SUBJECTS.includes(row.subject)) {
-      byDate[row.d][row.subject] = row.total_minutes;
-    }
+    if (byDate[row.d]) byDate[row.d][row.subject] = row.total_minutes;
   });
-  renderStudyChart(dates, byDate);
+  renderStudyChart(dates, byDate, subjectNames);
 }
 
-function renderStudyChart(dates, byDate) {
+function renderStudyChart(dates, byDate, subjectNames) {
   const container = document.getElementById("study-chart");
-  const totals = dates.map((d) => SUBJECTS.reduce((sum, s) => sum + byDate[d][s], 0));
+  const totals = dates.map((d) => subjectNames.reduce((sum, s) => sum + (byDate[d][s] || 0), 0));
   const maxTotal = Math.max(60, ...totals);
   const chartW = 320;
   const chartH = 130;
@@ -600,22 +648,23 @@ function renderStudyChart(dates, byDate) {
     .map((d, i) => {
       const x = padLeft + i * (barW + barGap);
       let yCursor = plotH;
-      const segments = SUBJECTS.map((s) => {
-        const minutes = byDate[d][s];
+      const segments = subjectNames.map((s) => {
+        const minutes = byDate[d][s] || 0;
         if (minutes <= 0) return "";
         const h = (minutes / maxTotal) * plotH;
         const y = yCursor - h;
         yCursor -= h + 1;
-        return `<rect x="${x}" y="${y}" width="${Math.max(barW, 0)}" height="${Math.max(h, 0)}" fill="${SUBJECT_COLORS[s]}" rx="2" data-date="${d}" data-subject="${s}" data-minutes="${minutes}"></rect>`;
+        return `<rect x="${x}" y="${y}" width="${Math.max(barW, 0)}" height="${Math.max(h, 0)}" fill="${colorFor(s)}" rx="2" data-date="${d}" data-subject="${s}" data-minutes="${minutes}"></rect>`;
       }).join("");
       const dayLabel = d.slice(8, 10);
       return `${segments}<text x="${x + barW / 2}" y="${chartH}" font-size="8" fill="var(--text-muted)" text-anchor="middle">${dayLabel}</text>`;
     })
     .join("");
 
-  const legend = SUBJECTS.map(
-    (s) => `<span class="legend-item"><span class="legend-dot" style="background:${SUBJECT_COLORS[s]}"></span>${s}</span>`
-  ).join("");
+  const legend = subjectNames
+    .filter((s) => dates.some((d) => byDate[d][s] > 0))
+    .map((s) => `<span class="legend-item"><span class="legend-dot" style="background:${colorFor(s)}"></span>${s}</span>`)
+    .join("");
 
   container.innerHTML = `
     <div class="chart-legend">${legend}</div>
@@ -632,8 +681,17 @@ function renderStudyChart(dates, byDate) {
 
 // ---------- weekly / monthly goal progress ----------
 
+function formatDuration(minutes) {
+  if (minutes < 60) return `${minutes}分`;
+  return `${(minutes / 60).toFixed(1)}時間`;
+}
+
 async function loadGoalProgress() {
   const p = await api("/api/study-logs/progress");
+  document.getElementById("stat-today").textContent = formatDuration(p.today_minutes);
+  document.getElementById("stat-month").textContent = formatDuration(p.month_minutes);
+  document.getElementById("stat-total").textContent = formatDuration(p.total_minutes);
+
   const weekHours = (p.week_minutes / 60).toFixed(1);
   const monthHours = (p.month_minutes / 60).toFixed(1);
   const weekGoalHours = p.weekly_goal_minutes ? p.weekly_goal_minutes / 60 : null;
@@ -685,6 +743,21 @@ async function loadStudySummary() {
   });
 }
 
+function formatLogDuration(minutes) {
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  if (h === 0) return `${m}分`;
+  if (m === 0) return `${h}時間`;
+  return `${h}時間${m}分`;
+}
+
+function formatLoggedAt(s) {
+  const [datePart, timePart] = s.split(" ");
+  const [, mo, da] = datePart.split("-");
+  const [hh, mm] = timePart.split(":");
+  return `${parseInt(mo, 10)}/${parseInt(da, 10)} ${hh}:${mm}`;
+}
+
 async function loadStudyLogList() {
   const logs = await api("/api/study-logs");
   const list = document.getElementById("study-log-list");
@@ -692,8 +765,12 @@ async function loadStudyLogList() {
   logs.slice(0, 20).forEach((l) => {
     const li = document.createElement("li");
     li.innerHTML = `
-      <span>${l.subject} ${l.minutes}分</span>
-      <span class="meta">${l.logged_at}</span>
+      <span class="log-icon" style="background:${colorFor(l.subject)}"></span>
+      <span class="log-info">
+        <span class="log-subject">${escapeHtml(l.subject)}</span>
+        <span class="log-time">${formatLoggedAt(l.logged_at)}</span>
+      </span>
+      <span class="log-duration">${formatLogDuration(l.minutes)}</span>
       <button class="delete-btn" title="削除">×</button>
     `;
     li.querySelector(".delete-btn").addEventListener("click", async () => {
@@ -757,17 +834,19 @@ document.getElementById("goal-form").addEventListener("submit", async (e) => {
 
 // ---------- init ----------
 
-loadCategories();
-loadTodos();
-loadTodoStats();
-loadDiaryEditor(todayStr());
-loadDiaryList();
-loadStudySummary();
-loadStudyLogList();
-loadStudyChart();
-loadGoalProgress();
-loadCountdown();
-loadGoals();
+(async function init() {
+  await loadCategories(); // study-buttons and the chart's subject list depend on categories being loaded first
+  loadTodos();
+  loadTodoStats();
+  loadDiaryEditor(todayStr());
+  loadDiaryList();
+  loadStudySummary();
+  loadStudyLogList();
+  loadStudyChart();
+  loadGoalProgress();
+  loadCountdown();
+  loadGoals();
+})();
 
 if ("serviceWorker" in navigator) {
   navigator.serviceWorker.register("/service-worker.js").catch(() => {});

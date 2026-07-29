@@ -197,6 +197,7 @@ def update_category(category_id: int, category: CategoryUpdate):
     old_name = row[0]
     conn.execute("UPDATE categories SET name = ? WHERE id = ?", (name, category_id))
     conn.execute("UPDATE todos SET category = ? WHERE category = ?", (name, old_name))
+    conn.execute("UPDATE study_logs SET subject = ? WHERE subject = ?", (name, old_name))
     conn.commit()
     conn.close()
     return {"id": category_id, "name": name}
@@ -328,17 +329,23 @@ def _read_settings(conn):
 @app.get("/api/study-logs/progress")
 def study_log_progress():
     conn = get_connection()
+    today_total = conn.execute(
+        "SELECT COALESCE(SUM(minutes), 0) FROM study_logs WHERE logged_at >= datetime('now', 'start of day')"
+    ).fetchone()[0]
     week_total = conn.execute(
         "SELECT COALESCE(SUM(minutes), 0) FROM study_logs WHERE logged_at >= datetime('now', '-6 days', 'start of day')"
     ).fetchone()[0]
     month_total = conn.execute(
         "SELECT COALESCE(SUM(minutes), 0) FROM study_logs WHERE logged_at >= datetime('now', 'start of month')"
     ).fetchone()[0]
+    all_time_total = conn.execute("SELECT COALESCE(SUM(minutes), 0) FROM study_logs").fetchone()[0]
     settings = _read_settings(conn)
     conn.close()
     return {
+        "today_minutes": today_total,
         "week_minutes": week_total,
         "month_minutes": month_total,
+        "total_minutes": all_time_total,
         **settings,
     }
 

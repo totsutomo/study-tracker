@@ -102,11 +102,7 @@
 
   <section id="tab-study" class="tab-panel">
     <h2>学習ログ</h2>
-    <div class="study-buttons">
-      <button class="subject-btn" data-subject="英語">英語</button>
-      <button class="subject-btn" data-subject="数学">数学</button>
-      <button class="subject-btn" data-subject="世界史">世界史</button>
-    </div>
+    <div class="study-buttons" id="study-buttons"></div>
 
     <h3>目標</h3>
     <div class="goal-progress-card">
@@ -128,6 +124,12 @@
       <input type="number" id="monthly-goal-input" placeholder="月間目標(時間)" min="0" step="0.5">
       <button type="submit">保存</button>
     </form>
+
+    <div class="stats-header">
+      <div class="stat-cell"><span class="stat-label">今日</span><span class="stat-value" id="stat-today"></span></div>
+      <div class="stat-cell"><span class="stat-label">今月</span><span class="stat-value" id="stat-month"></span></div>
+      <div class="stat-cell"><span class="stat-label">累計</span><span class="stat-value" id="stat-total"></span></div>
+    </div>
 
     <h3>直近14日間</h3>
     <div id="study-chart"></div>
