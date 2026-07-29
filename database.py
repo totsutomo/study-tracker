@@ -42,7 +42,14 @@ CREATE TABLE IF NOT EXISTS goals (
     done INTEGER DEFAULT 0,
     created_at TEXT DEFAULT (datetime('now'))
 );
+
+CREATE TABLE IF NOT EXISTS categories (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE
+);
 """
+
+DEFAULT_CATEGORIES = ("英語", "数学", "世界史", "その他")
 
 
 def get_connection():
@@ -68,6 +75,7 @@ def init_db():
     conn.executescript(SCHEMA)
     conn.commit()
     _migrate(conn)
+    _seed_categories(conn)
     conn.close()
 
 
@@ -79,4 +87,14 @@ def _migrate(conn):
         conn.execute("ALTER TABLE todos ADD COLUMN recurrence TEXT")
     if "due_time" not in cols:
         conn.execute("ALTER TABLE todos ADD COLUMN due_time TEXT")
+    conn.execute("UPDATE todos SET recurrence = 'mon,tue,wed,thu,fri,sat,sun' WHERE recurrence = 'daily'")
+    conn.execute("UPDATE todos SET recurrence = 'mon,tue,wed,thu,fri' WHERE recurrence = 'weekdays'")
     conn.commit()
+
+
+def _seed_categories(conn):
+    count = conn.execute("SELECT COUNT(*) FROM categories").fetchone()[0]
+    if count == 0:
+        for name in DEFAULT_CATEGORIES:
+            conn.execute("INSERT INTO categories (name) VALUES (?)", (name,))
+        conn.commit()

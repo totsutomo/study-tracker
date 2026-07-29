@@ -20,7 +20,15 @@ class TodoCreate(BaseModel):
     priority: str = "medium"
     due_date: str | None = None
     due_time: str | None = None  # "HH:MM", optional
-    recurrence: str | None = None  # None, "daily", or "weekdays"
+    recurrence: str | None = None  # None, or comma-separated weekday codes e.g. "mon,wed,fri"
+
+
+class CategoryCreate(BaseModel):
+    name: str
+
+
+class CategoryUpdate(BaseModel):
+    name: str
 
 
 class DiaryUpsert(BaseModel):
@@ -38,12 +46,18 @@ class GoalCreate(BaseModel):
     title: str
 
 
-def next_occurrence(base: date, recurrence: str) -> date:
-    next_date = base + timedelta(days=1)
-    if recurrence == "weekdays":
-        while next_date.weekday() >= 5:  # 5=Sat, 6=Sun
-            next_date += timedelta(days=1)
-    return next_date
+WEEKDAY_CODES = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]  # index matches date.weekday()
+
+
+def next_occurrence(base: date, recurrence: str) -> date | None:
+    days = set(recurrence.split(",")) if recurrence else set()
+    if not days:
+        return None
+    for offset in range(1, 8):
+        candidate = base + timedelta(days=offset)
+        if WEEKDAY_CODES[candidate.weekday()] in days:
+            return candidate
+    return None
 
 
 # ---------- todos ----------
@@ -114,14 +128,15 @@ def toggle_todo(todo_id: int):
         f"UPDATE todos SET done = ?, completed_at = {completed_at} WHERE id = ?",
         (new_done, todo_id),
     )
-    if new_done and recurrence in ("daily", "weekdays"):
+    if new_done and recurrence:
         base = date.fromisoformat(due_date) if due_date else date.today()
         base = max(base, date.today())
         next_due = next_occurrence(base, recurrence)
-        conn.execute(
-            "INSERT INTO todos (title, category, priority, due_date, due_time, recurrence) VALUES (?, ?, ?, ?, ?, ?)",
-            (title, category, priority, next_due.isoformat(), due_time, recurrence),
-        )
+        if next_due is not None:
+            conn.execute(
+                "INSERT INTO todos (title, category, priority, due_date, due_time, recurrence) VALUES (?, ?, ?, ?, ?, ?)",
+                (title, category, priority, next_due.isoformat(), due_time, recurrence),
+            )
     conn.commit()
     conn.close()
     return {"id": todo_id, "done": bool(new_done)}
@@ -131,6 +146,61 @@ def toggle_todo(todo_id: int):
 def delete_todo(todo_id: int):
     conn = get_connection()
     conn.execute("DELETE FROM todos WHERE id = ?", (todo_id,))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+# ---------- categories ----------
+
+@app.get("/api/categories")
+def list_categories():
+    conn = get_connection()
+    cur = conn.execute("SELECT * FROM categories ORDER BY id ASC")
+    result = rows_to_dicts(cur)
+    conn.close()
+    return result
+
+
+@app.post("/api/categories")
+def create_category(category: CategoryCreate):
+    name = category.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="name is required")
+    conn = get_connection()
+    existing = conn.execute("SELECT id FROM categories WHERE name = ?", (name,)).fetchone()
+    if existing is not None:
+        conn.close()
+        raise HTTPException(status_code=400, detail="category already exists")
+    cur = conn.execute("INSERT INTO categories (name) VALUES (?)", (name,))
+    conn.commit()
+    new_id = cur.lastrowid
+    conn.close()
+    return {"id": new_id, "name": name}
+
+
+@app.put("/api/categories/{category_id}")
+def update_category(category_id: int, category: CategoryUpdate):
+    name = category.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="name is required")
+    conn = get_connection()
+    row = conn.execute("SELECT name FROM categories WHERE id = ?", (category_id,)).fetchone()
+    if row is None:
+        conn.close()
+        raise HTTPException(status_code=404, detail="category not found")
+    old_name = row[0]
+    conn.execute("UPDATE categories SET name = ? WHERE id = ?", (name, category_id))
+    conn.execute("UPDATE todos SET category = ? WHERE category = ?", (name, old_name))
+    conn.commit()
+    conn.close()
+    return {"id": category_id, "name": name}
+
+
+@app.delete("/api/categories/{category_id}")
+def delete_category(category_id: int):
+    conn = get_connection()
+    conn.execute("DELETE FROM categories WHERE id = ?", (category_id,))
     conn.commit()
     conn.close()
     return {"ok": True}

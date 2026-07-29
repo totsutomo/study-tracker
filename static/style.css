@@ -26,6 +26,9 @@ header {
   color: var(--text);
   padding: 16px 16px 12px;
   border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
 header h1 {
@@ -33,6 +36,16 @@ header h1 {
   font-size: 17px;
   font-weight: 600;
   letter-spacing: 0.02em;
+}
+
+.icon-btn {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 19px;
+  line-height: 1;
+  padding: 4px;
+  cursor: pointer;
 }
 
 main {
@@ -87,6 +100,10 @@ h3 { font-size: 12px; color: var(--text-muted); margin: 20px 0 8px; text-transfo
   color: var(--text-muted);
   text-decoration: none;
   white-space: nowrap;
+}
+
+.category-name-input {
+  flex: 1;
 }
 
 .checkbox-label {
@@ -248,6 +265,29 @@ button.secondary {
   flex-wrap: wrap;
   align-items: center;
   flex: 1 1 100%;
+}
+
+.weekday-picker {
+  display: flex;
+  gap: 6px;
+}
+
+.weekday-btn {
+  flex: 1;
+  background: var(--card);
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 0;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.weekday-btn.active {
+  background: var(--accent);
+  color: #06141a;
+  border-color: var(--accent);
 }
 
 .quick-date-btn,

@@ -11,6 +11,7 @@
 <body>
 
 <header>
+  <button type="button" id="settings-btn" class="icon-btn" aria-label="設定">⚙️</button>
   <h1>study-tracker</h1>
 </header>
 
@@ -68,11 +69,20 @@
         </div>
         <button type="button" id="todo-time-toggle" class="time-toggle-btn">+ 時刻を追加</button>
         <input type="time" id="todo-due-time" style="display:none;">
-        <select id="todo-recurrence">
-          <option value="">繰り返しなし</option>
-          <option value="daily">毎日</option>
-          <option value="weekdays">平日のみ</option>
-        </select>
+        <div class="due-row">
+          <button type="button" class="quick-date-btn" data-recur-preset="daily">毎日</button>
+          <button type="button" class="quick-date-btn" data-recur-preset="weekdays">平日</button>
+          <button type="button" class="quick-date-btn" data-recur-preset="clear">クリア</button>
+        </div>
+        <div class="weekday-picker" id="todo-recurrence-picker">
+          <button type="button" class="weekday-btn" data-day="sun">日</button>
+          <button type="button" class="weekday-btn" data-day="mon">月</button>
+          <button type="button" class="weekday-btn" data-day="tue">火</button>
+          <button type="button" class="weekday-btn" data-day="wed">水</button>
+          <button type="button" class="weekday-btn" data-day="thu">木</button>
+          <button type="button" class="weekday-btn" data-day="fri">金</button>
+          <button type="button" class="weekday-btn" data-day="sat">土</button>
+        </div>
         <button type="submit">+ 追加</button>
       </form>
     </div>
@@ -117,6 +127,20 @@
   </section>
 
 </main>
+
+<div id="settings-backdrop" class="backdrop hidden"></div>
+<div id="settings-panel" class="add-panel hidden">
+  <div class="panel-header">
+    <h3>設定</h3>
+    <button type="button" id="settings-close" class="panel-close" aria-label="閉じる">×</button>
+  </div>
+  <h3>カテゴリ管理</h3>
+  <ul id="category-list" class="list"></ul>
+  <form id="category-form" class="add-form">
+    <input type="text" id="category-name" placeholder="新しいカテゴリ名" required>
+    <button type="submit">+ 追加</button>
+  </form>
+</div>
 
 <nav id="tabbar">
   <button class="tab-btn active" data-tab="tab-todo">ToDo</button>
