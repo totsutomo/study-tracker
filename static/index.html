@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>study-tracker</title>
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#2563eb">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<header>
+  <h1>study-tracker</h1>
+</header>
+
+<main id="app">
+
+  <section id="tab-todo" class="tab-panel active">
+    <h2>今日のToDo</h2>
+    <ul id="todo-list" class="list"></ul>
+    <form id="todo-form" class="add-form">
+      <input type="text" id="todo-title" placeholder="タスク名" required>
+      <select id="todo-category">
+        <option value="英語">英語</option>
+        <option value="数学">数学</option>
+        <option value="世界史">世界史</option>
+        <option value="その他">その他</option>
+      </select>
+      <button type="submit">+ 追加</button>
+    </form>
+  </section>
+
+  <section id="tab-diary" class="tab-panel">
+    <h2>日記</h2>
+    <div class="diary-editor">
+      <label id="diary-date-label" for="diary-content"></label>
+      <textarea id="diary-content" rows="8" placeholder="今日あったこと..."></textarea>
+      <button id="diary-save">保存</button>
+      <span id="diary-status"></span>
+    </div>
+    <h3>過去の日記</h3>
+    <ul id="diary-list" class="list"></ul>
+  </section>
+
+  <section id="tab-study" class="tab-panel">
+    <h2>学習ログ</h2>
+    <div class="study-buttons">
+      <button class="subject-btn" data-subject="英語">英語</button>
+      <button class="subject-btn" data-subject="数学">数学</button>
+      <button class="subject-btn" data-subject="世界史">世界史</button>
+    </div>
+    <div id="timer-display">00:00</div>
+    <button id="timer-stop" style="display:none;">記録して停止</button>
+    <h3>直近7日間の合計</h3>
+    <ul id="study-summary" class="list"></ul>
+    <h3>ログ履歴</h3>
+    <ul id="study-log-list" class="list"></ul>
+  </section>
+
+  <section id="tab-goal" class="tab-panel">
+    <h2>目標達成度</h2>
+    <div id="countdown"></div>
+    <ul id="goal-list" class="list"></ul>
+    <form id="goal-form" class="add-form">
+      <input type="text" id="goal-title" placeholder="達成したい項目(例: 単語1800語)" required>
+      <button type="submit">+ 追加</button>
+    </form>
+    <div id="goal-progress"></div>
+  </section>
+
+</main>
+
+<nav id="tabbar">
+  <button class="tab-btn active" data-tab="tab-todo">ToDo</button>
+  <button class="tab-btn" data-tab="tab-diary">日記</button>
+  <button class="tab-btn" data-tab="tab-study">学習ログ</button>
+  <button class="tab-btn" data-tab="tab-goal">目標</button>
+</nav>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,192 @@
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  background: #f5f6f8;
+  color: #1a1a1a;
+  padding-bottom: 72px;
+}
+
+header {
+  background: #2563eb;
+  color: white;
+  padding: 14px 16px;
+}
+
+header h1 {
+  margin: 0;
+  font-size: 18px;
+}
+
+main {
+  padding: 16px;
+  max-width: 480px;
+  margin: 0 auto;
+}
+
+.tab-panel { display: none; }
+.tab-panel.active { display: block; }
+
+h2 { font-size: 17px; margin-top: 0; }
+h3 { font-size: 14px; color: #555; margin-top: 24px; }
+
+.list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.list li {
+  background: white;
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.06);
+}
+
+.list li.done {
+  opacity: 0.5;
+  text-decoration: line-through;
+}
+
+.list li .meta {
+  margin-left: auto;
+  font-size: 12px;
+  color: #888;
+  text-decoration: none;
+}
+
+.add-form {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+
+.add-form input[type="text"] {
+  flex: 1;
+  min-width: 120px;
+  padding: 8px;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+}
+
+.add-form select {
+  padding: 8px;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+}
+
+button {
+  background: #2563eb;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  padding: 8px 14px;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+button.secondary {
+  background: #e5e7eb;
+  color: #333;
+}
+
+.delete-btn {
+  background: none;
+  color: #d33;
+  padding: 0 4px;
+  font-size: 16px;
+}
+
+.diary-editor textarea {
+  width: 100%;
+  padding: 10px;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  font-size: 14px;
+  resize: vertical;
+}
+
+.diary-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+#diary-status {
+  font-size: 12px;
+  color: #2a8;
+}
+
+.study-buttons {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.subject-btn.active {
+  background: #16a34a;
+}
+
+#timer-display {
+  font-size: 32px;
+  text-align: center;
+  margin: 12px 0;
+}
+
+#timer-stop {
+  display: block;
+  margin: 0 auto 16px;
+}
+
+#countdown {
+  background: white;
+  border-radius: 8px;
+  padding: 14px;
+  text-align: center;
+  font-size: 15px;
+  margin-bottom: 16px;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.06);
+}
+
+#countdown .days {
+  font-size: 28px;
+  font-weight: bold;
+  color: #2563eb;
+}
+
+#goal-progress {
+  margin-top: 16px;
+  font-size: 14px;
+  color: #555;
+}
+
+#tabbar {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  background: white;
+  border-top: 1px solid #ddd;
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+.tab-btn {
+  flex: 1;
+  background: none;
+  color: #888;
+  border-radius: 0;
+  padding: 12px 0;
+  font-size: 13px;
+}
+
+.tab-btn.active {
+  color: #2563eb;
+  font-weight: bold;
+}
