@@ -19,7 +19,8 @@ class TodoCreate(BaseModel):
     category: str | None = None
     priority: str = "medium"
     due_date: str | None = None
-    recurrence: str | None = None  # None or "daily"
+    due_time: str | None = None  # "HH:MM", optional
+    recurrence: str | None = None  # None, "daily", or "weekdays"
 
 
 class DiaryUpsert(BaseModel):
@@ -87,8 +88,8 @@ def todo_stats():
 def create_todo(todo: TodoCreate):
     conn = get_connection()
     cur = conn.execute(
-        "INSERT INTO todos (title, category, priority, due_date, recurrence) VALUES (?, ?, ?, ?, ?)",
-        (todo.title, todo.category, todo.priority, todo.due_date, todo.recurrence),
+        "INSERT INTO todos (title, category, priority, due_date, due_time, recurrence) VALUES (?, ?, ?, ?, ?, ?)",
+        (todo.title, todo.category, todo.priority, todo.due_date, todo.due_time, todo.recurrence),
     )
     conn.commit()
     new_id = cur.lastrowid
@@ -100,13 +101,13 @@ def create_todo(todo: TodoCreate):
 def toggle_todo(todo_id: int):
     conn = get_connection()
     row = conn.execute(
-        "SELECT done, title, category, priority, due_date, recurrence FROM todos WHERE id = ?",
+        "SELECT done, title, category, priority, due_date, due_time, recurrence FROM todos WHERE id = ?",
         (todo_id,),
     ).fetchone()
     if row is None:
         conn.close()
         raise HTTPException(status_code=404, detail="todo not found")
-    done, title, category, priority, due_date, recurrence = row
+    done, title, category, priority, due_date, due_time, recurrence = row
     new_done = 0 if done else 1
     completed_at = "datetime('now')" if new_done else "NULL"
     conn.execute(
@@ -118,8 +119,8 @@ def toggle_todo(todo_id: int):
         base = max(base, date.today())
         next_due = next_occurrence(base, recurrence)
         conn.execute(
-            "INSERT INTO todos (title, category, priority, due_date, recurrence) VALUES (?, ?, ?, ?, ?)",
-            (title, category, priority, next_due.isoformat(), recurrence),
+            "INSERT INTO todos (title, category, priority, due_date, due_time, recurrence) VALUES (?, ?, ?, ?, ?, ?)",
+            (title, category, priority, next_due.isoformat(), due_time, recurrence),
         )
     conn.commit()
     conn.close()

@@ -39,13 +39,26 @@ function todayStr() {
 
 const PRIORITY_LABEL = { high: "高", medium: "中", low: "低" };
 
+function nowHHMM() {
+  const d = new Date();
+  return String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0");
+}
+
+function isOverdue(t) {
+  if (t.done || !t.due_date) return false;
+  const today = todayStr();
+  if (t.due_date < today) return true;
+  if (t.due_date === today && t.due_time) return t.due_time < nowHHMM();
+  return false;
+}
+
 function renderTodoItem(t, list) {
   const li = document.createElement("li");
   if (t.done) li.classList.add("done");
-  if (!t.done && t.due_date && t.due_date < todayStr()) li.classList.add("overdue");
-  if (!t.done && t.due_date === todayStr()) li.classList.add("due-today");
+  if (isOverdue(t)) li.classList.add("overdue");
+  if (!t.done && t.due_date === todayStr() && !isOverdue(t)) li.classList.add("due-today");
   if (t.priority === "high") li.classList.add("priority-high");
-  const dueLabel = t.due_date ? `📅 ${t.due_date}` : "";
+  const dueLabel = t.due_date ? `📅 ${t.due_date}${t.due_time ? " " + t.due_time : ""}` : "";
   const recurLabel = t.recurrence === "daily" ? " 🔁毎日" : t.recurrence === "weekdays" ? " 🔁平日" : "";
   const priorityLabel = t.priority && t.priority !== "medium" ? `[${PRIORITY_LABEL[t.priority] || t.priority}] ` : "";
   li.innerHTML = `
@@ -70,7 +83,7 @@ function todoGroupOf(t) {
   if (t.done) return "done";
   if (!t.due_date) return "none";
   const today = todayStr();
-  if (t.due_date < today) return "overdue";
+  if (isOverdue(t)) return "overdue";
   if (t.due_date === today) return "today";
   const weekAhead = new Date();
   weekAhead.setDate(weekAhead.getDate() + 7);
@@ -160,14 +173,16 @@ document.getElementById("todo-form").addEventListener("submit", async (e) => {
   const category = document.getElementById("todo-category").value;
   const priority = document.getElementById("todo-priority").value;
   const due_date = document.getElementById("todo-due-date").value || null;
+  const due_time = document.getElementById("todo-due-time").value || null;
   const recurrence = document.getElementById("todo-recurrence").value || null;
   if (!title) return;
   await api("/api/todos", {
     method: "POST",
-    body: JSON.stringify({ title, category, priority, due_date, recurrence }),
+    body: JSON.stringify({ title, category, priority, due_date, due_time, recurrence }),
   });
   document.getElementById("todo-title").value = "";
   document.getElementById("todo-due-date").value = "";
+  document.getElementById("todo-due-time").value = "";
   document.getElementById("todo-recurrence").value = "";
   loadTodos();
 });

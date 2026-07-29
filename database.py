@@ -17,6 +17,7 @@ CREATE TABLE IF NOT EXISTS todos (
     created_at TEXT DEFAULT (datetime('now')),
     completed_at TEXT,
     due_date TEXT,
+    due_time TEXT,
     recurrence TEXT
 );
 
@@ -76,4 +77,6 @@ def _migrate(conn):
         conn.execute("ALTER TABLE todos ADD COLUMN due_date TEXT")
     if "recurrence" not in cols:
         conn.execute("ALTER TABLE todos ADD COLUMN recurrence TEXT")
+    if "due_time" not in cols:
+        conn.execute("ALTER TABLE todos ADD COLUMN due_time TEXT")
     conn.commit()
