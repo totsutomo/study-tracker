@@ -92,6 +92,7 @@ function todoGroupOf(t) {
 }
 
 let allTodos = [];
+let doneExpanded = false;
 
 function applyTodoFilters(todos) {
   const search = document.getElementById("todo-search").value.trim().toLowerCase();
@@ -126,10 +127,20 @@ function renderTodos() {
   sections.forEach(([key, label]) => {
     if (groups[key].length === 0) return;
     const h = document.createElement("h3");
-    h.textContent = `${label}(${groups[key].length})`;
+    if (key === "done") {
+      h.classList.add("collapsible");
+      h.textContent = `${doneExpanded ? "▼" : "▶"} ${label}(${groups[key].length})`;
+      h.addEventListener("click", () => {
+        doneExpanded = !doneExpanded;
+        renderTodos();
+      });
+    } else {
+      h.textContent = `${label}(${groups[key].length})`;
+    }
     groupsEl.appendChild(h);
     const ul = document.createElement("ul");
     ul.className = "list";
+    if (key === "done" && !doneExpanded) ul.style.display = "none";
     groups[key].forEach((t) => renderTodoItem(t, ul));
     groupsEl.appendChild(ul);
   });
@@ -167,6 +178,36 @@ async function loadTodoStats() {
   `;
 }
 
+document.querySelectorAll(".quick-date-btn").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    const dateInput = document.getElementById("todo-due-date");
+    const quick = btn.dataset.quick;
+    if (quick === "clear") {
+      dateInput.value = "";
+      return;
+    }
+    const d = new Date();
+    if (quick === "tomorrow") d.setDate(d.getDate() + 1);
+    if (quick === "nextweek") d.setDate(d.getDate() + 7);
+    dateInput.value = d.toISOString().slice(0, 10);
+  });
+});
+
+document.getElementById("todo-time-toggle").addEventListener("click", () => {
+  const timeInput = document.getElementById("todo-due-time");
+  const toggleBtn = document.getElementById("todo-time-toggle");
+  const showing = timeInput.style.display !== "none";
+  if (showing) {
+    timeInput.style.display = "none";
+    timeInput.value = "";
+    toggleBtn.textContent = "+ 時刻を追加";
+  } else {
+    timeInput.style.display = "";
+    toggleBtn.textContent = "− 時刻を削除";
+    timeInput.focus();
+  }
+});
+
 document.getElementById("todo-form").addEventListener("submit", async (e) => {
   e.preventDefault();
   const title = document.getElementById("todo-title").value.trim();
@@ -183,6 +224,8 @@ document.getElementById("todo-form").addEventListener("submit", async (e) => {
   document.getElementById("todo-title").value = "";
   document.getElementById("todo-due-date").value = "";
   document.getElementById("todo-due-time").value = "";
+  document.getElementById("todo-due-time").style.display = "none";
+  document.getElementById("todo-time-toggle").textContent = "+ 時刻を追加";
   document.getElementById("todo-recurrence").value = "";
   loadTodos();
 });

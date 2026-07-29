@@ -46,8 +46,15 @@
         <option value="medium" selected>優先度: 中</option>
         <option value="low">優先度: 低</option>
       </select>
-      <input type="date" id="todo-due-date">
-      <input type="time" id="todo-due-time">
+      <div class="due-row">
+        <input type="date" id="todo-due-date">
+        <button type="button" class="quick-date-btn" data-quick="today">今日</button>
+        <button type="button" class="quick-date-btn" data-quick="tomorrow">明日</button>
+        <button type="button" class="quick-date-btn" data-quick="nextweek">来週</button>
+        <button type="button" class="quick-date-btn" data-quick="clear">クリア</button>
+      </div>
+      <button type="button" id="todo-time-toggle" class="time-toggle-btn">+ 時刻を追加</button>
+      <input type="time" id="todo-due-time" style="display:none;">
       <select id="todo-recurrence">
         <option value="">繰り返しなし</option>
         <option value="daily">毎日</option>
