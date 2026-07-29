@@ -426,9 +426,13 @@ document.getElementById("diary-save").addEventListener("click", async () => {
 
 // ---------- study logs ----------
 
-let timerInterval = null;
-let timerStart = null;
-let timerSubject = null;
+const SUBJECT_COLORS = { "英語": "#3987e5", "数学": "#d95926", "世界史": "#199e70" };
+const SUBJECTS = ["英語", "数学", "世界史"];
+
+document.querySelectorAll(".subject-btn").forEach((btn) => {
+  const color = SUBJECT_COLORS[btn.dataset.subject];
+  if (color) btn.style.setProperty("--subject-color", color);
+});
 
 function formatElapsed(ms) {
   const totalSec = Math.floor(ms / 1000);
@@ -437,34 +441,234 @@ function formatElapsed(ms) {
   return `${min}:${sec}`;
 }
 
+// ---------- focus timer (start / pause / resume / stop) ----------
+
+let timerInterval = null;
+let timerSubject = null;
+let accumulatedMs = 0;
+let segmentStart = null;
+let isPaused = false;
+
+const RING_CIRCUMFERENCE = 2 * Math.PI * 54;
+const RING_PERIOD_MS = 25 * 60 * 1000; // ring completes one lap every 25 min, purely decorative
+
+function currentElapsedMs() {
+  return accumulatedMs + (segmentStart ? Date.now() - segmentStart : 0);
+}
+
+function updateFocusDisplay() {
+  const elapsed = currentElapsedMs();
+  document.getElementById("focus-timer").textContent = formatElapsed(elapsed);
+  const progress = (elapsed % RING_PERIOD_MS) / RING_PERIOD_MS;
+  document.getElementById("focus-ring-fill").style.strokeDashoffset = RING_CIRCUMFERENCE * (1 - progress);
+}
+
+function startTimerTick() {
+  updateFocusDisplay();
+  timerInterval = setInterval(updateFocusDisplay, 1000);
+}
+
+function stopTimerTick() {
+  if (timerInterval) {
+    clearInterval(timerInterval);
+    timerInterval = null;
+  }
+}
+
+function openFocusOverlay() {
+  const color = SUBJECT_COLORS[timerSubject] || "";
+  document.getElementById("focus-subject-name").textContent = timerSubject;
+  if (color) {
+    document.getElementById("focus-timer").style.color = color;
+    document.getElementById("focus-ring-fill").style.stroke = color;
+  }
+  document.getElementById("focus-pause-btn").textContent = "一時停止";
+  const overlay = document.getElementById("focus-overlay");
+  overlay.classList.remove("hidden");
+  overlay.classList.remove("paused");
+}
+
+function closeFocusOverlay() {
+  document.getElementById("focus-overlay").classList.add("hidden");
+}
+
 document.querySelectorAll(".subject-btn").forEach((btn) => {
   btn.addEventListener("click", () => {
-    if (timerInterval) return; // already running
+    if (timerSubject) return; // a session is already running
     timerSubject = btn.dataset.subject;
-    timerStart = Date.now();
-    btn.classList.add("active");
-    document.getElementById("timer-stop").style.display = "inline-block";
-    timerInterval = setInterval(() => {
-      document.getElementById("timer-display").textContent = formatElapsed(Date.now() - timerStart);
-    }, 1000);
+    accumulatedMs = 0;
+    segmentStart = Date.now();
+    isPaused = false;
+    openFocusOverlay();
+    startTimerTick();
   });
 });
 
-document.getElementById("timer-stop").addEventListener("click", async () => {
-  if (!timerInterval) return;
-  clearInterval(timerInterval);
-  timerInterval = null;
-  const elapsedMinutes = Math.max(1, Math.round((Date.now() - timerStart) / 60000));
+document.getElementById("focus-pause-btn").addEventListener("click", () => {
+  if (!timerSubject) return;
+  const overlay = document.getElementById("focus-overlay");
+  const pauseBtn = document.getElementById("focus-pause-btn");
+  if (isPaused) {
+    segmentStart = Date.now();
+    isPaused = false;
+    startTimerTick();
+    pauseBtn.textContent = "一時停止";
+    overlay.classList.remove("paused");
+  } else {
+    accumulatedMs += Date.now() - segmentStart;
+    segmentStart = null;
+    isPaused = true;
+    stopTimerTick();
+    pauseBtn.textContent = "再開";
+    overlay.classList.add("paused");
+  }
+});
+
+document.getElementById("focus-stop-btn").addEventListener("click", async () => {
+  if (!timerSubject) return;
+  const totalMs = currentElapsedMs();
+  stopTimerTick();
+  const elapsedMinutes = Math.max(1, Math.round(totalMs / 60000));
+  const subject = timerSubject;
+  timerSubject = null;
+  accumulatedMs = 0;
+  segmentStart = null;
+  isPaused = false;
+  closeFocusOverlay();
   await api("/api/study-logs", {
     method: "POST",
-    body: JSON.stringify({ subject: timerSubject, minutes: elapsedMinutes }),
+    body: JSON.stringify({ subject, minutes: elapsedMinutes }),
   });
-  document.getElementById("timer-display").textContent = "00:00";
-  document.getElementById("timer-stop").style.display = "none";
-  document.querySelectorAll(".subject-btn").forEach((b) => b.classList.remove("active"));
   loadStudySummary();
   loadStudyLogList();
+  loadStudyChart();
+  loadGoalProgress();
 });
+
+// ---------- daily chart ----------
+
+function last14Dates() {
+  const dates = [];
+  for (let i = 13; i >= 0; i--) {
+    const d = new Date();
+    d.setDate(d.getDate() - i);
+    dates.push(d.toISOString().slice(0, 10));
+  }
+  return dates;
+}
+
+async function loadStudyChart() {
+  const raw = await api("/api/study-logs/daily");
+  const dates = last14Dates();
+  const byDate = {};
+  dates.forEach((d) => {
+    byDate[d] = { 英語: 0, 数学: 0, 世界史: 0 };
+  });
+  raw.forEach((row) => {
+    if (byDate[row.d] && SUBJECTS.includes(row.subject)) {
+      byDate[row.d][row.subject] = row.total_minutes;
+    }
+  });
+  renderStudyChart(dates, byDate);
+}
+
+function renderStudyChart(dates, byDate) {
+  const container = document.getElementById("study-chart");
+  const totals = dates.map((d) => SUBJECTS.reduce((sum, s) => sum + byDate[d][s], 0));
+  const maxTotal = Math.max(60, ...totals);
+  const chartW = 320;
+  const chartH = 130;
+  const padLeft = 26;
+  const padBottom = 14;
+  const plotW = chartW - padLeft - 2;
+  const plotH = chartH - padBottom;
+  const barGap = 3;
+  const barW = plotW / dates.length - barGap;
+
+  const gridLines = [0, 0.5, 1]
+    .map((frac) => {
+      const y = plotH - plotH * frac;
+      const label = Math.round(((maxTotal * frac) / 60) * 10) / 10;
+      return `
+        <line x1="${padLeft}" y1="${y}" x2="${chartW}" y2="${y}" stroke="var(--border)" stroke-width="1" />
+        <text x="${padLeft - 4}" y="${y + 3}" font-size="8" fill="var(--text-muted)" text-anchor="end">${label}h</text>
+      `;
+    })
+    .join("");
+
+  const bars = dates
+    .map((d, i) => {
+      const x = padLeft + i * (barW + barGap);
+      let yCursor = plotH;
+      const segments = SUBJECTS.map((s) => {
+        const minutes = byDate[d][s];
+        if (minutes <= 0) return "";
+        const h = (minutes / maxTotal) * plotH;
+        const y = yCursor - h;
+        yCursor -= h + 1;
+        return `<rect x="${x}" y="${y}" width="${Math.max(barW, 0)}" height="${Math.max(h, 0)}" fill="${SUBJECT_COLORS[s]}" rx="2" data-date="${d}" data-subject="${s}" data-minutes="${minutes}"></rect>`;
+      }).join("");
+      const dayLabel = d.slice(8, 10);
+      return `${segments}<text x="${x + barW / 2}" y="${chartH}" font-size="8" fill="var(--text-muted)" text-anchor="middle">${dayLabel}</text>`;
+    })
+    .join("");
+
+  const legend = SUBJECTS.map(
+    (s) => `<span class="legend-item"><span class="legend-dot" style="background:${SUBJECT_COLORS[s]}"></span>${s}</span>`
+  ).join("");
+
+  container.innerHTML = `
+    <div class="chart-legend">${legend}</div>
+    <svg viewBox="0 0 ${chartW} ${chartH}" class="study-svg-chart">${gridLines}${bars}</svg>
+  `;
+
+  container.querySelectorAll("rect[data-subject]").forEach((rect) => {
+    rect.addEventListener("click", () => {
+      const { date, subject, minutes } = rect.dataset;
+      document.getElementById("study-chart-detail").textContent = `${date} ${subject}: ${minutes}分`;
+    });
+  });
+}
+
+// ---------- weekly / monthly goal progress ----------
+
+async function loadGoalProgress() {
+  const p = await api("/api/study-logs/progress");
+  const weekHours = (p.week_minutes / 60).toFixed(1);
+  const monthHours = (p.month_minutes / 60).toFixed(1);
+  const weekGoalHours = p.weekly_goal_minutes ? p.weekly_goal_minutes / 60 : null;
+  const monthGoalHours = p.monthly_goal_minutes ? p.monthly_goal_minutes / 60 : null;
+
+  document.getElementById("week-progress-label").textContent = weekGoalHours
+    ? `${weekHours} / ${weekGoalHours}時間`
+    : `${weekHours}時間(目標未設定)`;
+  document.getElementById("week-progress-fill").style.width = weekGoalHours
+    ? `${Math.min(100, (p.week_minutes / p.weekly_goal_minutes) * 100)}%`
+    : "0%";
+
+  document.getElementById("month-progress-label").textContent = monthGoalHours
+    ? `${monthHours} / ${monthGoalHours}時間`
+    : `${monthHours}時間(目標未設定)`;
+  document.getElementById("month-progress-fill").style.width = monthGoalHours
+    ? `${Math.min(100, (p.month_minutes / p.monthly_goal_minutes) * 100)}%`
+    : "0%";
+
+  document.getElementById("weekly-goal-input").value = weekGoalHours || "";
+  document.getElementById("monthly-goal-input").value = monthGoalHours || "";
+}
+
+document.getElementById("goal-minutes-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const weeklyHours = parseFloat(document.getElementById("weekly-goal-input").value);
+  const monthlyHours = parseFloat(document.getElementById("monthly-goal-input").value);
+  const payload = {};
+  if (!isNaN(weeklyHours)) payload.weekly_goal_minutes = Math.round(weeklyHours * 60);
+  if (!isNaN(monthlyHours)) payload.monthly_goal_minutes = Math.round(monthlyHours * 60);
+  await api("/api/settings", { method: "PUT", body: JSON.stringify(payload) });
+  loadGoalProgress();
+});
+
+// ---------- summary & log list ----------
 
 async function loadStudySummary() {
   const summary = await api("/api/study-logs/summary");
@@ -487,7 +691,18 @@ async function loadStudyLogList() {
   list.innerHTML = "";
   logs.slice(0, 20).forEach((l) => {
     const li = document.createElement("li");
-    li.innerHTML = `<span>${l.subject} ${l.minutes}分</span><span class="meta">${l.logged_at}</span>`;
+    li.innerHTML = `
+      <span>${l.subject} ${l.minutes}分</span>
+      <span class="meta">${l.logged_at}</span>
+      <button class="delete-btn" title="削除">×</button>
+    `;
+    li.querySelector(".delete-btn").addEventListener("click", async () => {
+      await api(`/api/study-logs/${l.id}`, { method: "DELETE" });
+      loadStudyLogList();
+      loadStudySummary();
+      loadStudyChart();
+      loadGoalProgress();
+    });
     list.appendChild(li);
   });
 }
@@ -549,6 +764,8 @@ loadDiaryEditor(todayStr());
 loadDiaryList();
 loadStudySummary();
 loadStudyLogList();
+loadStudyChart();
+loadGoalProgress();
 loadCountdown();
 loadGoals();
 

@@ -107,10 +107,35 @@
       <button class="subject-btn" data-subject="数学">数学</button>
       <button class="subject-btn" data-subject="世界史">世界史</button>
     </div>
-    <div id="timer-display">00:00</div>
-    <button id="timer-stop" style="display:none;">記録して停止</button>
+
+    <h3>目標</h3>
+    <div class="goal-progress-card">
+      <div class="goal-progress-row">
+        <span>今週</span>
+        <span class="meta" id="week-progress-label"></span>
+      </div>
+      <div class="stat-bar-track"><div class="stat-bar-fill" id="week-progress-fill"></div></div>
+    </div>
+    <div class="goal-progress-card">
+      <div class="goal-progress-row">
+        <span>今月</span>
+        <span class="meta" id="month-progress-label"></span>
+      </div>
+      <div class="stat-bar-track"><div class="stat-bar-fill" id="month-progress-fill"></div></div>
+    </div>
+    <form id="goal-minutes-form" class="add-form">
+      <input type="number" id="weekly-goal-input" placeholder="週間目標(時間)" min="0" step="0.5">
+      <input type="number" id="monthly-goal-input" placeholder="月間目標(時間)" min="0" step="0.5">
+      <button type="submit">保存</button>
+    </form>
+
+    <h3>直近14日間</h3>
+    <div id="study-chart"></div>
+    <p class="meta" id="study-chart-detail">棒をタップすると内訳が表示されます</p>
+
     <h3>直近7日間の合計</h3>
     <ul id="study-summary" class="list"></ul>
+
     <h3>ログ履歴</h3>
     <ul id="study-log-list" class="list"></ul>
   </section>
@@ -127,6 +152,24 @@
   </section>
 
 </main>
+
+<div id="focus-overlay" class="focus-overlay hidden">
+  <div class="focus-subject">
+    <span class="rec-dot"></span>
+    <span id="focus-subject-name"></span>
+  </div>
+  <div class="focus-ring-wrap">
+    <svg class="focus-ring" viewBox="0 0 120 120">
+      <circle class="focus-ring-track" cx="60" cy="60" r="54"></circle>
+      <circle class="focus-ring-fill" id="focus-ring-fill" cx="60" cy="60" r="54"></circle>
+    </svg>
+    <div class="focus-timer" id="focus-timer">00:00</div>
+  </div>
+  <div class="focus-controls">
+    <button type="button" id="focus-pause-btn" class="secondary">一時停止</button>
+    <button type="button" id="focus-stop-btn">記録して停止</button>
+  </div>
+</div>
 
 <div id="settings-backdrop" class="backdrop hidden"></div>
 <div id="settings-panel" class="add-panel hidden">

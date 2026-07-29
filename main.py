@@ -31,6 +31,11 @@ class CategoryUpdate(BaseModel):
     name: str
 
 
+class SettingsUpdate(BaseModel):
+    weekly_goal_minutes: int | None = None
+    monthly_goal_minutes: int | None = None
+
+
 class DiaryUpsert(BaseModel):
     date: str
     content: str
@@ -283,6 +288,80 @@ def create_study_log(log: StudyLogCreate):
     new_id = cur.lastrowid
     conn.close()
     return {"id": new_id}
+
+
+@app.delete("/api/study-logs/{log_id}")
+def delete_study_log(log_id: int):
+    conn = get_connection()
+    conn.execute("DELETE FROM study_logs WHERE id = ?", (log_id,))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+@app.get("/api/study-logs/daily")
+def study_log_daily():
+    conn = get_connection()
+    cur = conn.execute(
+        """
+        SELECT date(logged_at) AS d, subject, SUM(minutes) AS total_minutes
+        FROM study_logs
+        WHERE logged_at >= datetime('now', '-13 days', 'start of day')
+        GROUP BY d, subject
+        ORDER BY d
+        """
+    )
+    result = rows_to_dicts(cur)
+    conn.close()
+    return result
+
+
+def _read_settings(conn):
+    rows = conn.execute("SELECT key, value FROM settings").fetchall()
+    d = {row[0]: row[1] for row in rows}
+    return {
+        "weekly_goal_minutes": int(d["weekly_goal_minutes"]) if "weekly_goal_minutes" in d else None,
+        "monthly_goal_minutes": int(d["monthly_goal_minutes"]) if "monthly_goal_minutes" in d else None,
+    }
+
+
+@app.get("/api/study-logs/progress")
+def study_log_progress():
+    conn = get_connection()
+    week_total = conn.execute(
+        "SELECT COALESCE(SUM(minutes), 0) FROM study_logs WHERE logged_at >= datetime('now', '-6 days', 'start of day')"
+    ).fetchone()[0]
+    month_total = conn.execute(
+        "SELECT COALESCE(SUM(minutes), 0) FROM study_logs WHERE logged_at >= datetime('now', 'start of month')"
+    ).fetchone()[0]
+    settings = _read_settings(conn)
+    conn.close()
+    return {
+        "week_minutes": week_total,
+        "month_minutes": month_total,
+        **settings,
+    }
+
+
+@app.put("/api/settings")
+def update_settings(payload: SettingsUpdate):
+    conn = get_connection()
+    if payload.weekly_goal_minutes is not None:
+        conn.execute(
+            "INSERT INTO settings (key, value) VALUES ('weekly_goal_minutes', ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (str(payload.weekly_goal_minutes),),
+        )
+    if payload.monthly_goal_minutes is not None:
+        conn.execute(
+            "INSERT INTO settings (key, value) VALUES ('monthly_goal_minutes', ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (str(payload.monthly_goal_minutes),),
+        )
+    conn.commit()
+    result = _read_settings(conn)
+    conn.close()
+    return result
 
 
 # ---------- goals ----------
