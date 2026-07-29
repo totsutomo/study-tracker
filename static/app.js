@@ -178,6 +178,24 @@ async function loadTodoStats() {
   `;
 }
 
+const todoAddPanel = document.getElementById("todo-add-panel");
+const todoAddBackdrop = document.getElementById("todo-add-backdrop");
+
+function openTodoAddPanel() {
+  todoAddPanel.classList.remove("hidden");
+  todoAddBackdrop.classList.remove("hidden");
+  document.getElementById("todo-title").focus();
+}
+
+function closeTodoAddPanel() {
+  todoAddPanel.classList.add("hidden");
+  todoAddBackdrop.classList.add("hidden");
+}
+
+document.getElementById("todo-fab").addEventListener("click", openTodoAddPanel);
+document.getElementById("todo-add-close").addEventListener("click", closeTodoAddPanel);
+todoAddBackdrop.addEventListener("click", closeTodoAddPanel);
+
 document.querySelectorAll(".quick-date-btn").forEach((btn) => {
   btn.addEventListener("click", () => {
     const dateInput = document.getElementById("todo-due-date");
@@ -227,6 +245,7 @@ document.getElementById("todo-form").addEventListener("submit", async (e) => {
   document.getElementById("todo-due-time").style.display = "none";
   document.getElementById("todo-time-toggle").textContent = "+ 時刻を追加";
   document.getElementById("todo-recurrence").value = "";
+  closeTodoAddPanel();
   loadTodos();
 });
 

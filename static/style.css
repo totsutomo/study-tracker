@@ -158,6 +158,68 @@ button.secondary {
   font-weight: normal;
 }
 
+.hidden {
+  display: none !important;
+}
+
+.fab {
+  position: fixed;
+  right: 20px;
+  bottom: 92px;
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #06141a;
+  font-size: 26px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
+  z-index: 20;
+  padding: 0;
+}
+
+.backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 29;
+}
+
+.add-panel {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: var(--card);
+  border-top: 1px solid var(--border);
+  border-radius: 16px 16px 0 0;
+  padding: 16px 16px calc(16px + env(safe-area-inset-bottom));
+  max-height: 82vh;
+  overflow-y: auto;
+  z-index: 30;
+}
+
+.panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.panel-header h3 {
+  margin: 0;
+}
+
+.panel-close {
+  background: none;
+  color: var(--text-muted);
+  font-size: 20px;
+  padding: 0 6px;
+}
+
 .due-row {
   display: flex;
   gap: 6px;
