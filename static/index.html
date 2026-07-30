@@ -104,6 +104,15 @@
     <h2>学習ログ</h2>
     <div class="study-buttons" id="study-buttons"></div>
 
+    <button type="button" id="manual-log-toggle" class="quick-date-btn">+ 手動で記録</button>
+    <form id="manual-log-form" class="add-form hidden">
+      <select id="manual-log-subject" required></select>
+      <input type="number" id="manual-log-minutes" placeholder="分" min="1" required>
+      <input type="datetime-local" id="manual-log-datetime" required>
+      <input type="text" id="manual-log-note" placeholder="メモ(任意)">
+      <button type="submit">追加</button>
+    </form>
+
     <h3>目標</h3>
     <div class="goal-progress-card">
       <div class="goal-progress-row">
@@ -131,7 +140,13 @@
       <div class="stat-cell"><span class="stat-label">累計</span><span class="stat-value" id="stat-total"></span></div>
     </div>
 
-    <h3>直近14日間</h3>
+    <div class="chart-header-row">
+      <h3 id="study-chart-title">直近10週間</h3>
+      <div class="period-toggle">
+        <button type="button" class="period-btn active" data-granularity="week">週</button>
+        <button type="button" class="period-btn" data-granularity="day">日</button>
+      </div>
+    </div>
     <div id="study-chart"></div>
     <p class="meta" id="study-chart-detail">棒をタップすると内訳が表示されます</p>
 

@@ -282,6 +282,7 @@ async function loadCategories() {
   });
 
   renderStudyButtons(cats);
+  populateManualLogSubjects(cats);
 
   const list = document.getElementById("category-list");
   list.innerHTML = "";
@@ -469,6 +470,54 @@ function renderStudyButtons(cats) {
   });
 }
 
+function populateManualLogSubjects(cats) {
+  const select = document.getElementById("manual-log-subject");
+  const previous = select.value;
+  select.innerHTML = cats
+    .map((c) => `<option value="${escapeHtml(c.name)}">${escapeHtml(c.name)}</option>`)
+    .join("");
+  if (cats.some((c) => c.name === previous)) select.value = previous;
+}
+
+function localDatetimeNow() {
+  const now = new Date();
+  now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
+  return now.toISOString().slice(0, 16); // "YYYY-MM-DDTHH:MM"
+}
+
+document.getElementById("manual-log-toggle").addEventListener("click", () => {
+  const form = document.getElementById("manual-log-form");
+  const opening = form.classList.contains("hidden");
+  form.classList.toggle("hidden");
+  if (opening) {
+    document.getElementById("manual-log-datetime").value = localDatetimeNow();
+  }
+});
+
+document.getElementById("manual-log-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const subject = document.getElementById("manual-log-subject").value;
+  const minutes = parseInt(document.getElementById("manual-log-minutes").value, 10);
+  const datetimeLocal = document.getElementById("manual-log-datetime").value; // "YYYY-MM-DDTHH:MM"
+  const note = document.getElementById("manual-log-note").value.trim() || null;
+  if (!subject || !minutes || !datetimeLocal) return;
+  await api("/api/study-logs", {
+    method: "POST",
+    body: JSON.stringify({
+      subject,
+      minutes,
+      note,
+      logged_at: `${datetimeLocal.replace("T", " ")}:00`,
+    }),
+  });
+  e.target.reset();
+  document.getElementById("manual-log-form").classList.add("hidden");
+  loadStudySummary();
+  loadStudyLogList();
+  loadStudyChart();
+  loadGoalProgress();
+});
+
 function startTimerForTodo(todo) {
   if (timerSubject) {
     alert("すでにタイマーが動いています");
@@ -588,7 +637,11 @@ document.getElementById("focus-stop-btn").addEventListener("click", async () => 
   loadGoalProgress();
 });
 
-// ---------- daily chart ----------
+// ---------- daily / weekly chart ----------
+
+const WEEKLY_CHART_WEEKS = 10;
+
+let chartGranularity = localStorage.getItem("studyChartGranularity") === "day" ? "day" : "week";
 
 function last14Dates() {
   const dates = [];
@@ -600,29 +653,86 @@ function last14Dates() {
   return dates;
 }
 
+function mondayOf(d) {
+  const day = (d.getDay() + 6) % 7; // 0 = Monday
+  const monday = new Date(d);
+  monday.setDate(d.getDate() - day);
+  return monday.toISOString().slice(0, 10);
+}
+
+function lastNWeekStarts(n) {
+  const currentMonday = new Date(mondayOf(new Date()));
+  const weeks = [];
+  for (let i = n - 1; i >= 0; i--) {
+    const d = new Date(currentMonday);
+    d.setDate(d.getDate() - i * 7);
+    weeks.push(d.toISOString().slice(0, 10));
+  }
+  return weeks;
+}
+
+function monthDayLabel(isoDate) {
+  const [, mo, da] = isoDate.split("-");
+  return `${parseInt(mo, 10)}/${parseInt(da, 10)}`;
+}
+
 async function loadStudyChart() {
+  if (chartGranularity === "day") {
+    await loadDailyChart();
+  } else {
+    await loadWeeklyChart();
+  }
+}
+
+async function loadDailyChart() {
   const raw = await api("/api/study-logs/daily");
   const dates = last14Dates();
   const subjectNames = allCategories.map((c) => c.name);
   raw.forEach((row) => {
     if (!subjectNames.includes(row.subject)) subjectNames.push(row.subject);
   });
-  const byDate = {};
+  const byBucket = {};
   dates.forEach((d) => {
-    byDate[d] = {};
+    byBucket[d] = {};
     subjectNames.forEach((s) => {
-      byDate[d][s] = 0;
+      byBucket[d][s] = 0;
     });
   });
   raw.forEach((row) => {
-    if (byDate[row.d]) byDate[row.d][row.subject] = row.total_minutes;
+    if (byBucket[row.d]) byBucket[row.d][row.subject] = row.total_minutes;
   });
-  renderStudyChart(dates, byDate, subjectNames);
+  renderStudyChart(dates, byBucket, subjectNames, {
+    axisLabel: (d) => d.slice(8, 10),
+    detailLabel: (d) => d,
+  });
 }
 
-function renderStudyChart(dates, byDate, subjectNames) {
+async function loadWeeklyChart() {
+  const raw = await api("/api/study-logs/weekly");
+  const weeks = lastNWeekStarts(WEEKLY_CHART_WEEKS);
+  const subjectNames = allCategories.map((c) => c.name);
+  raw.forEach((row) => {
+    if (!subjectNames.includes(row.subject)) subjectNames.push(row.subject);
+  });
+  const byBucket = {};
+  weeks.forEach((w) => {
+    byBucket[w] = {};
+    subjectNames.forEach((s) => {
+      byBucket[w][s] = 0;
+    });
+  });
+  raw.forEach((row) => {
+    if (byBucket[row.week_start]) byBucket[row.week_start][row.subject] = row.total_minutes;
+  });
+  renderStudyChart(weeks, byBucket, subjectNames, {
+    axisLabel: monthDayLabel,
+    detailLabel: (w) => `${monthDayLabel(w)}週`,
+  });
+}
+
+function renderStudyChart(buckets, byBucket, subjectNames, labelFns) {
   const container = document.getElementById("study-chart");
-  const totals = dates.map((d) => subjectNames.reduce((sum, s) => sum + (byDate[d][s] || 0), 0));
+  const totals = buckets.map((b) => subjectNames.reduce((sum, s) => sum + (byBucket[b][s] || 0), 0));
   const maxTotal = Math.max(60, ...totals);
   const chartW = 320;
   const chartH = 130;
@@ -631,7 +741,7 @@ function renderStudyChart(dates, byDate, subjectNames) {
   const plotW = chartW - padLeft - 2;
   const plotH = chartH - padBottom;
   const barGap = 3;
-  const barW = plotW / dates.length - barGap;
+  const barW = plotW / buckets.length - barGap;
 
   const gridLines = [0, 0.5, 1]
     .map((frac) => {
@@ -644,25 +754,25 @@ function renderStudyChart(dates, byDate, subjectNames) {
     })
     .join("");
 
-  const bars = dates
-    .map((d, i) => {
+  const bars = buckets
+    .map((b, i) => {
       const x = padLeft + i * (barW + barGap);
       let yCursor = plotH;
       const segments = subjectNames.map((s) => {
-        const minutes = byDate[d][s] || 0;
+        const minutes = byBucket[b][s] || 0;
         if (minutes <= 0) return "";
         const h = (minutes / maxTotal) * plotH;
         const y = yCursor - h;
         yCursor -= h + 1;
-        return `<rect x="${x}" y="${y}" width="${Math.max(barW, 0)}" height="${Math.max(h, 0)}" fill="${colorFor(s)}" rx="2" data-date="${d}" data-subject="${s}" data-minutes="${minutes}"></rect>`;
+        return `<rect x="${x}" y="${y}" width="${Math.max(barW, 0)}" height="${Math.max(h, 0)}" fill="${colorFor(s)}" rx="2" data-bucket="${b}" data-subject="${s}" data-minutes="${minutes}"></rect>`;
       }).join("");
-      const dayLabel = d.slice(8, 10);
-      return `${segments}<text x="${x + barW / 2}" y="${chartH}" font-size="8" fill="var(--text-muted)" text-anchor="middle">${dayLabel}</text>`;
+      const axisLabel = labelFns.axisLabel(b);
+      return `${segments}<text x="${x + barW / 2}" y="${chartH}" font-size="8" fill="var(--text-muted)" text-anchor="middle">${axisLabel}</text>`;
     })
     .join("");
 
   const legend = subjectNames
-    .filter((s) => dates.some((d) => byDate[d][s] > 0))
+    .filter((s) => buckets.some((b) => byBucket[b][s] > 0))
     .map((s) => `<span class="legend-item"><span class="legend-dot" style="background:${colorFor(s)}"></span>${s}</span>`)
     .join("");
 
@@ -673,11 +783,29 @@ function renderStudyChart(dates, byDate, subjectNames) {
 
   container.querySelectorAll("rect[data-subject]").forEach((rect) => {
     rect.addEventListener("click", () => {
-      const { date, subject, minutes } = rect.dataset;
-      document.getElementById("study-chart-detail").textContent = `${date} ${subject}: ${minutes}分`;
+      const { bucket, subject, minutes } = rect.dataset;
+      document.getElementById("study-chart-detail").textContent = `${labelFns.detailLabel(bucket)} ${subject}: ${minutes}分`;
     });
   });
 }
+
+function updateChartTitle() {
+  document.getElementById("study-chart-title").textContent =
+    chartGranularity === "day" ? "直近14日間" : `直近${WEEKLY_CHART_WEEKS}週間`;
+}
+
+document.querySelectorAll(".period-btn").forEach((btn) => {
+  btn.classList.toggle("active", btn.dataset.granularity === chartGranularity);
+  btn.addEventListener("click", () => {
+    chartGranularity = btn.dataset.granularity;
+    localStorage.setItem("studyChartGranularity", chartGranularity);
+    document.querySelectorAll(".period-btn").forEach((b) => b.classList.toggle("active", b === btn));
+    updateChartTitle();
+    loadStudyChart();
+  });
+});
+
+updateChartTitle();
 
 // ---------- weekly / monthly goal progress ----------
 

@@ -45,6 +45,7 @@ class StudyLogCreate(BaseModel):
     subject: str
     minutes: int
     note: str | None = None
+    logged_at: str | None = None  # "YYYY-MM-DD HH:MM:SS", optional; defaults to now
 
 
 class GoalCreate(BaseModel):
@@ -281,10 +282,16 @@ def study_log_summary():
 @app.post("/api/study-logs")
 def create_study_log(log: StudyLogCreate):
     conn = get_connection()
-    cur = conn.execute(
-        "INSERT INTO study_logs (subject, minutes, note) VALUES (?, ?, ?)",
-        (log.subject, log.minutes, log.note),
-    )
+    if log.logged_at:
+        cur = conn.execute(
+            "INSERT INTO study_logs (subject, minutes, note, logged_at) VALUES (?, ?, ?, ?)",
+            (log.subject, log.minutes, log.note, log.logged_at),
+        )
+    else:
+        cur = conn.execute(
+            "INSERT INTO study_logs (subject, minutes, note) VALUES (?, ?, ?)",
+            (log.subject, log.minutes, log.note),
+        )
     conn.commit()
     new_id = cur.lastrowid
     conn.close()
@@ -314,6 +321,39 @@ def study_log_daily():
     )
     result = rows_to_dicts(cur)
     conn.close()
+    return result
+
+
+WEEKLY_CHART_WEEKS = 10
+
+
+@app.get("/api/study-logs/weekly")
+def study_log_weekly():
+    conn = get_connection()
+    cur = conn.execute(
+        """
+        SELECT date(logged_at) AS d, subject, SUM(minutes) AS total_minutes
+        FROM study_logs
+        WHERE logged_at >= datetime('now', ?, 'start of day')
+        GROUP BY d, subject
+        ORDER BY d
+        """,
+        (f"-{WEEKLY_CHART_WEEKS * 7 - 1} days",),
+    )
+    rows = rows_to_dicts(cur)
+    conn.close()
+    weekly: dict[str, dict[str, int]] = {}
+    for row in rows:
+        d = date.fromisoformat(row["d"])
+        week_start = (d - timedelta(days=d.weekday())).isoformat()  # Monday of that week
+        bucket = weekly.setdefault(week_start, {})
+        bucket[row["subject"]] = bucket.get(row["subject"], 0) + row["total_minutes"]
+    result = [
+        {"week_start": week_start, "subject": subject, "total_minutes": total_minutes}
+        for week_start, subjects in weekly.items()
+        for subject, total_minutes in subjects.items()
+    ]
+    result.sort(key=lambda r: r["week_start"])
     return result
 
 
