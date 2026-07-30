@@ -241,7 +241,7 @@ function setRecurrenceDays(days) {
   });
 }
 
-document.querySelectorAll(".weekday-btn").forEach((btn) => {
+document.querySelectorAll("#todo-recurrence-picker .weekday-btn").forEach((btn) => {
   btn.addEventListener("click", () => {
     const day = btn.dataset.day;
     if (selectedRecurrenceDays.has(day)) {
@@ -253,7 +253,7 @@ document.querySelectorAll(".weekday-btn").forEach((btn) => {
   });
 });
 
-document.querySelectorAll("[data-recur-preset]").forEach((btn) => {
+document.querySelectorAll("#todo-form [data-recur-preset]").forEach((btn) => {
   btn.addEventListener("click", () => {
     const preset = btn.dataset.recurPreset;
     if (preset === "daily") setRecurrenceDays(WEEKDAY_ORDER);
@@ -283,6 +283,7 @@ async function loadCategories() {
 
   renderStudyButtons(cats);
   populateManualLogSubjects(cats);
+  populateEventCategorySelect(cats);
 
   const list = document.getElementById("category-list");
   list.innerHTML = "";
@@ -960,9 +961,267 @@ document.getElementById("goal-form").addEventListener("submit", async (e) => {
   loadGoals();
 });
 
+// ---------- calendar (events) ----------
+
+function populateEventCategorySelect(cats) {
+  const select = document.getElementById("event-category");
+  const previous = select.value;
+  select.innerHTML =
+    `<option value="">カテゴリ: なし</option>` +
+    cats.map((c) => `<option value="${escapeHtml(c.name)}">${escapeHtml(c.name)}</option>`).join("");
+  if (cats.some((c) => c.name === previous)) select.value = previous;
+}
+
+let calYear, calMonth; // calMonth is 1-based
+let selectedCalDate = null;
+let calEventsCache = [];
+let calTodosCache = [];
+
+function pad2(n) {
+  return String(n).padStart(2, "0");
+}
+
+function isoDate(y, m, d) {
+  return `${y}-${pad2(m)}-${pad2(d)}`;
+}
+
+function daysInMonth(y, m) {
+  return new Date(y, m, 0).getDate(); // m (1-based) as monthIndex gives last day of month m
+}
+
+async function loadCalendar() {
+  document.getElementById("cal-month-label").textContent = `${calYear}年${calMonth}月`;
+  const [events, todos] = await Promise.all([
+    api(`/api/events?year=${calYear}&month=${calMonth}`),
+    api("/api/todos"),
+  ]);
+  calEventsCache = events;
+  calTodosCache = todos.filter((t) => t.due_date);
+  renderCalGrid();
+  renderCalDayDetail();
+}
+
+function renderCalGrid() {
+  const grid = document.getElementById("cal-grid");
+  const firstOfMonth = new Date(calYear, calMonth - 1, 1);
+  const firstWeekday = (firstOfMonth.getDay() + 6) % 7; // 0 = Monday
+  const totalDays = daysInMonth(calYear, calMonth);
+  const prevMonthDays = daysInMonth(calMonth === 1 ? calYear - 1 : calYear, calMonth === 1 ? 12 : calMonth - 1);
+
+  const cells = [];
+  for (let i = firstWeekday - 1; i >= 0; i--) {
+    cells.push({ day: prevMonthDays - i, otherMonth: true, date: null });
+  }
+  for (let d = 1; d <= totalDays; d++) {
+    cells.push({ day: d, otherMonth: false, date: isoDate(calYear, calMonth, d) });
+  }
+  let nextDay = 1;
+  while (cells.length % 7 !== 0) {
+    cells.push({ day: nextDay++, otherMonth: true, date: null });
+  }
+
+  const today = todayStr();
+
+  grid.innerHTML = cells
+    .map((c) => {
+      if (c.otherMonth) {
+        return `<div class="cal-day other-month"><span class="cal-day-num">${c.day}</span></div>`;
+      }
+      const dayEvents = calEventsCache.filter((e) => e.occurrence_date === c.date);
+      const dayTodos = calTodosCache.filter((t) => t.due_date === c.date);
+      const dots = dayEvents
+        .slice(0, 4)
+        .map((e) => `<span class="cal-dot" style="background:${colorFor(e.category || "")}"></span>`)
+        .join("");
+      const todoMark = dayTodos.length ? `<span class="cal-todo-dot"></span>` : "";
+      const classes = ["cal-day"];
+      if (c.date === today) classes.push("today");
+      if (c.date === selectedCalDate) classes.push("selected");
+      return `
+        <div class="${classes.join(" ")}" data-date="${c.date}">
+          <span class="cal-day-num">${c.day}</span>
+          <div class="cal-day-marks">${dots}${todoMark}</div>
+        </div>
+      `;
+    })
+    .join("");
+
+  grid.querySelectorAll(".cal-day[data-date]").forEach((el) => {
+    el.addEventListener("click", () => {
+      selectedCalDate = el.dataset.date;
+      renderCalGrid();
+      renderCalDayDetail();
+    });
+  });
+}
+
+function renderCalDayDetail() {
+  const title = document.getElementById("cal-detail-title");
+  const eventList = document.getElementById("cal-event-list");
+  const todoList = document.getElementById("cal-todo-list");
+  if (!selectedCalDate) {
+    title.textContent = "日付を選んでください";
+    eventList.innerHTML = "";
+    todoList.innerHTML = "";
+    return;
+  }
+  title.textContent = selectedCalDate;
+
+  const dayEvents = calEventsCache
+    .filter((e) => e.occurrence_date === selectedCalDate)
+    .sort((a, b) => a.start_time.localeCompare(b.start_time));
+  eventList.innerHTML = "";
+  if (dayEvents.length === 0) {
+    eventList.innerHTML = "<li>予定はありません</li>";
+  }
+  dayEvents.forEach((ev) => {
+    const li = document.createElement("li");
+    li.innerHTML = `
+      <span class="log-icon" style="background:${colorFor(ev.category || "")}"></span>
+      <span class="log-info">
+        <span class="log-subject">${escapeHtml(ev.title)}</span>
+        <span class="log-time">${ev.start_time}〜${ev.end_time}${ev.recurrence ? " 🔁" : ""}</span>
+      </span>
+      <button class="delete-btn" title="削除">×</button>
+    `;
+    li.querySelector(".delete-btn").addEventListener("click", async () => {
+      if (ev.recurrence && !confirm("繰り返し予定です。この予定シリーズ全体を削除しますか?")) return;
+      await api(`/api/events/${ev.id}`, { method: "DELETE" });
+      loadCalendar();
+    });
+    eventList.appendChild(li);
+  });
+
+  const dayTodos = calTodosCache.filter((t) => t.due_date === selectedCalDate);
+  todoList.innerHTML = "";
+  if (dayTodos.length === 0) {
+    todoList.innerHTML = "<li>期限のタスクはありません</li>";
+  }
+  dayTodos.forEach((t) => {
+    const li = document.createElement("li");
+    if (t.done) li.classList.add("done");
+    li.innerHTML = `
+      <input type="checkbox" ${t.done ? "checked" : ""}>
+      <span>${escapeHtml(t.title)}</span>
+      <span class="meta">${t.due_time || ""}</span>
+    `;
+    li.querySelector("input").addEventListener("click", async () => {
+      await api(`/api/todos/${t.id}/toggle`, { method: "POST" });
+      loadTodos();
+      loadTodoStats();
+      loadCalendar();
+    });
+    todoList.appendChild(li);
+  });
+}
+
+document.getElementById("cal-prev").addEventListener("click", () => {
+  calMonth -= 1;
+  if (calMonth < 1) {
+    calMonth = 12;
+    calYear -= 1;
+  }
+  selectedCalDate = null;
+  loadCalendar();
+});
+
+document.getElementById("cal-next").addEventListener("click", () => {
+  calMonth += 1;
+  if (calMonth > 12) {
+    calMonth = 1;
+    calYear += 1;
+  }
+  selectedCalDate = null;
+  loadCalendar();
+});
+
+// ---------- event add form ----------
+
+const eventAddPanel = document.getElementById("event-add-panel");
+const eventAddBackdrop = document.getElementById("event-add-backdrop");
+
+function openEventAddPanel() {
+  eventAddPanel.classList.remove("hidden");
+  eventAddBackdrop.classList.remove("hidden");
+  document.getElementById("event-date").value = selectedCalDate || todayStr();
+  document.getElementById("event-title").focus();
+}
+
+function closeEventAddPanel() {
+  eventAddPanel.classList.add("hidden");
+  eventAddBackdrop.classList.add("hidden");
+}
+
+document.getElementById("event-fab").addEventListener("click", openEventAddPanel);
+document.getElementById("event-add-close").addEventListener("click", closeEventAddPanel);
+eventAddBackdrop.addEventListener("click", closeEventAddPanel);
+
+const selectedEventRecurrenceDays = new Set();
+
+function setEventRecurrenceDays(days) {
+  selectedEventRecurrenceDays.clear();
+  days.forEach((d) => selectedEventRecurrenceDays.add(d));
+  document.querySelectorAll("#event-recurrence-picker .weekday-btn").forEach((btn) => {
+    btn.classList.toggle("active", selectedEventRecurrenceDays.has(btn.dataset.day));
+  });
+}
+
+document.querySelectorAll("#event-recurrence-picker .weekday-btn").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    const day = btn.dataset.day;
+    if (selectedEventRecurrenceDays.has(day)) {
+      selectedEventRecurrenceDays.delete(day);
+    } else {
+      selectedEventRecurrenceDays.add(day);
+    }
+    btn.classList.toggle("active", selectedEventRecurrenceDays.has(day));
+  });
+});
+
+document.querySelectorAll("#event-form [data-recur-preset]").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    const preset = btn.dataset.recurPreset;
+    if (preset === "daily") setEventRecurrenceDays(WEEKDAY_ORDER);
+    else if (preset === "weekdays") setEventRecurrenceDays(["mon", "tue", "wed", "thu", "fri"]);
+    else setEventRecurrenceDays([]);
+  });
+});
+
+document.getElementById("event-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const title = document.getElementById("event-title").value.trim();
+  const category = document.getElementById("event-category").value || null;
+  const evDate = document.getElementById("event-date").value;
+  const startTime = document.getElementById("event-start-time").value;
+  const endTime = document.getElementById("event-end-time").value;
+  const recurrenceUntilInput = document.getElementById("event-recurrence-until").value || null;
+  if (!title || !evDate || !startTime || !endTime) return;
+  const recurrence = selectedEventRecurrenceDays.size ? [...selectedEventRecurrenceDays].join(",") : null;
+  await api("/api/events", {
+    method: "POST",
+    body: JSON.stringify({
+      title,
+      category,
+      date: evDate,
+      start_time: startTime,
+      end_time: endTime,
+      recurrence,
+      recurrence_until: recurrence ? recurrenceUntilInput : null,
+    }),
+  });
+  e.target.reset();
+  setEventRecurrenceDays([]);
+  closeEventAddPanel();
+  loadCalendar();
+});
+
 // ---------- init ----------
 
 (async function init() {
+  const now = new Date();
+  calYear = now.getFullYear();
+  calMonth = now.getMonth() + 1;
+
   await loadCategories(); // study-buttons and the chart's subject list depend on categories being loaded first
   loadTodos();
   loadTodoStats();
@@ -974,6 +1233,7 @@ document.getElementById("goal-form").addEventListener("submit", async (e) => {
   loadGoalProgress();
   loadCountdown();
   loadGoals();
+  loadCalendar();
 })();
 
 if ("serviceWorker" in navigator) {

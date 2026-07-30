@@ -1,3 +1,4 @@
+import calendar
 from datetime import date, timedelta
 
 from fastapi import FastAPI, HTTPException
@@ -50,6 +51,16 @@ class StudyLogCreate(BaseModel):
 
 class GoalCreate(BaseModel):
     title: str
+
+
+class EventCreate(BaseModel):
+    title: str
+    category: str | None = None
+    date: str  # "YYYY-MM-DD"; anchor date, or first occurrence when recurring
+    start_time: str  # "HH:MM"
+    end_time: str  # "HH:MM"
+    recurrence: str | None = None  # None, or comma-separated weekday codes e.g. "mon,wed,fri"
+    recurrence_until: str | None = None  # "YYYY-MM-DD", only meaningful when recurrence is set
 
 
 WEEKDAY_CODES = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]  # index matches date.weekday()
@@ -460,6 +471,63 @@ def goal_countdown():
     target = date(2026, 11, 30)
     days_left = (target - date.today()).days
     return {"target_date": target.isoformat(), "days_left": days_left}
+
+
+# ---------- events (calendar) ----------
+
+@app.get("/api/events")
+def list_events(year: int, month: int):
+    conn = get_connection()
+    rows = rows_to_dicts(conn.execute("SELECT * FROM events"))
+    conn.close()
+
+    days_in_month = calendar.monthrange(year, month)[1]
+    month_start = date(year, month, 1)
+    month_end = date(year, month, days_in_month)
+
+    occurrences = []
+    for row in rows:
+        anchor = date.fromisoformat(row["date"])
+        if not row["recurrence"]:
+            if month_start <= anchor <= month_end:
+                occurrences.append({**row, "occurrence_date": row["date"]})
+            continue
+        days = set(row["recurrence"].split(","))
+        until = date.fromisoformat(row["recurrence_until"]) if row["recurrence_until"] else None
+        range_start = max(month_start, anchor)
+        range_end = month_end if until is None else min(month_end, until)
+        d = range_start
+        while d <= range_end:
+            if WEEKDAY_CODES[d.weekday()] in days:
+                occurrences.append({**row, "occurrence_date": d.isoformat()})
+            d += timedelta(days=1)
+
+    occurrences.sort(key=lambda r: (r["occurrence_date"], r["start_time"]))
+    return occurrences
+
+
+@app.post("/api/events")
+def create_event(event: EventCreate):
+    conn = get_connection()
+    cur = conn.execute(
+        "INSERT INTO events (title, category, date, start_time, end_time, recurrence, recurrence_until) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (event.title, event.category, event.date, event.start_time, event.end_time,
+         event.recurrence, event.recurrence_until),
+    )
+    conn.commit()
+    new_id = cur.lastrowid
+    conn.close()
+    return {"id": new_id}
+
+
+@app.delete("/api/events/{event_id}")
+def delete_event(event_id: int):
+    conn = get_connection()
+    conn.execute("DELETE FROM events WHERE id = ?", (event_id,))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
 
 
 # ---------- static frontend ----------

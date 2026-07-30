@@ -168,6 +168,63 @@
     <div id="goal-progress"></div>
   </section>
 
+  <section id="tab-calendar" class="tab-panel">
+    <h2>予定</h2>
+    <div class="month-nav">
+      <button type="button" id="cal-prev" class="icon-btn" aria-label="前の月">‹</button>
+      <span id="cal-month-label"></span>
+      <button type="button" id="cal-next" class="icon-btn" aria-label="次の月">›</button>
+    </div>
+    <div class="cal-weekday-row">
+      <span>月</span><span>火</span><span>水</span><span>木</span><span>金</span><span>土</span><span>日</span>
+    </div>
+    <div id="cal-grid" class="cal-grid"></div>
+
+    <h3 id="cal-detail-title">日付を選んでください</h3>
+    <ul id="cal-event-list" class="list"></ul>
+    <h3>期限のタスク</h3>
+    <ul id="cal-todo-list" class="list"></ul>
+
+    <button type="button" id="event-fab" class="fab" aria-label="予定を追加">+</button>
+
+    <div id="event-add-backdrop" class="backdrop hidden"></div>
+    <div id="event-add-panel" class="add-panel hidden">
+      <div class="panel-header">
+        <h3>新しい予定</h3>
+        <button type="button" id="event-add-close" class="panel-close" aria-label="閉じる">×</button>
+      </div>
+      <form id="event-form" class="add-form">
+        <input type="text" id="event-title" placeholder="予定のタイトル" required>
+        <select id="event-category">
+          <option value="">カテゴリ: なし</option>
+        </select>
+        <div class="form-row">
+          <input type="date" id="event-date" required>
+        </div>
+        <div class="form-row">
+          <input type="time" id="event-start-time" required>
+          <input type="time" id="event-end-time" required>
+        </div>
+        <div class="due-row">
+          <button type="button" class="quick-date-btn" data-recur-preset="daily">毎日</button>
+          <button type="button" class="quick-date-btn" data-recur-preset="weekdays">平日</button>
+          <button type="button" class="quick-date-btn" data-recur-preset="clear">クリア</button>
+        </div>
+        <div class="weekday-picker" id="event-recurrence-picker">
+          <button type="button" class="weekday-btn" data-day="mon">月</button>
+          <button type="button" class="weekday-btn" data-day="tue">火</button>
+          <button type="button" class="weekday-btn" data-day="wed">水</button>
+          <button type="button" class="weekday-btn" data-day="thu">木</button>
+          <button type="button" class="weekday-btn" data-day="fri">金</button>
+          <button type="button" class="weekday-btn" data-day="sat">土</button>
+          <button type="button" class="weekday-btn" data-day="sun">日</button>
+        </div>
+        <input type="date" id="event-recurrence-until" placeholder="繰り返し終了日(任意)">
+        <button type="submit">+ 追加</button>
+      </form>
+    </div>
+  </section>
+
 </main>
 
 <div id="focus-overlay" class="focus-overlay hidden">
@@ -207,6 +264,7 @@
   <button class="tab-btn" data-tab="tab-diary">日記</button>
   <button class="tab-btn" data-tab="tab-study">学習ログ</button>
   <button class="tab-btn" data-tab="tab-goal">目標</button>
+  <button class="tab-btn" data-tab="tab-calendar">予定</button>
 </nav>
 
 <script src="/static/app.js"></script>
