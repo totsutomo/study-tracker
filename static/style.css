@@ -438,7 +438,9 @@ body.focus-open #tabbar {
 
 .focus-controls {
   display: flex;
-  gap: 12px;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: center;
 }
 
 .focus-minimize {
@@ -479,6 +481,58 @@ body.focus-open #tabbar {
   padding: 13px;
   font-size: 16px;
   margin-top: 12px;
+}
+
+.start-panel {
+  padding: 22px 20px calc(22px + env(safe-area-inset-bottom));
+}
+
+.start-panel .panel-header h3 {
+  font-size: 22px;
+}
+
+.start-panel .period-toggle {
+  gap: 10px;
+}
+
+.start-panel .period-btn {
+  flex: 1;
+  padding: 13px 0;
+  font-size: 16px;
+}
+
+.start-panel .due-row {
+  gap: 10px;
+}
+
+.start-panel .quick-date-btn {
+  padding: 12px 18px;
+  font-size: 15px;
+}
+
+.start-panel #start-duration-input {
+  font-size: 16px;
+  padding: 10px;
+}
+
+.start-panel .start-clockonly-label {
+  font-size: 15px;
+  gap: 8px;
+}
+
+.start-panel #start-begin-btn {
+  padding: 16px;
+  font-size: 18px;
+}
+
+.danger-outline {
+  background: none;
+  color: var(--danger);
+  border: 1px solid var(--danger);
+}
+
+.danger-text {
+  color: var(--danger);
 }
 
 .mini-timer-bar {

@@ -793,9 +793,7 @@ document.addEventListener("visibilitychange", () => {
   }
 });
 
-async function finishSession(elapsedMinutes) {
-  const subject = timerSubject;
-  const todoId = activeTodoId;
+function resetSessionState() {
   stopTimerTick();
   timerSubject = null;
   activeTodoId = null;
@@ -809,6 +807,18 @@ async function finishSession(elapsedMinutes) {
   overlayMinimized = false;
   closeFocusOverlay();
   hideMiniBar();
+}
+
+function discardSession() {
+  if (!timerSubject) return;
+  if (!confirm("記録せずにこのセッションを破棄しますか?")) return;
+  resetSessionState();
+}
+
+async function finishSession(elapsedMinutes) {
+  const subject = timerSubject;
+  const todoId = activeTodoId;
+  resetSessionState();
   await api("/api/study-logs", {
     method: "POST",
     body: JSON.stringify({ subject, minutes: elapsedMinutes }),
@@ -850,6 +860,9 @@ document.getElementById("mini-stop-btn").addEventListener("click", async () => {
   const elapsedMinutes = Math.max(1, Math.round(totalMs / 60000));
   await finishSession(elapsedMinutes);
 });
+
+document.getElementById("focus-discard-btn").addEventListener("click", discardSession);
+document.getElementById("mini-discard-btn").addEventListener("click", discardSession);
 
 // ---------- daily / weekly chart ----------
 

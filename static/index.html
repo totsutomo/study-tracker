@@ -271,6 +271,7 @@
   </div>
   <div class="focus-controls">
     <button type="button" id="focus-pause-btn" class="secondary">一時停止</button>
+    <button type="button" id="focus-discard-btn" class="danger-outline">破棄</button>
     <button type="button" id="focus-stop-btn">記録して停止</button>
   </div>
 </div>
@@ -281,11 +282,12 @@
   <span id="mini-timer-time" class="mini-timer-time">00:00</span>
   <span id="mini-timer-status" class="mini-timer-status"></span>
   <button type="button" id="mini-pause-btn" class="icon-btn" aria-label="一時停止/再開">⏸</button>
+  <button type="button" id="mini-discard-btn" class="icon-btn danger-text" aria-label="破棄">🗑</button>
   <button type="button" id="mini-stop-btn" class="icon-btn" aria-label="記録して停止">⏹</button>
 </div>
 
 <div id="start-backdrop" class="backdrop hidden"></div>
-<div id="start-panel" class="add-panel hidden">
+<div id="start-panel" class="add-panel start-panel hidden">
   <div class="panel-header">
     <h3 id="start-subject-name">科目</h3>
     <button type="button" id="start-close" class="panel-close" aria-label="閉じる">×</button>
@@ -299,7 +301,7 @@
     <button type="button" class="quick-date-btn" data-minutes="25">25分</button>
     <button type="button" class="quick-date-btn" data-minutes="45">45分</button>
     <button type="button" class="quick-date-btn" data-minutes="60">60分</button>
-    <input type="number" id="start-duration-input" min="1" value="25" style="max-width:80px;">
+    <input type="number" id="start-duration-input" min="1" value="25" style="max-width:100px;">
   </div>
   <label class="checkbox-label start-clockonly-label">
     <input type="checkbox" id="start-clockonly"> 時計だけモード(画面から離れると一時停止)
