@@ -69,6 +69,13 @@
         </div>
         <button type="button" id="todo-time-toggle" class="time-toggle-btn">+ 時刻を追加</button>
         <input type="time" id="todo-due-time" style="display:none;">
+        <select id="todo-notify" style="display:none;">
+          <option value="">通知しない</option>
+          <option value="0">その時刻に通知</option>
+          <option value="10">10分前に通知</option>
+          <option value="30">30分前に通知</option>
+          <option value="60">1時間前に通知</option>
+        </select>
         <div class="due-row">
           <button type="button" class="quick-date-btn" data-recur-preset="daily">毎日</button>
           <button type="button" class="quick-date-btn" data-recur-preset="weekdays">平日</button>
@@ -205,6 +212,13 @@
           <input type="time" id="event-start-time" required>
           <input type="time" id="event-end-time" required>
         </div>
+        <select id="event-notify">
+          <option value="">通知しない</option>
+          <option value="0">開始時刻に通知</option>
+          <option value="10">10分前に通知</option>
+          <option value="30">30分前に通知</option>
+          <option value="60">1時間前に通知</option>
+        </select>
         <div class="due-row">
           <button type="button" class="quick-date-btn" data-recur-preset="daily">毎日</button>
           <button type="button" class="quick-date-btn" data-recur-preset="weekdays">平日</button>
@@ -257,6 +271,9 @@
     <input type="text" id="category-name" placeholder="新しいカテゴリ名" required>
     <button type="submit">+ 追加</button>
   </form>
+  <h3>通知</h3>
+  <p class="meta" id="push-status">確認中...</p>
+  <button type="button" id="push-toggle-btn">通知を有効にする</button>
 </div>
 
 <nav id="tabbar">

@@ -1,16 +1,24 @@
 import calendar
-from datetime import date, timedelta
+import json
+import os
+from datetime import date, datetime, timedelta
 
 from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
+from pywebpush import WebPushException, webpush
 
 from database import get_connection, init_db, row_to_dict, rows_to_dicts
 
 app = FastAPI(title="study-tracker")
 
 init_db()
+
+VAPID_PUBLIC_KEY = os.environ.get("VAPID_PUBLIC_KEY")
+VAPID_PRIVATE_KEY = os.environ.get("VAPID_PRIVATE_KEY")
+VAPID_CLAIMS_EMAIL = os.environ.get("VAPID_CLAIMS_EMAIL", "example@example.com")
+CRON_SECRET = os.environ.get("CRON_SECRET")
 
 
 # ---------- schemas ----------
@@ -22,6 +30,7 @@ class TodoCreate(BaseModel):
     due_date: str | None = None
     due_time: str | None = None  # "HH:MM", optional
     recurrence: str | None = None  # None, or comma-separated weekday codes e.g. "mon,wed,fri"
+    notify_offset_minutes: int | None = None  # None = no notification, 0 = at due time, N = N minutes before
 
 
 class CategoryCreate(BaseModel):
@@ -61,6 +70,12 @@ class EventCreate(BaseModel):
     end_time: str  # "HH:MM"
     recurrence: str | None = None  # None, or comma-separated weekday codes e.g. "mon,wed,fri"
     recurrence_until: str | None = None  # "YYYY-MM-DD", only meaningful when recurrence is set
+    notify_offset_minutes: int | None = None  # None = no notification, 0 = at start time, N = N minutes before
+
+
+class PushSubscribeIn(BaseModel):
+    endpoint: str
+    keys: dict
 
 
 WEEKDAY_CODES = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]  # index matches date.weekday()
@@ -119,8 +134,10 @@ def todo_stats():
 def create_todo(todo: TodoCreate):
     conn = get_connection()
     cur = conn.execute(
-        "INSERT INTO todos (title, category, priority, due_date, due_time, recurrence) VALUES (?, ?, ?, ?, ?, ?)",
-        (todo.title, todo.category, todo.priority, todo.due_date, todo.due_time, todo.recurrence),
+        "INSERT INTO todos (title, category, priority, due_date, due_time, recurrence, notify_offset_minutes) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (todo.title, todo.category, todo.priority, todo.due_date, todo.due_time, todo.recurrence,
+         todo.notify_offset_minutes if todo.due_time else None),
     )
     conn.commit()
     new_id = cur.lastrowid
@@ -132,13 +149,14 @@ def create_todo(todo: TodoCreate):
 def toggle_todo(todo_id: int):
     conn = get_connection()
     row = conn.execute(
-        "SELECT done, title, category, priority, due_date, due_time, recurrence FROM todos WHERE id = ?",
+        "SELECT done, title, category, priority, due_date, due_time, recurrence, notify_offset_minutes "
+        "FROM todos WHERE id = ?",
         (todo_id,),
     ).fetchone()
     if row is None:
         conn.close()
         raise HTTPException(status_code=404, detail="todo not found")
-    done, title, category, priority, due_date, due_time, recurrence = row
+    done, title, category, priority, due_date, due_time, recurrence, notify_offset_minutes = row
     new_done = 0 if done else 1
     completed_at = "datetime('now')" if new_done else "NULL"
     conn.execute(
@@ -151,8 +169,9 @@ def toggle_todo(todo_id: int):
         next_due = next_occurrence(base, recurrence)
         if next_due is not None:
             conn.execute(
-                "INSERT INTO todos (title, category, priority, due_date, due_time, recurrence) VALUES (?, ?, ?, ?, ?, ?)",
-                (title, category, priority, next_due.isoformat(), due_time, recurrence),
+                "INSERT INTO todos (title, category, priority, due_date, due_time, recurrence, notify_offset_minutes) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (title, category, priority, next_due.isoformat(), due_time, recurrence, notify_offset_minutes),
             )
     conn.commit()
     conn.close()
@@ -510,10 +529,10 @@ def list_events(year: int, month: int):
 def create_event(event: EventCreate):
     conn = get_connection()
     cur = conn.execute(
-        "INSERT INTO events (title, category, date, start_time, end_time, recurrence, recurrence_until) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO events (title, category, date, start_time, end_time, recurrence, recurrence_until, "
+        "notify_offset_minutes) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         (event.title, event.category, event.date, event.start_time, event.end_time,
-         event.recurrence, event.recurrence_until),
+         event.recurrence, event.recurrence_until, event.notify_offset_minutes),
     )
     conn.commit()
     new_id = cur.lastrowid
@@ -528,6 +547,134 @@ def delete_event(event_id: int):
     conn.commit()
     conn.close()
     return {"ok": True}
+
+
+# ---------- push notifications ----------
+
+NOTIFY_OFFSET_CHOICES = (0, 10, 30, 60)
+
+
+@app.get("/api/push/vapid-public-key")
+def push_vapid_public_key():
+    return {"publicKey": VAPID_PUBLIC_KEY}
+
+
+@app.post("/api/push/subscribe")
+def push_subscribe(sub: PushSubscribeIn):
+    keys = sub.keys or {}
+    conn = get_connection()
+    conn.execute(
+        """
+        INSERT INTO push_subscriptions (endpoint, p256dh, auth) VALUES (?, ?, ?)
+        ON CONFLICT(endpoint) DO UPDATE SET p256dh = excluded.p256dh, auth = excluded.auth
+        """,
+        (sub.endpoint, keys.get("p256dh"), keys.get("auth")),
+    )
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+@app.post("/api/push/unsubscribe")
+def push_unsubscribe(sub: PushSubscribeIn):
+    conn = get_connection()
+    conn.execute("DELETE FROM push_subscriptions WHERE endpoint = ?", (sub.endpoint,))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+def _send_push_to_all(conn, payload: dict) -> int:
+    subs = rows_to_dicts(conn.execute("SELECT * FROM push_subscriptions"))
+    sent = 0
+    for sub in subs:
+        subscription_info = {
+            "endpoint": sub["endpoint"],
+            "keys": {"p256dh": sub["p256dh"], "auth": sub["auth"]},
+        }
+        try:
+            webpush(
+                subscription_info=subscription_info,
+                data=json.dumps(payload),
+                vapid_private_key=VAPID_PRIVATE_KEY,
+                vapid_claims={"sub": f"mailto:{VAPID_CLAIMS_EMAIL}"},
+            )
+            sent += 1
+        except WebPushException as exc:
+            status_code = exc.response.status_code if exc.response is not None else None
+            if status_code in (404, 410):
+                conn.execute("DELETE FROM push_subscriptions WHERE endpoint = ?", (sub["endpoint"],))
+    return sent
+
+
+@app.post("/api/push/check")
+def push_check(token: str | None = None):
+    if not CRON_SECRET or token != CRON_SECRET:
+        raise HTTPException(status_code=403, detail="invalid token")
+    if not VAPID_PRIVATE_KEY or not VAPID_PUBLIC_KEY:
+        raise HTTPException(status_code=500, detail="VAPID keys not configured")
+
+    conn = get_connection()
+    now = datetime.now()
+    sent_count = 0
+
+    todo_rows = rows_to_dicts(conn.execute(
+        "SELECT * FROM todos WHERE done = 0 AND due_date IS NOT NULL AND due_time IS NOT NULL "
+        "AND notify_offset_minutes IS NOT NULL AND notified_at IS NULL"
+    ))
+    for todo in todo_rows:
+        due_dt = datetime.fromisoformat(f"{todo['due_date']}T{todo['due_time']}")
+        notify_at = due_dt - timedelta(minutes=todo["notify_offset_minutes"])
+        if notify_at <= now:
+            sent_count += _send_push_to_all(conn, {
+                "title": "ToDoの期限",
+                "body": todo["title"],
+                "tag": f"todo-{todo['id']}",
+            })
+            conn.execute("UPDATE todos SET notified_at = datetime('now') WHERE id = ?", (todo["id"],))
+
+    event_rows = rows_to_dicts(conn.execute(
+        "SELECT * FROM events WHERE notify_offset_minutes IS NOT NULL"
+    ))
+    window = [now.date() + timedelta(days=offset) for offset in (-1, 0, 1)]
+    for event in event_rows:
+        anchor = date.fromisoformat(event["date"])
+        until = date.fromisoformat(event["recurrence_until"]) if event["recurrence_until"] else None
+        last_notified = date.fromisoformat(event["last_notified_occurrence"]) if event["last_notified_occurrence"] else None
+        occurrence_dates = []
+        if not event["recurrence"]:
+            if anchor in window:
+                occurrence_dates.append(anchor)
+        else:
+            days = set(event["recurrence"].split(","))
+            for d in window:
+                if d < anchor:
+                    continue
+                if until is not None and d > until:
+                    continue
+                if WEEKDAY_CODES[d.weekday()] in days:
+                    occurrence_dates.append(d)
+        occurrence_dates.sort()
+        for occ_date in occurrence_dates:
+            if last_notified is not None and occ_date <= last_notified:
+                continue
+            start_dt = datetime.fromisoformat(f"{occ_date.isoformat()}T{event['start_time']}")
+            notify_at = start_dt - timedelta(minutes=event["notify_offset_minutes"])
+            if notify_at <= now:
+                sent_count += _send_push_to_all(conn, {
+                    "title": "予定",
+                    "body": event["title"],
+                    "tag": f"event-{event['id']}-{occ_date.isoformat()}",
+                })
+                conn.execute(
+                    "UPDATE events SET last_notified_occurrence = ? WHERE id = ?",
+                    (occ_date.isoformat(), event["id"]),
+                )
+                last_notified = occ_date
+
+    conn.commit()
+    conn.close()
+    return {"notifications_sent": sent_count}
 
 
 # ---------- static frontend ----------

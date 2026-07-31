@@ -45,6 +45,16 @@ CREATE TABLE IF NOT EXISTS events (
     end_time TEXT NOT NULL,
     recurrence TEXT,
     recurrence_until TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    notify_offset_minutes INTEGER,
+    last_notified_occurrence TEXT
+);
+
+CREATE TABLE IF NOT EXISTS push_subscriptions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    endpoint TEXT UNIQUE NOT NULL,
+    p256dh TEXT NOT NULL,
+    auth TEXT NOT NULL,
     created_at TEXT DEFAULT (datetime('now'))
 );
 
@@ -104,8 +114,18 @@ def _migrate(conn):
         conn.execute("ALTER TABLE todos ADD COLUMN recurrence TEXT")
     if "due_time" not in cols:
         conn.execute("ALTER TABLE todos ADD COLUMN due_time TEXT")
+    if "notify_offset_minutes" not in cols:
+        conn.execute("ALTER TABLE todos ADD COLUMN notify_offset_minutes INTEGER")
+    if "notified_at" not in cols:
+        conn.execute("ALTER TABLE todos ADD COLUMN notified_at TEXT")
     conn.execute("UPDATE todos SET recurrence = 'mon,tue,wed,thu,fri,sat,sun' WHERE recurrence = 'daily'")
     conn.execute("UPDATE todos SET recurrence = 'mon,tue,wed,thu,fri' WHERE recurrence = 'weekdays'")
+
+    event_cols = [row[1] for row in conn.execute("PRAGMA table_info(events)").fetchall()]
+    if "notify_offset_minutes" not in event_cols:
+        conn.execute("ALTER TABLE events ADD COLUMN notify_offset_minutes INTEGER")
+    if "last_notified_occurrence" not in event_cols:
+        conn.execute("ALTER TABLE events ADD COLUMN last_notified_occurrence TEXT")
     conn.commit()
 
 

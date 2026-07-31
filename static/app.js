@@ -361,14 +361,18 @@ settingsBackdrop.addEventListener("click", closeSettingsPanel);
 
 document.getElementById("todo-time-toggle").addEventListener("click", () => {
   const timeInput = document.getElementById("todo-due-time");
+  const notifySelect = document.getElementById("todo-notify");
   const toggleBtn = document.getElementById("todo-time-toggle");
   const showing = timeInput.style.display !== "none";
   if (showing) {
     timeInput.style.display = "none";
     timeInput.value = "";
+    notifySelect.style.display = "none";
+    notifySelect.value = "";
     toggleBtn.textContent = "+ 時刻を追加";
   } else {
     timeInput.style.display = "";
+    notifySelect.style.display = "";
     toggleBtn.textContent = "− 時刻を削除";
     timeInput.focus();
     if (timeInput.showPicker) {
@@ -388,17 +392,21 @@ document.getElementById("todo-form").addEventListener("submit", async (e) => {
   const priority = document.getElementById("todo-priority").value;
   const due_date = document.getElementById("todo-due-date").value || null;
   const due_time = document.getElementById("todo-due-time").value || null;
+  const notifyVal = document.getElementById("todo-notify").value;
+  const notify_offset_minutes = due_time && notifyVal !== "" ? parseInt(notifyVal, 10) : null;
   const recurrence =
     selectedRecurrenceDays.size > 0 ? WEEKDAY_ORDER.filter((d) => selectedRecurrenceDays.has(d)).join(",") : null;
   if (!title) return;
   await api("/api/todos", {
     method: "POST",
-    body: JSON.stringify({ title, category, priority, due_date, due_time, recurrence }),
+    body: JSON.stringify({ title, category, priority, due_date, due_time, recurrence, notify_offset_minutes }),
   });
   document.getElementById("todo-title").value = "";
   document.getElementById("todo-due-date").value = "";
   document.getElementById("todo-due-time").value = "";
   document.getElementById("todo-due-time").style.display = "none";
+  document.getElementById("todo-notify").value = "";
+  document.getElementById("todo-notify").style.display = "none";
   document.getElementById("todo-time-toggle").textContent = "+ 時刻を追加";
   setRecurrenceDays([]);
   closeTodoAddPanel();
@@ -1195,6 +1203,8 @@ document.getElementById("event-form").addEventListener("submit", async (e) => {
   const startTime = document.getElementById("event-start-time").value;
   const endTime = document.getElementById("event-end-time").value;
   const recurrenceUntilInput = document.getElementById("event-recurrence-until").value || null;
+  const notifyVal = document.getElementById("event-notify").value;
+  const notify_offset_minutes = notifyVal !== "" ? parseInt(notifyVal, 10) : null;
   if (!title || !evDate || !startTime || !endTime) return;
   const recurrence = selectedEventRecurrenceDays.size ? [...selectedEventRecurrenceDays].join(",") : null;
   await api("/api/events", {
@@ -1207,6 +1217,7 @@ document.getElementById("event-form").addEventListener("submit", async (e) => {
       end_time: endTime,
       recurrence,
       recurrence_until: recurrence ? recurrenceUntilInput : null,
+      notify_offset_minutes,
     }),
   });
   e.target.reset();
@@ -1214,6 +1225,80 @@ document.getElementById("event-form").addEventListener("submit", async (e) => {
   closeEventAddPanel();
   loadCalendar();
 });
+
+// ---------- push notifications ----------
+
+function urlBase64ToUint8Array(base64String) {
+  const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
+  const rawData = atob(base64);
+  return Uint8Array.from([...rawData].map((c) => c.charCodeAt(0)));
+}
+
+function pushSupported() {
+  return "serviceWorker" in navigator && "PushManager" in window;
+}
+
+async function getPushSubscription() {
+  if (!pushSupported()) return null;
+  const reg = await navigator.serviceWorker.ready;
+  return reg.pushManager.getSubscription();
+}
+
+async function updatePushStatus() {
+  const statusEl = document.getElementById("push-status");
+  const btn = document.getElementById("push-toggle-btn");
+  if (!pushSupported()) {
+    statusEl.textContent = "この端末/ブラウザは通知に対応していません";
+    btn.disabled = true;
+    return;
+  }
+  const sub = await getPushSubscription();
+  statusEl.textContent = sub ? "通知は有効です" : "通知は無効です";
+  btn.textContent = sub ? "通知を無効にする" : "通知を有効にする";
+  btn.disabled = false;
+}
+
+async function enablePush() {
+  const permission = await Notification.requestPermission();
+  if (permission !== "granted") {
+    alert("通知が許可されませんでした");
+    return;
+  }
+  const { publicKey } = await api("/api/push/vapid-public-key");
+  if (!publicKey) {
+    alert("サーバー側の通知設定が未完了です");
+    return;
+  }
+  const reg = await navigator.serviceWorker.ready;
+  const sub = await reg.pushManager.subscribe({
+    userVisibleOnly: true,
+    applicationServerKey: urlBase64ToUint8Array(publicKey),
+  });
+  await api("/api/push/subscribe", { method: "POST", body: JSON.stringify(sub.toJSON()) });
+}
+
+async function disablePush() {
+  const sub = await getPushSubscription();
+  if (!sub) return;
+  await api("/api/push/unsubscribe", {
+    method: "POST",
+    body: JSON.stringify({ endpoint: sub.endpoint, keys: {} }),
+  });
+  await sub.unsubscribe();
+}
+
+document.getElementById("push-toggle-btn").addEventListener("click", async () => {
+  const sub = await getPushSubscription();
+  if (sub) {
+    await disablePush();
+  } else {
+    await enablePush();
+  }
+  updatePushStatus();
+});
+
+updatePushStatus();
 
 // ---------- init ----------
 
