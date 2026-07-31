@@ -68,6 +68,14 @@ CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY,
     value TEXT
 );
+
+CREATE TABLE IF NOT EXISTS activation_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    triggered_at TEXT NOT NULL,
+    note TEXT,
+    returned_at TEXT,
+    reminded_at TEXT
+);
 """
 
 DEFAULT_CATEGORIES = ("英語", "数学", "世界史", "その他")

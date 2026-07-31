@@ -38,6 +38,11 @@ class TodoNoteUpdate(BaseModel):
     note: str | None = None
 
 
+class TodoDueUpdate(BaseModel):
+    due_date: str | None = None
+    due_time: str | None = None
+
+
 class CategoryCreate(BaseModel):
     name: str
 
@@ -49,6 +54,7 @@ class CategoryUpdate(BaseModel):
 class SettingsUpdate(BaseModel):
     weekly_goal_minutes: int | None = None
     monthly_goal_minutes: int | None = None
+    daily_minimum_minutes: int | None = None
 
 
 class StudyLogCreate(BaseModel):
@@ -89,6 +95,15 @@ class EventUpdate(BaseModel):
 class PushSubscribeIn(BaseModel):
     endpoint: str
     keys: dict
+
+
+class ActivationLogCreate(BaseModel):
+    triggered_at: str  # "YYYY-MM-DD HH:MM:SS", client local time
+    note: str | None = None
+
+
+class ActivationLogReturn(BaseModel):
+    returned_at: str  # "YYYY-MM-DD HH:MM:SS", client local time
 
 
 WEEKDAY_CODES = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]  # index matches date.weekday()
@@ -166,6 +181,22 @@ def update_todo_note(todo_id: int, payload: TodoNoteUpdate):
         conn.close()
         raise HTTPException(status_code=404, detail="todo not found")
     conn.execute("UPDATE todos SET note = ? WHERE id = ?", (payload.note, todo_id))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+@app.put("/api/todos/{todo_id}/due")
+def update_todo_due(todo_id: int, payload: TodoDueUpdate):
+    conn = get_connection()
+    row = conn.execute("SELECT id FROM todos WHERE id = ?", (todo_id,)).fetchone()
+    if row is None:
+        conn.close()
+        raise HTTPException(status_code=404, detail="todo not found")
+    conn.execute(
+        "UPDATE todos SET due_date = ?, due_time = ?, notified_at = NULL WHERE id = ?",
+        (payload.due_date, payload.due_time, todo_id),
+    )
     conn.commit()
     conn.close()
     return {"ok": True}
@@ -324,6 +355,19 @@ def delete_study_log(log_id: int):
     return {"ok": True}
 
 
+@app.get("/api/study-logs/days")
+def study_log_days(year: int, month: int):
+    conn = get_connection()
+    cur = conn.execute(
+        "SELECT DISTINCT date(logged_at) AS d FROM study_logs "
+        "WHERE strftime('%Y', logged_at) = ? AND strftime('%m', logged_at) = ?",
+        (str(year), f"{month:02d}"),
+    )
+    result = [row[0] for row in cur.fetchall()]
+    conn.close()
+    return result
+
+
 @app.get("/api/study-logs/daily")
 def study_log_daily():
     conn = get_connection()
@@ -380,6 +424,7 @@ def _read_settings(conn):
     return {
         "weekly_goal_minutes": int(d["weekly_goal_minutes"]) if "weekly_goal_minutes" in d else None,
         "monthly_goal_minutes": int(d["monthly_goal_minutes"]) if "monthly_goal_minutes" in d else None,
+        "daily_minimum_minutes": int(d["daily_minimum_minutes"]) if "daily_minimum_minutes" in d else None,
     }
 
 
@@ -422,10 +467,132 @@ def update_settings(payload: SettingsUpdate):
             "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
             (str(payload.monthly_goal_minutes),),
         )
+    if payload.daily_minimum_minutes is not None:
+        conn.execute(
+            "INSERT INTO settings (key, value) VALUES ('daily_minimum_minutes', ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (str(payload.daily_minimum_minutes),),
+        )
     conn.commit()
     result = _read_settings(conn)
     conn.close()
     return result
+
+
+# ---------- activation logs ----------
+
+ACTIVATION_REMINDER_MINUTES = 45
+
+
+@app.get("/api/activation-logs")
+def list_activation_logs(limit: int = 200):
+    conn = get_connection()
+    cur = conn.execute(
+        "SELECT * FROM activation_logs ORDER BY triggered_at DESC LIMIT ?", (limit,)
+    )
+    result = rows_to_dicts(cur)
+    conn.close()
+    return result
+
+
+@app.get("/api/activation-logs/active")
+def active_activation_log():
+    conn = get_connection()
+    cur = conn.execute(
+        "SELECT * FROM activation_logs WHERE returned_at IS NULL ORDER BY triggered_at DESC LIMIT 1"
+    )
+    row = cur.fetchone()
+    result = row_to_dict(cur, row)
+    conn.close()
+    return result
+
+
+@app.get("/api/activation-logs/days")
+def activation_log_days(year: int, month: int):
+    conn = get_connection()
+    cur = conn.execute(
+        "SELECT DISTINCT date(triggered_at) AS d FROM activation_logs "
+        "WHERE strftime('%Y', triggered_at) = ? AND strftime('%m', triggered_at) = ?",
+        (str(year), f"{month:02d}"),
+    )
+    result = [row[0] for row in cur.fetchall()]
+    conn.close()
+    return result
+
+
+@app.get("/api/activation-logs/stats")
+def activation_log_stats():
+    conn = get_connection()
+    week_count = conn.execute(
+        "SELECT COUNT(*) FROM activation_logs WHERE triggered_at >= datetime('now', '-6 days', 'start of day')"
+    ).fetchone()[0]
+    month_count = conn.execute(
+        "SELECT COUNT(*) FROM activation_logs WHERE triggered_at >= datetime('now', 'start of month')"
+    ).fetchone()[0]
+    total_count = conn.execute("SELECT COUNT(*) FROM activation_logs").fetchone()[0]
+    conn.close()
+    return {"week_count": week_count, "month_count": month_count, "total_count": total_count}
+
+
+@app.get("/api/activation-logs/export")
+def export_activation_logs(since: str | None = None):
+    conn = get_connection()
+    if since:
+        cur = conn.execute(
+            "SELECT * FROM activation_logs WHERE triggered_at >= ? ORDER BY triggered_at ASC",
+            (since,),
+        )
+    else:
+        cur = conn.execute("SELECT * FROM activation_logs ORDER BY triggered_at ASC")
+    rows = rows_to_dicts(cur)
+    conn.close()
+    lines = []
+    for r in rows:
+        triggered = r["triggered_at"][:16]
+        note = r["note"] or ""
+        line = f"- 発動 {triggered} きっかけ: {note}"
+        if r["returned_at"]:
+            line += f" / 復帰 {r['returned_at'][:16]}"
+        lines.append(line)
+    return {"text": "\n".join(lines), "count": len(lines)}
+
+
+@app.post("/api/activation-logs")
+def create_activation_log(log: ActivationLogCreate):
+    conn = get_connection()
+    cur = conn.execute(
+        "INSERT INTO activation_logs (triggered_at, note) VALUES (?, ?)",
+        (log.triggered_at, log.note),
+    )
+    conn.commit()
+    new_id = cur.lastrowid
+    conn.close()
+    return {"id": new_id}
+
+
+@app.put("/api/activation-logs/{log_id}/return")
+def return_activation_log(log_id: int, payload: ActivationLogReturn):
+    conn = get_connection()
+    row = conn.execute("SELECT id FROM activation_logs WHERE id = ?", (log_id,)).fetchone()
+    if row is None:
+        conn.close()
+        raise HTTPException(status_code=404, detail="activation log not found")
+    conn.execute(
+        "UPDATE activation_logs SET returned_at = ? WHERE id = ?",
+        (payload.returned_at, log_id),
+    )
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+@app.delete("/api/activation-logs/{log_id}")
+def delete_activation_log(log_id: int):
+    conn = get_connection()
+    conn.execute("DELETE FROM activation_logs WHERE id = ?", (log_id,))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
 
 
 # ---------- goals ----------
@@ -676,6 +843,21 @@ def push_check(token: str | None = None):
                     (occ_date.isoformat(), event["id"]),
                 )
                 last_notified = occ_date
+
+    activation_rows = rows_to_dicts(conn.execute(
+        "SELECT * FROM activation_logs WHERE returned_at IS NULL AND reminded_at IS NULL"
+    ))
+    for act in activation_rows:
+        triggered_dt = datetime.fromisoformat(act["triggered_at"].replace(" ", "T"))
+        if now - triggered_dt >= timedelta(minutes=ACTIVATION_REMINDER_MINUTES):
+            sent_count += _send_push_to_all(conn, {
+                "title": "発動ログ",
+                "body": "まだ復帰の記録がないよ",
+                "tag": f"activation-{act['id']}",
+            })
+            conn.execute(
+                "UPDATE activation_logs SET reminded_at = datetime('now') WHERE id = ?", (act["id"],)
+            )
 
     conn.commit()
     conn.close()

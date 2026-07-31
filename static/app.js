@@ -74,22 +74,47 @@ function recurrenceLabel(recurrence) {
   return " 🔁" + sorted.map((d) => WEEKDAY_LABEL[d]).join("");
 }
 
+function computeReschedule(t, kind) {
+  // kind: "+30" | "+60" | "tomorrow"
+  if (kind === "tomorrow") {
+    return { due_date: addDaysToDate(t.due_date, 1), due_time: t.due_time || null };
+  }
+  const minutes = kind === "+30" ? 30 : 60;
+  if (!t.due_time) {
+    return { due_date: addDaysToDate(t.due_date, 0), due_time: null };
+  }
+  const base = new Date(`${t.due_date}T${t.due_time}:00`);
+  base.setMinutes(base.getMinutes() + minutes);
+  return { due_date: formatLocalDate(base), due_time: String(base.getHours()).padStart(2, "0") + ":" + String(base.getMinutes()).padStart(2, "0") };
+}
+
 function renderTodoItem(t, list) {
   const li = document.createElement("li");
   if (t.done) li.classList.add("done");
-  if (isOverdue(t)) li.classList.add("overdue");
-  if (!t.done && t.due_date === todayStr() && !isOverdue(t)) li.classList.add("due-today");
+  const overdue = isOverdue(t);
+  if (overdue) li.classList.add("overdue");
+  if (!t.done && t.due_date === todayStr() && !overdue) li.classList.add("due-today");
   if (t.priority === "high") li.classList.add("priority-high");
   const dueLabel = t.due_date ? `📅 ${t.due_date}${t.due_time ? " " + t.due_time : ""}` : "";
   const recurLabel = recurrenceLabel(t.recurrence);
   const priorityLabel = t.priority && t.priority !== "medium" ? `[${PRIORITY_LABEL[t.priority] || t.priority}] ` : "";
   const noteMark = t.note ? " 📝" : "";
+  const showReschedule = !t.done && t.due_date && (overdue || t.due_date === todayStr());
   li.innerHTML = `
-    <input type="checkbox" ${t.done ? "checked" : ""}>
-    <span>${priorityLabel}${escapeHtml(t.title)}${noteMark}</span>
-    <span class="meta">${t.category || ""} ${dueLabel}${recurLabel}</span>
-    ${!t.done && t.category ? `<button class="play-btn" title="記録開始">▶</button>` : ""}
-    <button class="delete-btn" title="削除">×</button>
+    <div class="todo-item-row">
+      <input type="checkbox" ${t.done ? "checked" : ""}>
+      <span>${priorityLabel}${escapeHtml(t.title)}${noteMark}</span>
+      <span class="meta">${t.category || ""} ${dueLabel}${recurLabel}</span>
+      ${!t.done && t.category ? `<button class="play-btn" title="記録開始">▶</button>` : ""}
+      <button class="delete-btn" title="削除">×</button>
+    </div>
+    ${showReschedule ? `
+      <div class="reschedule-row">
+        <button type="button" class="reschedule-btn" data-kind="+30">+30分</button>
+        <button type="button" class="reschedule-btn" data-kind="+60">+1時間</button>
+        <button type="button" class="reschedule-btn" data-kind="tomorrow">明日</button>
+      </div>
+    ` : ""}
   `;
   li.querySelector("input").addEventListener("click", async (e) => {
     e.stopPropagation();
@@ -108,6 +133,15 @@ function renderTodoItem(t, list) {
     e.stopPropagation();
     await api(`/api/todos/${t.id}`, { method: "DELETE" });
     loadTodos();
+  });
+  li.querySelectorAll(".reschedule-btn").forEach((btn) => {
+    btn.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      const { due_date, due_time } = computeReschedule(t, btn.dataset.kind);
+      await api(`/api/todos/${t.id}/due`, { method: "PUT", body: JSON.stringify({ due_date, due_time }) });
+      loadTodos();
+      loadCalendar();
+    });
   });
   li.classList.add("clickable");
   li.addEventListener("click", () => openTodoDetail(t));
@@ -183,6 +217,23 @@ function renderTodos() {
   if (todos.length === 0) {
     groupsEl.innerHTML = "<p class='meta'>該当するタスクがありません</p>";
   }
+
+  const deferCandidates = [...groups.overdue, ...groups.today].filter((t) => t.priority !== "high");
+  const deferBtn = document.getElementById("defer-today-btn");
+  deferBtn.classList.toggle("hidden", deferCandidates.length === 0);
+  deferBtn.onclick = async () => {
+    if (!confirm(`優先度が高以外の${deferCandidates.length}件を明日に繰り越します`)) return;
+    await Promise.all(
+      deferCandidates.map((t) =>
+        api(`/api/todos/${t.id}/due`, {
+          method: "PUT",
+          body: JSON.stringify({ due_date: addDaysToDate(todayStr(), 1), due_time: t.due_time || null }),
+        })
+      )
+    );
+    loadTodos();
+    loadCalendar();
+  };
 }
 
 async function loadTodos() {
@@ -505,6 +556,10 @@ function localDatetimeNow() {
   return now.toISOString().slice(0, 16); // "YYYY-MM-DDTHH:MM"
 }
 
+function nowLocalTimestamp() {
+  return `${localDatetimeNow().replace("T", " ")}:00`; // "YYYY-MM-DD HH:MM:SS"
+}
+
 document.getElementById("manual-log-toggle").addEventListener("click", () => {
   const form = document.getElementById("manual-log-form");
   const opening = form.classList.contains("hidden");
@@ -821,7 +876,7 @@ async function finishSession(elapsedMinutes) {
   resetSessionState();
   await api("/api/study-logs", {
     method: "POST",
-    body: JSON.stringify({ subject, minutes: elapsedMinutes }),
+    body: JSON.stringify({ subject, minutes: elapsedMinutes, logged_at: `${localDatetimeNow().replace("T", " ")}:00` }),
   });
   if (todoId && confirm("このタスクを完了にする?")) {
     await api(`/api/todos/${todoId}/toggle`, { method: "POST" });
@@ -1047,6 +1102,18 @@ async function loadGoalProgress() {
   document.getElementById("stat-month").textContent = formatDuration(p.month_minutes);
   document.getElementById("stat-total").textContent = formatDuration(p.total_minutes);
 
+  const dailyMinLabel = document.getElementById("daily-min-label");
+  const dailyMinFill = document.getElementById("daily-min-fill");
+  if (p.daily_minimum_minutes) {
+    const reached = p.today_minutes >= p.daily_minimum_minutes;
+    dailyMinLabel.textContent = `${p.today_minutes} / ${p.daily_minimum_minutes}分${reached ? " ✓" : ""}`;
+    dailyMinFill.style.width = `${Math.min(100, (p.today_minutes / p.daily_minimum_minutes) * 100)}%`;
+  } else {
+    dailyMinLabel.textContent = "未設定";
+    dailyMinFill.style.width = "0%";
+  }
+  document.getElementById("daily-goal-input").value = p.daily_minimum_minutes || "";
+
   const weekHours = (p.week_minutes / 60).toFixed(1);
   const monthHours = (p.month_minutes / 60).toFixed(1);
   const weekGoalHours = p.weekly_goal_minutes ? p.weekly_goal_minutes / 60 : null;
@@ -1072,9 +1139,11 @@ async function loadGoalProgress() {
 
 document.getElementById("goal-minutes-form").addEventListener("submit", async (e) => {
   e.preventDefault();
+  const dailyMinutes = parseInt(document.getElementById("daily-goal-input").value, 10);
   const weeklyHours = parseFloat(document.getElementById("weekly-goal-input").value);
   const monthlyHours = parseFloat(document.getElementById("monthly-goal-input").value);
   const payload = {};
+  if (!isNaN(dailyMinutes)) payload.daily_minimum_minutes = dailyMinutes;
   if (!isNaN(weeklyHours)) payload.weekly_goal_minutes = Math.round(weeklyHours * 60);
   if (!isNaN(monthlyHours)) payload.monthly_goal_minutes = Math.round(monthlyHours * 60);
   await api("/api/settings", { method: "PUT", body: JSON.stringify(payload) });
@@ -1187,6 +1256,133 @@ document.getElementById("goal-form").addEventListener("submit", async (e) => {
   loadGoals();
 });
 
+// ---------- activation logs ----------
+
+let activationActiveLog = null;
+
+async function loadActivationActive() {
+  activationActiveLog = await api("/api/activation-logs/active");
+  const btn = document.getElementById("activation-btn");
+  const statusEl = document.getElementById("activation-current-status");
+  if (activationActiveLog) {
+    btn.classList.add("active");
+    btn.title = "タップで復帰を記録";
+    const noteText = activationActiveLog.note ? ` ${activationActiveLog.note}` : "";
+    statusEl.textContent = `発動中: ${formatLoggedAt(activationActiveLog.triggered_at)}〜${noteText}`;
+  } else {
+    btn.classList.remove("active");
+    btn.title = "";
+    statusEl.textContent = "";
+  }
+}
+
+async function loadActivationStats() {
+  const s = await api("/api/activation-logs/stats");
+  document.getElementById("activation-stats").textContent =
+    `今週 ${s.week_count}件 / 今月 ${s.month_count}件 / 累計 ${s.total_count}件`;
+}
+
+async function loadActivationList() {
+  const logs = await api("/api/activation-logs?limit=30");
+  const list = document.getElementById("activation-list");
+  list.innerHTML = "";
+  if (logs.length === 0) {
+    list.innerHTML = "<li>記録がありません</li>";
+    return;
+  }
+  logs.forEach((l) => {
+    const li = document.createElement("li");
+    const returnedPart = l.returned_at ? `→ ${formatLoggedAt(l.returned_at)}` : "進行中";
+    const noteMark = l.note ? `<span class="meta">${escapeHtml(l.note)}</span>` : "";
+    li.innerHTML = `
+      <span class="log-info">
+        <span>${formatLoggedAt(l.triggered_at)} ${returnedPart}</span>
+        ${noteMark}
+      </span>
+      <button class="delete-btn" title="削除">×</button>
+    `;
+    li.querySelector(".delete-btn").addEventListener("click", async () => {
+      await api(`/api/activation-logs/${l.id}`, { method: "DELETE" });
+      loadActivationList();
+      loadActivationActive();
+      loadActivationStats();
+      loadCalendar();
+    });
+    list.appendChild(li);
+  });
+}
+
+function refreshActivation() {
+  loadActivationActive();
+  loadActivationList();
+  loadActivationStats();
+  loadCalendar();
+}
+
+const activationPanel = document.getElementById("activation-panel");
+const activationBackdrop = document.getElementById("activation-backdrop");
+
+function openActivationPanel() {
+  activationPanel.classList.remove("hidden");
+  activationBackdrop.classList.remove("hidden");
+  document.getElementById("activation-time-preview").textContent = `記録時刻: ${nowHHMM()}`;
+  document.getElementById("activation-note").value = "";
+  document.getElementById("activation-note").focus();
+}
+
+function closeActivationPanel() {
+  activationPanel.classList.add("hidden");
+  activationBackdrop.classList.add("hidden");
+}
+
+document.getElementById("activation-close").addEventListener("click", closeActivationPanel);
+activationBackdrop.addEventListener("click", closeActivationPanel);
+
+document.getElementById("activation-btn").addEventListener("click", async () => {
+  if (activationActiveLog) {
+    await api(`/api/activation-logs/${activationActiveLog.id}/return`, {
+      method: "PUT",
+      body: JSON.stringify({ returned_at: nowLocalTimestamp() }),
+    });
+    refreshActivation();
+  } else {
+    openActivationPanel();
+  }
+});
+
+document.getElementById("activation-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const note = document.getElementById("activation-note").value.trim() || null;
+  await api("/api/activation-logs", {
+    method: "POST",
+    body: JSON.stringify({ triggered_at: nowLocalTimestamp(), note }),
+  });
+  closeActivationPanel();
+  refreshActivation();
+});
+
+document.getElementById("activation-export-btn").addEventListener("click", async () => {
+  const since = `${addDaysToDate(todayStr(), -6)} 00:00:00`;
+  const { text, count } = await api(`/api/activation-logs/export?since=${encodeURIComponent(since)}`);
+  const textarea = document.getElementById("activation-export-text");
+  textarea.value = count ? text : "直近7日分の記録はありません";
+  textarea.classList.remove("hidden");
+  document.getElementById("activation-copy-btn").classList.toggle("hidden", count === 0);
+});
+
+document.getElementById("activation-copy-btn").addEventListener("click", async () => {
+  const textarea = document.getElementById("activation-export-text");
+  const copyBtn = document.getElementById("activation-copy-btn");
+  try {
+    await navigator.clipboard.writeText(textarea.value);
+    copyBtn.textContent = "コピーしました";
+  } catch {
+    textarea.select();
+    copyBtn.textContent = "手動でコピーしてください";
+  }
+  setTimeout(() => { copyBtn.textContent = "コピー"; }, 1500);
+});
+
 // ---------- calendar (events) ----------
 
 function populateEventCategorySelect(cats) {
@@ -1206,6 +1402,8 @@ let calWeekStart = null; // ISO date (Monday), used when calViewMode === "week"
 let selectedCalDate = null;
 let calEventsCache = [];
 let calTodosCache = [];
+let calStudyDaysCache = new Set();
+let calActivationDaysCache = new Set();
 const CAL_HOUR_HEIGHT = 52; // px per hour in the week time grid
 
 function timeToMinutes(t) {
@@ -1250,7 +1448,7 @@ async function loadCalendar() {
       `${startD.getFullYear()}-${startD.getMonth() + 1}`,
       `${endD.getFullYear()}-${endD.getMonth() + 1}`,
     ]);
-    const [eventLists, todos] = await Promise.all([
+    const [eventLists, todos, studyDayLists, activationDayLists] = await Promise.all([
       Promise.all(
         [...monthKeys].map((key) => {
           const [y, m] = key.split("-").map(Number);
@@ -1258,17 +1456,35 @@ async function loadCalendar() {
         })
       ),
       api("/api/todos"),
+      Promise.all(
+        [...monthKeys].map((key) => {
+          const [y, m] = key.split("-").map(Number);
+          return api(`/api/study-logs/days?year=${y}&month=${m}`);
+        })
+      ),
+      Promise.all(
+        [...monthKeys].map((key) => {
+          const [y, m] = key.split("-").map(Number);
+          return api(`/api/activation-logs/days?year=${y}&month=${m}`);
+        })
+      ),
     ]);
     calEventsCache = eventLists.flat();
     calTodosCache = todos.filter((t) => t.due_date);
+    calStudyDaysCache = new Set(studyDayLists.flat());
+    calActivationDaysCache = new Set(activationDayLists.flat());
   } else {
     document.getElementById("cal-month-label").textContent = `${calYear}年${calMonth}月`;
-    const [events, todos] = await Promise.all([
+    const [events, todos, studyDays, activationDays] = await Promise.all([
       api(`/api/events?year=${calYear}&month=${calMonth}`),
       api("/api/todos"),
+      api(`/api/study-logs/days?year=${calYear}&month=${calMonth}`),
+      api(`/api/activation-logs/days?year=${calYear}&month=${calMonth}`),
     ]);
     calEventsCache = events;
     calTodosCache = todos.filter((t) => t.due_date);
+    calStudyDaysCache = new Set(studyDays);
+    calActivationDaysCache = new Set(activationDays);
   }
 
   const isWeek = calViewMode === "week";
@@ -1317,6 +1533,8 @@ function renderCalGrid() {
         .map((e) => `<span class="cal-dot" style="background:${colorFor(e.category || "")}"></span>`)
         .join("");
       const todoMark = dayTodos.length ? `<span class="cal-todo-dot"></span>` : "";
+      const studyMark = calStudyDaysCache.has(c.date) ? `<span class="cal-log-dot"></span>` : "";
+      const activationMark = calActivationDaysCache.has(c.date) ? `<span class="cal-activation-dot"></span>` : "";
       const classes = ["cal-day"];
       const weekdayCol = i % 7;
       if (weekdayCol === 5) classes.push("sat");
@@ -1326,7 +1544,7 @@ function renderCalGrid() {
       return `
         <div class="${classes.join(" ")}" data-date="${c.date}">
           <span class="cal-day-num">${c.day}</span>
-          <div class="cal-day-marks">${dots}${todoMark}</div>
+          <div class="cal-day-marks">${dots}${todoMark}${studyMark}${activationMark}</div>
         </div>
       `;
     })
@@ -1881,6 +2099,9 @@ updatePushStatus();
   loadGoalProgress();
   loadCountdown();
   loadGoals();
+  loadActivationActive();
+  loadActivationList();
+  loadActivationStats();
   loadCalendar();
 })();
 
