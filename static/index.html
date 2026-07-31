@@ -188,10 +188,20 @@
         <span id="cal-month-label"></span>
         <button type="button" id="cal-next" class="icon-btn" aria-label="次へ">›</button>
       </div>
-      <div class="cal-weekday-row">
+      <div class="cal-weekday-row" id="cal-weekday-row">
         <span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span class="sat">Sat</span><span class="sun">Sun</span>
       </div>
       <div id="cal-grid" class="cal-grid"></div>
+
+      <div id="cal-week-view" class="cal-week-view hidden">
+        <div class="cal-week-header" id="cal-week-header"></div>
+        <div class="cal-week-scroll" id="cal-week-scroll">
+          <div class="cal-week-body" id="cal-week-body">
+            <div class="cal-time-axis" id="cal-time-axis"></div>
+            <div class="cal-week-columns" id="cal-week-columns"></div>
+          </div>
+        </div>
+      </div>
     </div>
 
     <h3 id="cal-detail-title">日付を選んでください</h3>

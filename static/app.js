@@ -1204,6 +1204,12 @@ let calWeekStart = null; // ISO date (Monday), used when calViewMode === "week"
 let selectedCalDate = null;
 let calEventsCache = [];
 let calTodosCache = [];
+const CAL_HOUR_HEIGHT = 52; // px per hour in the week time grid
+
+function timeToMinutes(t) {
+  const [h, m] = t.split(":").map(Number);
+  return h * 60 + m;
+}
 
 function pad2(n) {
   return String(n).padStart(2, "0");
@@ -1262,35 +1268,37 @@ async function loadCalendar() {
     calEventsCache = events;
     calTodosCache = todos.filter((t) => t.due_date);
   }
-  renderCalGrid();
+
+  const isWeek = calViewMode === "week";
+  document.getElementById("cal-weekday-row").classList.toggle("hidden", isWeek);
+  document.getElementById("cal-grid").classList.toggle("hidden", isWeek);
+  document.getElementById("cal-week-view").classList.toggle("hidden", !isWeek);
+
+  if (isWeek) {
+    renderWeekTimeGrid();
+  } else {
+    renderCalGrid();
+  }
   renderCalDayDetail();
 }
 
 function renderCalGrid() {
   const grid = document.getElementById("cal-grid");
-  let cells;
-  if (calViewMode === "week") {
-    cells = Array.from({ length: 7 }, (_, i) => {
-      const d = addDaysToDate(calWeekStart, i);
-      return { day: Number(d.slice(8, 10)), otherMonth: false, date: d };
-    });
-  } else {
-    const firstOfMonth = new Date(calYear, calMonth - 1, 1);
-    const firstWeekday = (firstOfMonth.getDay() + 6) % 7; // 0 = Monday
-    const totalDays = daysInMonth(calYear, calMonth);
-    const prevMonthDays = daysInMonth(calMonth === 1 ? calYear - 1 : calYear, calMonth === 1 ? 12 : calMonth - 1);
+  const firstOfMonth = new Date(calYear, calMonth - 1, 1);
+  const firstWeekday = (firstOfMonth.getDay() + 6) % 7; // 0 = Monday
+  const totalDays = daysInMonth(calYear, calMonth);
+  const prevMonthDays = daysInMonth(calMonth === 1 ? calYear - 1 : calYear, calMonth === 1 ? 12 : calMonth - 1);
 
-    cells = [];
-    for (let i = firstWeekday - 1; i >= 0; i--) {
-      cells.push({ day: prevMonthDays - i, otherMonth: true, date: null });
-    }
-    for (let d = 1; d <= totalDays; d++) {
-      cells.push({ day: d, otherMonth: false, date: isoDate(calYear, calMonth, d) });
-    }
-    let nextDay = 1;
-    while (cells.length % 7 !== 0) {
-      cells.push({ day: nextDay++, otherMonth: true, date: null });
-    }
+  const cells = [];
+  for (let i = firstWeekday - 1; i >= 0; i--) {
+    cells.push({ day: prevMonthDays - i, otherMonth: true, date: null });
+  }
+  for (let d = 1; d <= totalDays; d++) {
+    cells.push({ day: d, otherMonth: false, date: isoDate(calYear, calMonth, d) });
+  }
+  let nextDay = 1;
+  while (cells.length % 7 !== 0) {
+    cells.push({ day: nextDay++, otherMonth: true, date: null });
   }
 
   const today = todayStr();
@@ -1329,6 +1337,124 @@ function renderCalGrid() {
       renderCalDayDetail();
     });
   });
+}
+
+function layoutDayEvents(events) {
+  const sorted = [...events].sort((a, b) => timeToMinutes(a.start_time) - timeToMinutes(b.start_time));
+  const cols = []; // end time (minutes) of the last event placed in each column
+  const placed = sorted.map((e) => {
+    const start = timeToMinutes(e.start_time);
+    const end = Math.max(timeToMinutes(e.end_time), start + 15);
+    let col = cols.findIndex((endMin) => endMin <= start);
+    if (col === -1) {
+      col = cols.length;
+      cols.push(end);
+    } else {
+      cols[col] = end;
+    }
+    return { ev: e, start, end, col };
+  });
+  const totalCols = cols.length || 1;
+  return placed.map((p) => ({ ...p, totalCols }));
+}
+
+function renderWeekTimeGrid() {
+  const header = document.getElementById("cal-week-header");
+  const axis = document.getElementById("cal-time-axis");
+  const columns = document.getElementById("cal-week-columns");
+  const body = document.getElementById("cal-week-body");
+
+  body.style.setProperty("--cal-hour-height", `${CAL_HOUR_HEIGHT}px`);
+  const totalHeight = 24 * CAL_HOUR_HEIGHT;
+  axis.style.height = `${totalHeight}px`;
+  columns.style.height = `${totalHeight}px`;
+
+  const today = todayStr();
+  const weekdayNames = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+  const days = Array.from({ length: 7 }, (_, i) => addDaysToDate(calWeekStart, i));
+
+  header.innerHTML =
+    `<div class="cal-week-header-spacer"></div>` +
+    days
+      .map((d, i) => {
+        const classes = ["cal-week-daycol"];
+        if (i === 5) classes.push("sat");
+        if (i === 6) classes.push("sun");
+        if (d === today) classes.push("today");
+        if (d === selectedCalDate) classes.push("selected");
+        return `
+          <div class="${classes.join(" ")}" data-date="${d}">
+            <span class="cal-week-day-name">${weekdayNames[i]}</span>
+            <span class="cal-week-day-num">${Number(d.slice(8, 10))}</span>
+          </div>
+        `;
+      })
+      .join("");
+
+  header.querySelectorAll(".cal-week-daycol").forEach((el) => {
+    el.addEventListener("click", () => {
+      selectedCalDate = el.dataset.date;
+      renderWeekTimeGrid();
+      renderCalDayDetail();
+    });
+  });
+
+  axis.innerHTML = Array.from({ length: 24 }, (_, h) => `<span class="cal-time-slot" style="top:${h * CAL_HOUR_HEIGHT}px">${pad2(h)}:00</span>`).join("");
+
+  columns.innerHTML = days
+    .map((d, i) => {
+      const classes = ["cal-week-col"];
+      if (d === today) classes.push("today");
+      const dayEvents = calEventsCache.filter((e) => e.occurrence_date === d);
+      const blocks = layoutDayEvents(dayEvents)
+        .map(({ ev, start, end, col, totalCols }) => {
+          const top = (start / 60) * CAL_HOUR_HEIGHT;
+          const height = Math.max(((end - start) / 60) * CAL_HOUR_HEIGHT - 2, 16);
+          const width = 100 / totalCols;
+          const left = col * width;
+          const color = colorFor(ev.category || "");
+          return `
+            <div class="cal-event-block" data-id="${ev.id}"
+                 style="top:${top}px;height:${height}px;left:calc(${left}% + 2px);width:calc(${width}% - 4px);background:${color}3d;border-left-color:${color}">
+              <span class="cal-event-block-title">${escapeHtml(ev.title)}</span>
+              <span class="cal-event-block-time">${ev.start_time}〜${ev.end_time}</span>
+            </div>
+          `;
+        })
+        .join("");
+      return `<div class="${classes.join(" ")}" data-date="${d}">${blocks}</div>`;
+    })
+    .join("");
+
+  columns.querySelectorAll(".cal-event-block").forEach((el) => {
+    el.addEventListener("click", () => {
+      const ev = calEventsCache.find((e) => String(e.id) === el.dataset.id);
+      if (ev) openEventDetail(ev);
+    });
+  });
+
+  const existingNowLine = columns.querySelector(".cal-now-line");
+  if (existingNowLine) existingNowLine.remove();
+  if (days.includes(today)) {
+    const now = new Date();
+    const nowTop = ((now.getHours() * 60 + now.getMinutes()) / 60) * CAL_HOUR_HEIGHT;
+    const nowLine = document.createElement("div");
+    nowLine.className = "cal-now-line";
+    nowLine.style.top = `${nowTop}px`;
+    columns.appendChild(nowLine);
+  }
+
+  const scrollBox = document.getElementById("cal-week-scroll");
+  let scrollToMinutes;
+  if (days.includes(today)) {
+    scrollToMinutes = new Date().getHours() * 60;
+  } else if (calEventsCache.length) {
+    const earliest = Math.min(...calEventsCache.map((e) => timeToMinutes(e.start_time)));
+    scrollToMinutes = earliest;
+  } else {
+    scrollToMinutes = 8 * 60;
+  }
+  scrollBox.scrollTop = Math.max((scrollToMinutes / 60) * CAL_HOUR_HEIGHT - 80, 0);
 }
 
 function renderCalDayDetail() {
@@ -1398,7 +1524,7 @@ function renderCalDayDetail() {
   });
 }
 
-document.getElementById("cal-prev").addEventListener("click", () => {
+function calGoPrev() {
   if (calViewMode === "week") {
     calWeekStart = addDaysToDate(calWeekStart, -7);
   } else {
@@ -1410,9 +1536,9 @@ document.getElementById("cal-prev").addEventListener("click", () => {
   }
   selectedCalDate = null;
   loadCalendar();
-});
+}
 
-document.getElementById("cal-next").addEventListener("click", () => {
+function calGoNext() {
   if (calViewMode === "week") {
     calWeekStart = addDaysToDate(calWeekStart, 7);
   } else {
@@ -1424,7 +1550,48 @@ document.getElementById("cal-next").addEventListener("click", () => {
   }
   selectedCalDate = null;
   loadCalendar();
-});
+}
+
+document.getElementById("cal-prev").addEventListener("click", calGoPrev);
+document.getElementById("cal-next").addEventListener("click", calGoNext);
+
+// スワイプでの月/週送り
+(() => {
+  const board = document.querySelector(".cal-board");
+  let touchStartX = 0;
+  let touchStartY = 0;
+  let swiping = false;
+
+  board.addEventListener(
+    "touchstart",
+    (e) => {
+      if (e.touches.length !== 1) return;
+      touchStartX = e.touches[0].clientX;
+      touchStartY = e.touches[0].clientY;
+      swiping = true;
+    },
+    { passive: true }
+  );
+
+  board.addEventListener(
+    "touchend",
+    (e) => {
+      if (!swiping) return;
+      swiping = false;
+      const touch = e.changedTouches[0];
+      const dx = touch.clientX - touchStartX;
+      const dy = touch.clientY - touchStartY;
+      const SWIPE_THRESHOLD = 40;
+      if (Math.abs(dx) < SWIPE_THRESHOLD || Math.abs(dx) < Math.abs(dy) * 1.5) return;
+      if (dx < 0) {
+        calGoNext();
+      } else {
+        calGoPrev();
+      }
+    },
+    { passive: true }
+  );
+})();
 
 document.querySelectorAll("#cal-view-toggle .cal-view-btn").forEach((btn) => {
   btn.addEventListener("click", () => {
