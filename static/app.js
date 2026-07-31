@@ -1199,6 +1199,8 @@ function populateEventCategorySelect(cats) {
 }
 
 let calYear, calMonth; // calMonth is 1-based
+let calViewMode = "month"; // "month" | "week"
+let calWeekStart = null; // ISO date (Monday), used when calViewMode === "week"
 let selectedCalDate = null;
 let calEventsCache = [];
 let calTodosCache = [];
@@ -1215,35 +1217,80 @@ function daysInMonth(y, m) {
   return new Date(y, m, 0).getDate(); // m (1-based) as monthIndex gives last day of month m
 }
 
+function addDaysToDate(dateStr, delta) {
+  const d = new Date(dateStr + "T00:00:00");
+  d.setDate(d.getDate() + delta);
+  return formatLocalDate(d);
+}
+
+function mondayOf(dateStr) {
+  const d = new Date(dateStr + "T00:00:00");
+  const dow = (d.getDay() + 6) % 7; // 0 = Monday
+  return addDaysToDate(dateStr, -dow);
+}
+
 async function loadCalendar() {
-  document.getElementById("cal-month-label").textContent = `${calYear}年${calMonth}月`;
-  const [events, todos] = await Promise.all([
-    api(`/api/events?year=${calYear}&month=${calMonth}`),
-    api("/api/todos"),
-  ]);
-  calEventsCache = events;
-  calTodosCache = todos.filter((t) => t.due_date);
+  if (calViewMode === "week") {
+    const weekEnd = addDaysToDate(calWeekStart, 6);
+    const startD = new Date(calWeekStart + "T00:00:00");
+    const endD = new Date(weekEnd + "T00:00:00");
+    document.getElementById("cal-month-label").textContent =
+      startD.getMonth() === endD.getMonth()
+        ? `${startD.getFullYear()}年${startD.getMonth() + 1}月${startD.getDate()}日〜${endD.getDate()}日`
+        : `${startD.getFullYear()}年${startD.getMonth() + 1}月${startD.getDate()}日〜${endD.getMonth() + 1}月${endD.getDate()}日`;
+    const monthKeys = new Set([
+      `${startD.getFullYear()}-${startD.getMonth() + 1}`,
+      `${endD.getFullYear()}-${endD.getMonth() + 1}`,
+    ]);
+    const [eventLists, todos] = await Promise.all([
+      Promise.all(
+        [...monthKeys].map((key) => {
+          const [y, m] = key.split("-").map(Number);
+          return api(`/api/events?year=${y}&month=${m}`);
+        })
+      ),
+      api("/api/todos"),
+    ]);
+    calEventsCache = eventLists.flat();
+    calTodosCache = todos.filter((t) => t.due_date);
+  } else {
+    document.getElementById("cal-month-label").textContent = `${calYear}年${calMonth}月`;
+    const [events, todos] = await Promise.all([
+      api(`/api/events?year=${calYear}&month=${calMonth}`),
+      api("/api/todos"),
+    ]);
+    calEventsCache = events;
+    calTodosCache = todos.filter((t) => t.due_date);
+  }
   renderCalGrid();
   renderCalDayDetail();
 }
 
 function renderCalGrid() {
   const grid = document.getElementById("cal-grid");
-  const firstOfMonth = new Date(calYear, calMonth - 1, 1);
-  const firstWeekday = (firstOfMonth.getDay() + 6) % 7; // 0 = Monday
-  const totalDays = daysInMonth(calYear, calMonth);
-  const prevMonthDays = daysInMonth(calMonth === 1 ? calYear - 1 : calYear, calMonth === 1 ? 12 : calMonth - 1);
+  let cells;
+  if (calViewMode === "week") {
+    cells = Array.from({ length: 7 }, (_, i) => {
+      const d = addDaysToDate(calWeekStart, i);
+      return { day: Number(d.slice(8, 10)), otherMonth: false, date: d };
+    });
+  } else {
+    const firstOfMonth = new Date(calYear, calMonth - 1, 1);
+    const firstWeekday = (firstOfMonth.getDay() + 6) % 7; // 0 = Monday
+    const totalDays = daysInMonth(calYear, calMonth);
+    const prevMonthDays = daysInMonth(calMonth === 1 ? calYear - 1 : calYear, calMonth === 1 ? 12 : calMonth - 1);
 
-  const cells = [];
-  for (let i = firstWeekday - 1; i >= 0; i--) {
-    cells.push({ day: prevMonthDays - i, otherMonth: true, date: null });
-  }
-  for (let d = 1; d <= totalDays; d++) {
-    cells.push({ day: d, otherMonth: false, date: isoDate(calYear, calMonth, d) });
-  }
-  let nextDay = 1;
-  while (cells.length % 7 !== 0) {
-    cells.push({ day: nextDay++, otherMonth: true, date: null });
+    cells = [];
+    for (let i = firstWeekday - 1; i >= 0; i--) {
+      cells.push({ day: prevMonthDays - i, otherMonth: true, date: null });
+    }
+    for (let d = 1; d <= totalDays; d++) {
+      cells.push({ day: d, otherMonth: false, date: isoDate(calYear, calMonth, d) });
+    }
+    let nextDay = 1;
+    while (cells.length % 7 !== 0) {
+      cells.push({ day: nextDay++, otherMonth: true, date: null });
+    }
   }
 
   const today = todayStr();
@@ -1352,23 +1399,48 @@ function renderCalDayDetail() {
 }
 
 document.getElementById("cal-prev").addEventListener("click", () => {
-  calMonth -= 1;
-  if (calMonth < 1) {
-    calMonth = 12;
-    calYear -= 1;
+  if (calViewMode === "week") {
+    calWeekStart = addDaysToDate(calWeekStart, -7);
+  } else {
+    calMonth -= 1;
+    if (calMonth < 1) {
+      calMonth = 12;
+      calYear -= 1;
+    }
   }
   selectedCalDate = null;
   loadCalendar();
 });
 
 document.getElementById("cal-next").addEventListener("click", () => {
-  calMonth += 1;
-  if (calMonth > 12) {
-    calMonth = 1;
-    calYear += 1;
+  if (calViewMode === "week") {
+    calWeekStart = addDaysToDate(calWeekStart, 7);
+  } else {
+    calMonth += 1;
+    if (calMonth > 12) {
+      calMonth = 1;
+      calYear += 1;
+    }
   }
   selectedCalDate = null;
   loadCalendar();
+});
+
+document.querySelectorAll("#cal-view-toggle .cal-view-btn").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    const mode = btn.dataset.view;
+    if (mode === calViewMode) return;
+    calViewMode = mode;
+    document.querySelectorAll("#cal-view-toggle .cal-view-btn").forEach((b) => b.classList.toggle("active", b === btn));
+    if (calViewMode === "week") {
+      calWeekStart = mondayOf(selectedCalDate || todayStr());
+    } else {
+      const anchor = new Date(calWeekStart + "T00:00:00");
+      calYear = anchor.getFullYear();
+      calMonth = anchor.getMonth() + 1;
+    }
+    loadCalendar();
+  });
 });
 
 // ---------- event add form ----------

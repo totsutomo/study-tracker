@@ -179,13 +179,17 @@
   <section id="tab-calendar" class="tab-panel">
     <h2>予定</h2>
     <div class="cal-board">
+      <div class="cal-view-toggle" id="cal-view-toggle">
+        <button type="button" class="cal-view-btn active" data-view="month">月</button>
+        <button type="button" class="cal-view-btn" data-view="week">週</button>
+      </div>
       <div class="month-nav">
-        <button type="button" id="cal-prev" class="icon-btn" aria-label="前の月">‹</button>
+        <button type="button" id="cal-prev" class="icon-btn" aria-label="前へ">‹</button>
         <span id="cal-month-label"></span>
-        <button type="button" id="cal-next" class="icon-btn" aria-label="次の月">›</button>
+        <button type="button" id="cal-next" class="icon-btn" aria-label="次へ">›</button>
       </div>
       <div class="cal-weekday-row">
-        <span>月</span><span>火</span><span>水</span><span>木</span><span>金</span><span class="sat">土</span><span class="sun">日</span>
+        <span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span class="sat">Sat</span><span class="sun">Sun</span>
       </div>
       <div id="cal-grid" class="cal-grid"></div>
     </div>
