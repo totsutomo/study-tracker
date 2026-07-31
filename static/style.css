@@ -77,6 +77,10 @@ h3 { font-size: 12px; color: var(--text-muted); margin: 20px 0 8px; text-transfo
   gap: 8px;
 }
 
+.list li.clickable {
+  cursor: pointer;
+}
+
 .list li.done {
   opacity: 0.45;
   text-decoration: line-through;

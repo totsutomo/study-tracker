@@ -40,7 +40,8 @@ CREATE TABLE IF NOT EXISTS events (
     recurrence_until TEXT,
     created_at TEXT DEFAULT (datetime('now')),
     notify_offset_minutes INTEGER,
-    last_notified_occurrence TEXT
+    last_notified_occurrence TEXT,
+    note TEXT
 );
 
 CREATE TABLE IF NOT EXISTS push_subscriptions (
@@ -111,6 +112,8 @@ def _migrate(conn):
         conn.execute("ALTER TABLE todos ADD COLUMN notify_offset_minutes INTEGER")
     if "notified_at" not in cols:
         conn.execute("ALTER TABLE todos ADD COLUMN notified_at TEXT")
+    if "note" not in cols:
+        conn.execute("ALTER TABLE todos ADD COLUMN note TEXT")
     conn.execute("UPDATE todos SET recurrence = 'mon,tue,wed,thu,fri,sat,sun' WHERE recurrence = 'daily'")
     conn.execute("UPDATE todos SET recurrence = 'mon,tue,wed,thu,fri' WHERE recurrence = 'weekdays'")
 
@@ -119,6 +122,8 @@ def _migrate(conn):
         conn.execute("ALTER TABLE events ADD COLUMN notify_offset_minutes INTEGER")
     if "last_notified_occurrence" not in event_cols:
         conn.execute("ALTER TABLE events ADD COLUMN last_notified_occurrence TEXT")
+    if "note" not in event_cols:
+        conn.execute("ALTER TABLE events ADD COLUMN note TEXT")
     conn.commit()
 
 

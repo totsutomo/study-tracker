@@ -31,6 +31,11 @@ class TodoCreate(BaseModel):
     due_time: str | None = None  # "HH:MM", optional
     recurrence: str | None = None  # None, or comma-separated weekday codes e.g. "mon,wed,fri"
     notify_offset_minutes: int | None = None  # None = no notification, 0 = at due time, N = N minutes before
+    note: str | None = None
+
+
+class TodoNoteUpdate(BaseModel):
+    note: str | None = None
 
 
 class CategoryCreate(BaseModel):
@@ -66,6 +71,11 @@ class EventCreate(BaseModel):
     recurrence: str | None = None  # None, or comma-separated weekday codes e.g. "mon,wed,fri"
     recurrence_until: str | None = None  # "YYYY-MM-DD", only meaningful when recurrence is set
     notify_offset_minutes: int | None = None  # None = no notification, 0 = at start time, N = N minutes before
+    note: str | None = None
+
+
+class EventNoteUpdate(BaseModel):
+    note: str | None = None
 
 
 class PushSubscribeIn(BaseModel):
@@ -129,10 +139,10 @@ def todo_stats():
 def create_todo(todo: TodoCreate):
     conn = get_connection()
     cur = conn.execute(
-        "INSERT INTO todos (title, category, priority, due_date, due_time, recurrence, notify_offset_minutes) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO todos (title, category, priority, due_date, due_time, recurrence, notify_offset_minutes, note) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         (todo.title, todo.category, todo.priority, todo.due_date, todo.due_time, todo.recurrence,
-         todo.notify_offset_minutes if todo.due_time else None),
+         todo.notify_offset_minutes if todo.due_time else None, todo.note),
     )
     conn.commit()
     new_id = cur.lastrowid
@@ -140,18 +150,31 @@ def create_todo(todo: TodoCreate):
     return {"id": new_id}
 
 
+@app.put("/api/todos/{todo_id}/note")
+def update_todo_note(todo_id: int, payload: TodoNoteUpdate):
+    conn = get_connection()
+    row = conn.execute("SELECT id FROM todos WHERE id = ?", (todo_id,)).fetchone()
+    if row is None:
+        conn.close()
+        raise HTTPException(status_code=404, detail="todo not found")
+    conn.execute("UPDATE todos SET note = ? WHERE id = ?", (payload.note, todo_id))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
 @app.post("/api/todos/{todo_id}/toggle")
 def toggle_todo(todo_id: int):
     conn = get_connection()
     row = conn.execute(
-        "SELECT done, title, category, priority, due_date, due_time, recurrence, notify_offset_minutes "
+        "SELECT done, title, category, priority, due_date, due_time, recurrence, notify_offset_minutes, note "
         "FROM todos WHERE id = ?",
         (todo_id,),
     ).fetchone()
     if row is None:
         conn.close()
         raise HTTPException(status_code=404, detail="todo not found")
-    done, title, category, priority, due_date, due_time, recurrence, notify_offset_minutes = row
+    done, title, category, priority, due_date, due_time, recurrence, notify_offset_minutes, note = row
     new_done = 0 if done else 1
     completed_at = "datetime('now')" if new_done else "NULL"
     conn.execute(
@@ -164,9 +187,9 @@ def toggle_todo(todo_id: int):
         next_due = next_occurrence(base, recurrence)
         if next_due is not None:
             conn.execute(
-                "INSERT INTO todos (title, category, priority, due_date, due_time, recurrence, notify_offset_minutes) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (title, category, priority, next_due.isoformat(), due_time, recurrence, notify_offset_minutes),
+                "INSERT INTO todos (title, category, priority, due_date, due_time, recurrence, notify_offset_minutes, note) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (title, category, priority, next_due.isoformat(), due_time, recurrence, notify_offset_minutes, note),
             )
     conn.commit()
     conn.close()
@@ -486,14 +509,27 @@ def create_event(event: EventCreate):
     conn = get_connection()
     cur = conn.execute(
         "INSERT INTO events (title, category, date, start_time, end_time, recurrence, recurrence_until, "
-        "notify_offset_minutes) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        "notify_offset_minutes, note) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (event.title, event.category, event.date, event.start_time, event.end_time,
-         event.recurrence, event.recurrence_until, event.notify_offset_minutes),
+         event.recurrence, event.recurrence_until, event.notify_offset_minutes, event.note),
     )
     conn.commit()
     new_id = cur.lastrowid
     conn.close()
     return {"id": new_id}
+
+
+@app.put("/api/events/{event_id}/note")
+def update_event_note(event_id: int, payload: EventNoteUpdate):
+    conn = get_connection()
+    row = conn.execute("SELECT id FROM events WHERE id = ?", (event_id,)).fetchone()
+    if row is None:
+        conn.close()
+        raise HTTPException(status_code=404, detail="event not found")
+    conn.execute("UPDATE events SET note = ? WHERE id = ?", (payload.note, event_id))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
 
 
 @app.delete("/api/events/{event_id}")

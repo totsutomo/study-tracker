@@ -90,8 +90,21 @@
           <button type="button" class="weekday-btn" data-day="fri">金</button>
           <button type="button" class="weekday-btn" data-day="sat">土</button>
         </div>
+        <textarea id="todo-note" rows="3" placeholder="メモ(任意)"></textarea>
         <button type="submit">+ 追加</button>
       </form>
+    </div>
+
+    <div id="todo-detail-backdrop" class="backdrop hidden"></div>
+    <div id="todo-detail-panel" class="add-panel hidden">
+      <div class="panel-header">
+        <h3 id="todo-detail-title"></h3>
+        <button type="button" id="todo-detail-close" class="panel-close" aria-label="閉じる">×</button>
+      </div>
+      <p class="meta" id="todo-detail-meta"></p>
+      <textarea id="todo-detail-note" rows="4" placeholder="メモ(任意)"></textarea>
+      <button type="button" id="todo-detail-save">メモを保存</button>
+      <span class="meta" id="todo-detail-status"></span>
     </div>
   </section>
 
@@ -222,8 +235,21 @@
           <button type="button" class="weekday-btn" data-day="sun">日</button>
         </div>
         <input type="date" id="event-recurrence-until" placeholder="繰り返し終了日(任意)">
+        <textarea id="event-note" rows="3" placeholder="メモ(任意)"></textarea>
         <button type="submit">+ 追加</button>
       </form>
+    </div>
+
+    <div id="event-detail-backdrop" class="backdrop hidden"></div>
+    <div id="event-detail-panel" class="add-panel hidden">
+      <div class="panel-header">
+        <h3 id="event-detail-title"></h3>
+        <button type="button" id="event-detail-close" class="panel-close" aria-label="閉じる">×</button>
+      </div>
+      <p class="meta" id="event-detail-meta"></p>
+      <textarea id="event-detail-note" rows="4" placeholder="メモ(任意)"></textarea>
+      <button type="button" id="event-detail-save">メモを保存</button>
+      <span class="meta" id="event-detail-status"></span>
     </div>
   </section>
 

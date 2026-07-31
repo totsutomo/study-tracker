@@ -83,26 +83,34 @@ function renderTodoItem(t, list) {
   const dueLabel = t.due_date ? `📅 ${t.due_date}${t.due_time ? " " + t.due_time : ""}` : "";
   const recurLabel = recurrenceLabel(t.recurrence);
   const priorityLabel = t.priority && t.priority !== "medium" ? `[${PRIORITY_LABEL[t.priority] || t.priority}] ` : "";
+  const noteMark = t.note ? " 📝" : "";
   li.innerHTML = `
     <input type="checkbox" ${t.done ? "checked" : ""}>
-    <span>${priorityLabel}${escapeHtml(t.title)}</span>
+    <span>${priorityLabel}${escapeHtml(t.title)}${noteMark}</span>
     <span class="meta">${t.category || ""} ${dueLabel}${recurLabel}</span>
     ${!t.done && t.category ? `<button class="play-btn" title="記録開始">▶</button>` : ""}
     <button class="delete-btn" title="削除">×</button>
   `;
-  li.querySelector("input").addEventListener("click", async () => {
+  li.querySelector("input").addEventListener("click", async (e) => {
+    e.stopPropagation();
     await api(`/api/todos/${t.id}/toggle`, { method: "POST" });
     loadTodos();
     loadTodoStats();
   });
   const playBtn = li.querySelector(".play-btn");
   if (playBtn) {
-    playBtn.addEventListener("click", () => openStartPanel(t.category, t.id));
+    playBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      openStartPanel(t.category, t.id);
+    });
   }
-  li.querySelector(".delete-btn").addEventListener("click", async () => {
+  li.querySelector(".delete-btn").addEventListener("click", async (e) => {
+    e.stopPropagation();
     await api(`/api/todos/${t.id}`, { method: "DELETE" });
     loadTodos();
   });
+  li.classList.add("clickable");
+  li.addEventListener("click", () => openTodoDetail(t));
   list.appendChild(li);
 }
 
@@ -405,10 +413,11 @@ document.getElementById("todo-form").addEventListener("submit", async (e) => {
   const notify_offset_minutes = due_time && notifyVal !== "" ? parseInt(notifyVal, 10) : null;
   const recurrence =
     selectedRecurrenceDays.size > 0 ? WEEKDAY_ORDER.filter((d) => selectedRecurrenceDays.has(d)).join(",") : null;
+  const note = document.getElementById("todo-note").value.trim() || null;
   if (!title) return;
   await api("/api/todos", {
     method: "POST",
-    body: JSON.stringify({ title, category, priority, due_date, due_time, recurrence, notify_offset_minutes }),
+    body: JSON.stringify({ title, category, priority, due_date, due_time, recurrence, notify_offset_minutes, note }),
   });
   document.getElementById("todo-title").value = "";
   document.getElementById("todo-due-date").value = "";
@@ -416,9 +425,47 @@ document.getElementById("todo-form").addEventListener("submit", async (e) => {
   document.getElementById("todo-due-time").style.display = "none";
   document.getElementById("todo-notify").value = "";
   document.getElementById("todo-notify").style.display = "none";
+  document.getElementById("todo-note").value = "";
   document.getElementById("todo-time-toggle").textContent = "+ 時刻を追加";
   setRecurrenceDays([]);
   closeTodoAddPanel();
+  loadTodos();
+});
+
+// ---------- todo detail panel ----------
+
+let currentDetailTodoId = null;
+
+function openTodoDetail(t) {
+  currentDetailTodoId = t.id;
+  document.getElementById("todo-detail-title").textContent = t.title;
+  const dueLabel = t.due_date ? `期限: ${t.due_date}${t.due_time ? " " + t.due_time : ""}` : "期限なし";
+  const priorityLabel = `優先度: ${PRIORITY_LABEL[t.priority] || t.priority}`;
+  const categoryLabel = t.category ? `カテゴリ: ${t.category}` : "";
+  const recurLabel = t.recurrence ? `繰り返し:${recurrenceLabel(t.recurrence)}` : "";
+  document.getElementById("todo-detail-meta").textContent = [priorityLabel, categoryLabel, dueLabel, recurLabel]
+    .filter(Boolean)
+    .join(" / ");
+  document.getElementById("todo-detail-note").value = t.note || "";
+  document.getElementById("todo-detail-status").textContent = "";
+  document.getElementById("todo-detail-panel").classList.remove("hidden");
+  document.getElementById("todo-detail-backdrop").classList.remove("hidden");
+}
+
+function closeTodoDetail() {
+  document.getElementById("todo-detail-panel").classList.add("hidden");
+  document.getElementById("todo-detail-backdrop").classList.add("hidden");
+  currentDetailTodoId = null;
+}
+
+document.getElementById("todo-detail-close").addEventListener("click", closeTodoDetail);
+document.getElementById("todo-detail-backdrop").addEventListener("click", closeTodoDetail);
+
+document.getElementById("todo-detail-save").addEventListener("click", async () => {
+  if (!currentDetailTodoId) return;
+  const note = document.getElementById("todo-detail-note").value.trim() || null;
+  await api(`/api/todos/${currentDetailTodoId}/note`, { method: "PUT", body: JSON.stringify({ note }) });
+  document.getElementById("todo-detail-status").textContent = "保存しました";
   loadTodos();
 });
 
@@ -1242,19 +1289,23 @@ function renderCalDayDetail() {
   }
   dayEvents.forEach((ev) => {
     const li = document.createElement("li");
+    const noteMark = ev.note ? " 📝" : "";
     li.innerHTML = `
       <span class="log-icon" style="background:${colorFor(ev.category || "")}"></span>
       <span class="log-info">
-        <span class="log-subject">${escapeHtml(ev.title)}</span>
+        <span class="log-subject">${escapeHtml(ev.title)}${noteMark}</span>
         <span class="log-time">${ev.start_time}〜${ev.end_time}${ev.recurrence ? " 🔁" : ""}</span>
       </span>
       <button class="delete-btn" title="削除">×</button>
     `;
-    li.querySelector(".delete-btn").addEventListener("click", async () => {
+    li.querySelector(".delete-btn").addEventListener("click", async (e) => {
+      e.stopPropagation();
       if (ev.recurrence && !confirm("繰り返し予定です。この予定シリーズ全体を削除しますか?")) return;
       await api(`/api/events/${ev.id}`, { method: "DELETE" });
       loadCalendar();
     });
+    li.classList.add("clickable");
+    li.addEventListener("click", () => openEventDetail(ev));
     eventList.appendChild(li);
   });
 
@@ -1271,12 +1322,15 @@ function renderCalDayDetail() {
       <span>${escapeHtml(t.title)}</span>
       <span class="meta">${t.due_time || ""}</span>
     `;
-    li.querySelector("input").addEventListener("click", async () => {
+    li.querySelector("input").addEventListener("click", async (e) => {
+      e.stopPropagation();
       await api(`/api/todos/${t.id}/toggle`, { method: "POST" });
       loadTodos();
       loadTodoStats();
       loadCalendar();
     });
+    li.classList.add("clickable");
+    li.addEventListener("click", () => openTodoDetail(t));
     todoList.appendChild(li);
   });
 }
@@ -1363,6 +1417,7 @@ document.getElementById("event-form").addEventListener("submit", async (e) => {
   const recurrenceUntilInput = document.getElementById("event-recurrence-until").value || null;
   const notifyVal = document.getElementById("event-notify").value;
   const notify_offset_minutes = notifyVal !== "" ? parseInt(notifyVal, 10) : null;
+  const note = document.getElementById("event-note").value.trim() || null;
   if (!title || !evDate || !startTime || !endTime) return;
   const recurrence = selectedEventRecurrenceDays.size ? [...selectedEventRecurrenceDays].join(",") : null;
   await api("/api/events", {
@@ -1376,11 +1431,49 @@ document.getElementById("event-form").addEventListener("submit", async (e) => {
       recurrence,
       recurrence_until: recurrence ? recurrenceUntilInput : null,
       notify_offset_minutes,
+      note,
     }),
   });
   e.target.reset();
   setEventRecurrenceDays([]);
   closeEventAddPanel();
+  loadCalendar();
+});
+
+// ---------- event detail panel ----------
+
+let currentDetailEventId = null;
+
+function openEventDetail(ev) {
+  currentDetailEventId = ev.id;
+  document.getElementById("event-detail-title").textContent = ev.title;
+  const dateLabel = `日付: ${ev.occurrence_date || ev.date}`;
+  const timeLabel = `時間: ${ev.start_time}〜${ev.end_time}`;
+  const categoryLabel = ev.category ? `カテゴリ: ${ev.category}` : "";
+  const recurLabel = ev.recurrence ? "繰り返しあり" : "";
+  document.getElementById("event-detail-meta").textContent = [categoryLabel, dateLabel, timeLabel, recurLabel]
+    .filter(Boolean)
+    .join(" / ");
+  document.getElementById("event-detail-note").value = ev.note || "";
+  document.getElementById("event-detail-status").textContent = "";
+  document.getElementById("event-detail-panel").classList.remove("hidden");
+  document.getElementById("event-detail-backdrop").classList.remove("hidden");
+}
+
+function closeEventDetail() {
+  document.getElementById("event-detail-panel").classList.add("hidden");
+  document.getElementById("event-detail-backdrop").classList.add("hidden");
+  currentDetailEventId = null;
+}
+
+document.getElementById("event-detail-close").addEventListener("click", closeEventDetail);
+document.getElementById("event-detail-backdrop").addEventListener("click", closeEventDetail);
+
+document.getElementById("event-detail-save").addEventListener("click", async () => {
+  if (!currentDetailEventId) return;
+  const note = document.getElementById("event-detail-note").value.trim() || null;
+  await api(`/api/events/${currentDetailEventId}/note`, { method: "PUT", body: JSON.stringify({ note }) });
+  document.getElementById("event-detail-status").textContent = "保存しました";
   loadCalendar();
 });
 
