@@ -1249,7 +1249,7 @@ function renderCalGrid() {
   const today = todayStr();
 
   grid.innerHTML = cells
-    .map((c) => {
+    .map((c, i) => {
       if (c.otherMonth) {
         return `<div class="cal-day other-month"><span class="cal-day-num">${c.day}</span></div>`;
       }
@@ -1261,6 +1261,9 @@ function renderCalGrid() {
         .join("");
       const todoMark = dayTodos.length ? `<span class="cal-todo-dot"></span>` : "";
       const classes = ["cal-day"];
+      const weekdayCol = i % 7;
+      if (weekdayCol === 5) classes.push("sat");
+      if (weekdayCol === 6) classes.push("sun");
       if (c.date === today) classes.push("today");
       if (c.date === selectedCalDate) classes.push("selected");
       return `
