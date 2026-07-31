@@ -30,9 +30,15 @@ async function api(path, options = {}, retries = 3) {
   }
 }
 
+function formatLocalDate(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
 function todayStr() {
-  const d = new Date();
-  return d.toISOString().slice(0, 10);
+  return formatLocalDate(new Date());
 }
 
 // ---------- todos ----------
@@ -105,7 +111,7 @@ function todoGroupOf(t) {
   if (t.due_date === today) return "today";
   const weekAhead = new Date();
   weekAhead.setDate(weekAhead.getDate() + 7);
-  if (t.due_date <= weekAhead.toISOString().slice(0, 10)) return "week";
+  if (t.due_date <= formatLocalDate(weekAhead)) return "week";
   return "later";
 }
 
@@ -225,7 +231,7 @@ document.querySelectorAll("[data-quick]").forEach((btn) => {
     const d = new Date();
     if (quick === "tomorrow") d.setDate(d.getDate() + 1);
     if (quick === "nextweek") d.setDate(d.getDate() + 7);
-    dateInput.value = d.toISOString().slice(0, 10);
+    dateInput.value = formatLocalDate(d);
   });
 });
 
@@ -621,25 +627,25 @@ function last14Dates() {
   for (let i = 13; i >= 0; i--) {
     const d = new Date();
     d.setDate(d.getDate() - i);
-    dates.push(d.toISOString().slice(0, 10));
+    dates.push(formatLocalDate(d));
   }
   return dates;
 }
 
-function mondayOf(d) {
+function mondayOfDate(d) {
   const day = (d.getDay() + 6) % 7; // 0 = Monday
   const monday = new Date(d);
   monday.setDate(d.getDate() - day);
-  return monday.toISOString().slice(0, 10);
+  return monday;
 }
 
 function lastNWeekStarts(n) {
-  const currentMonday = new Date(mondayOf(new Date()));
+  const currentMonday = mondayOfDate(new Date());
   const weeks = [];
   for (let i = n - 1; i >= 0; i--) {
     const d = new Date(currentMonday);
     d.setDate(d.getDate() - i * 7);
-    weeks.push(d.toISOString().slice(0, 10));
+    weeks.push(formatLocalDate(d));
   }
   return weeks;
 }
