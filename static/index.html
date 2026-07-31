@@ -230,9 +230,11 @@
 </main>
 
 <div id="focus-overlay" class="focus-overlay hidden">
+  <button type="button" id="focus-minimize-btn" class="focus-minimize" aria-label="ToDoなど他の画面に戻る">‹ 戻る</button>
   <div class="focus-subject">
     <span class="rec-dot"></span>
     <span id="focus-subject-name"></span>
+    <span id="focus-clockonly-badge" class="clockonly-badge hidden">🔒 時計だけモード</span>
   </div>
   <div class="focus-ring-wrap">
     <svg class="focus-ring" viewBox="0 0 120 120">
@@ -245,6 +247,38 @@
     <button type="button" id="focus-pause-btn" class="secondary">一時停止</button>
     <button type="button" id="focus-stop-btn">記録して停止</button>
   </div>
+</div>
+
+<div id="mini-timer-bar" class="mini-timer-bar hidden">
+  <span class="rec-dot"></span>
+  <span id="mini-timer-subject" class="mini-timer-subject"></span>
+  <span id="mini-timer-time" class="mini-timer-time">00:00</span>
+  <span id="mini-timer-status" class="mini-timer-status"></span>
+  <button type="button" id="mini-pause-btn" class="icon-btn" aria-label="一時停止/再開">⏸</button>
+  <button type="button" id="mini-stop-btn" class="icon-btn" aria-label="記録して停止">⏹</button>
+</div>
+
+<div id="start-backdrop" class="backdrop hidden"></div>
+<div id="start-panel" class="add-panel hidden">
+  <div class="panel-header">
+    <h3 id="start-subject-name">科目</h3>
+    <button type="button" id="start-close" class="panel-close" aria-label="閉じる">×</button>
+  </div>
+  <div class="period-toggle" id="start-mode-toggle">
+    <button type="button" class="period-btn active" data-mode="countup">タイマー</button>
+    <button type="button" class="period-btn" data-mode="countdown">カウントダウン</button>
+  </div>
+  <div class="due-row hidden" id="start-duration-row">
+    <button type="button" class="quick-date-btn" data-minutes="15">15分</button>
+    <button type="button" class="quick-date-btn" data-minutes="25">25分</button>
+    <button type="button" class="quick-date-btn" data-minutes="45">45分</button>
+    <button type="button" class="quick-date-btn" data-minutes="60">60分</button>
+    <input type="number" id="start-duration-input" min="1" value="25" style="max-width:80px;">
+  </div>
+  <label class="checkbox-label start-clockonly-label">
+    <input type="checkbox" id="start-clockonly"> 時計だけモード(画面から離れると一時停止)
+  </label>
+  <button type="button" id="start-begin-btn">開始</button>
 </div>
 
 <div id="settings-backdrop" class="backdrop hidden"></div>

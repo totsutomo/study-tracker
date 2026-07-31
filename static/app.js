@@ -9,6 +9,9 @@ tabButtons.forEach((btn) => {
     tabPanels.forEach((p) => p.classList.remove("active"));
     btn.classList.add("active");
     document.getElementById(btn.dataset.tab).classList.add("active");
+    if (typeof timerSubject !== "undefined" && timerSubject && !overlayMinimized) {
+      minimizeFocusOverlay();
+    }
   });
 });
 
@@ -94,7 +97,7 @@ function renderTodoItem(t, list) {
   });
   const playBtn = li.querySelector(".play-btn");
   if (playBtn) {
-    playBtn.addEventListener("click", () => startTimerForTodo(t));
+    playBtn.addEventListener("click", () => openStartPanel(t.category, t.id));
   }
   li.querySelector(".delete-btn").addEventListener("click", async () => {
     await api(`/api/todos/${t.id}`, { method: "DELETE" });
@@ -436,16 +439,7 @@ function renderStudyButtons(cats) {
     )
     .join("");
   container.querySelectorAll(".subject-btn").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      if (timerSubject) return; // a session is already running
-      timerSubject = btn.dataset.subject;
-      activeTodoId = null;
-      accumulatedMs = 0;
-      segmentStart = Date.now();
-      isPaused = false;
-      openFocusOverlay();
-      startTimerTick();
-    });
+    btn.addEventListener("click", () => openStartPanel(btn.dataset.subject, null));
   });
 }
 
@@ -497,28 +491,80 @@ document.getElementById("manual-log-form").addEventListener("submit", async (e) 
   loadGoalProgress();
 });
 
-function startTimerForTodo(todo) {
-  if (timerSubject) {
-    alert("すでにタイマーが動いています");
-    return;
-  }
-  timerSubject = todo.category;
-  activeTodoId = todo.id;
-  accumulatedMs = 0;
-  segmentStart = Date.now();
-  isPaused = false;
-  openFocusOverlay();
-  startTimerTick();
-}
-
 function formatElapsed(ms) {
-  const totalSec = Math.floor(ms / 1000);
+  const totalSec = Math.max(0, Math.floor(ms / 1000));
   const min = String(Math.floor(totalSec / 60)).padStart(2, "0");
   const sec = String(totalSec % 60).padStart(2, "0");
   return `${min}:${sec}`;
 }
 
-// ---------- focus timer (start / pause / resume / stop) ----------
+// ---------- session start panel (mode / duration / clock-only) ----------
+
+let pendingStart = null; // { subject, todoId }
+let startMode = "countup";
+
+const startBackdrop = document.getElementById("start-backdrop");
+const startPanel = document.getElementById("start-panel");
+
+function openStartPanel(subject, todoId) {
+  if (timerSubject) {
+    alert("すでにタイマーが動いています");
+    return;
+  }
+  pendingStart = { subject, todoId };
+  document.getElementById("start-subject-name").textContent = subject;
+  setStartMode("countup");
+  document.getElementById("start-duration-input").value = 25;
+  document.getElementById("start-clockonly").checked = false;
+  startBackdrop.classList.remove("hidden");
+  startPanel.classList.remove("hidden");
+}
+
+function closeStartPanel() {
+  pendingStart = null;
+  startBackdrop.classList.add("hidden");
+  startPanel.classList.add("hidden");
+}
+
+document.getElementById("start-close").addEventListener("click", closeStartPanel);
+startBackdrop.addEventListener("click", closeStartPanel);
+
+function setStartMode(mode) {
+  startMode = mode;
+  document.querySelectorAll("#start-mode-toggle .period-btn").forEach((b) => {
+    b.classList.toggle("active", b.dataset.mode === mode);
+  });
+  document.getElementById("start-duration-row").classList.toggle("hidden", mode !== "countdown");
+}
+
+document.querySelectorAll("#start-mode-toggle .period-btn").forEach((btn) => {
+  btn.addEventListener("click", () => setStartMode(btn.dataset.mode));
+});
+
+document.querySelectorAll("#start-duration-row [data-minutes]").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    document.getElementById("start-duration-input").value = btn.dataset.minutes;
+  });
+});
+
+document.getElementById("start-begin-btn").addEventListener("click", () => {
+  if (!pendingStart) return;
+  const { subject, todoId } = pendingStart;
+  const clockOnly = document.getElementById("start-clockonly").checked;
+  let targetMs = null;
+  if (startMode === "countdown") {
+    const minutes = parseInt(document.getElementById("start-duration-input").value, 10);
+    if (!minutes || minutes <= 0) {
+      alert("時間(分)を入力してください");
+      return;
+    }
+    targetMs = minutes * 60000;
+  }
+  closeStartPanel();
+  beginSession(subject, todoId, startMode, targetMs, clockOnly);
+});
+
+// ---------- focus timer (start / pause / resume / stop / minimize) ----------
 
 let timerInterval = null;
 let timerSubject = null;
@@ -526,19 +572,55 @@ let activeTodoId = null;
 let accumulatedMs = 0;
 let segmentStart = null;
 let isPaused = false;
+let sessionMode = "countup"; // "countup" | "countdown"
+let sessionTargetMs = null;
+let sessionClockOnly = false;
+let sessionCompleted = false;
+let overlayMinimized = false;
 
 const RING_CIRCUMFERENCE = 2 * Math.PI * 54;
-const RING_PERIOD_MS = 25 * 60 * 1000; // ring completes one lap every 25 min, purely decorative
+const RING_PERIOD_MS = 25 * 60 * 1000; // countup ring completes one lap every 25 min, purely decorative
 
 function currentElapsedMs() {
   return accumulatedMs + (segmentStart ? Date.now() - segmentStart : 0);
 }
 
+function beginSession(subject, todoId, mode, targetMs, clockOnly) {
+  timerSubject = subject;
+  activeTodoId = todoId;
+  accumulatedMs = 0;
+  segmentStart = Date.now();
+  isPaused = false;
+  sessionMode = mode;
+  sessionTargetMs = targetMs;
+  sessionClockOnly = clockOnly;
+  sessionCompleted = false;
+  overlayMinimized = false;
+  openFocusOverlay();
+  startTimerTick();
+}
+
 function updateFocusDisplay() {
   const elapsed = currentElapsedMs();
-  document.getElementById("focus-timer").textContent = formatElapsed(elapsed);
-  const progress = (elapsed % RING_PERIOD_MS) / RING_PERIOD_MS;
+  let displayMs = elapsed;
+  let progress;
+  if (sessionMode === "countdown") {
+    const remaining = Math.max(0, sessionTargetMs - elapsed);
+    displayMs = remaining;
+    progress = 1 - remaining / sessionTargetMs;
+    if (remaining <= 0 && !sessionCompleted) {
+      sessionCompleted = true;
+      completeCountdown();
+      return;
+    }
+  } else {
+    progress = (elapsed % RING_PERIOD_MS) / RING_PERIOD_MS;
+  }
+  const text = formatElapsed(displayMs);
+  document.getElementById("focus-timer").textContent = text;
   document.getElementById("focus-ring-fill").style.strokeDashoffset = RING_CIRCUMFERENCE * (1 - progress);
+  const miniTime = document.getElementById("mini-timer-time");
+  if (miniTime) miniTime.textContent = text;
 }
 
 function startTimerTick() {
@@ -553,54 +635,133 @@ function stopTimerTick() {
   }
 }
 
+function syncFocusOpenBodyClass() {
+  document.body.classList.toggle("focus-open", !!timerSubject && !overlayMinimized);
+}
+
 function openFocusOverlay() {
   const color = colorFor(timerSubject);
   document.getElementById("focus-subject-name").textContent = timerSubject;
   document.getElementById("focus-timer").style.color = color;
   document.getElementById("focus-ring-fill").style.stroke = color;
   document.getElementById("focus-pause-btn").textContent = "一時停止";
+  document.getElementById("focus-clockonly-badge").classList.toggle("hidden", !sessionClockOnly);
   const overlay = document.getElementById("focus-overlay");
-  overlay.classList.remove("hidden");
-  overlay.classList.remove("paused");
+  overlay.classList.remove("hidden", "paused");
+  overlay.classList.toggle("clock-only", sessionClockOnly);
+  hideMiniBar();
+  syncFocusOpenBodyClass();
+  updateFocusDisplay();
 }
 
 function closeFocusOverlay() {
   document.getElementById("focus-overlay").classList.add("hidden");
+  syncFocusOpenBodyClass();
+}
+
+function minimizeFocusOverlay() {
+  if (!timerSubject) return;
+  overlayMinimized = true;
+  document.getElementById("focus-overlay").classList.add("hidden");
+  syncFocusOpenBodyClass();
+  showMiniBar();
+  if (sessionClockOnly && !isPaused) {
+    pauseSession();
+  }
+}
+
+function expandFocusOverlay() {
+  if (!timerSubject) return;
+  overlayMinimized = false;
+  hideMiniBar();
+  document.getElementById("focus-overlay").classList.remove("hidden");
+  syncFocusOpenBodyClass();
+}
+
+document.getElementById("focus-minimize-btn").addEventListener("click", minimizeFocusOverlay);
+
+function showMiniBar() {
+  const bar = document.getElementById("mini-timer-bar");
+  bar.classList.remove("hidden");
+  bar.style.bottom = `${document.getElementById("tabbar").getBoundingClientRect().height}px`;
+  document.getElementById("mini-timer-subject").textContent = timerSubject;
+  bar.style.setProperty("--subject-color", colorFor(timerSubject));
+  updateMiniStatus();
+  updateFocusDisplay();
+}
+
+function hideMiniBar() {
+  document.getElementById("mini-timer-bar").classList.add("hidden");
+}
+
+function updateMiniStatus() {
+  document.getElementById("mini-timer-status").textContent = isPaused ? "一時停止中" : "";
+  document.getElementById("mini-pause-btn").textContent = isPaused ? "▶" : "⏸";
+}
+
+function pauseSession() {
+  if (!timerSubject || isPaused) return;
+  accumulatedMs += Date.now() - segmentStart;
+  segmentStart = null;
+  isPaused = true;
+  stopTimerTick();
+  updatePauseUI();
+}
+
+function resumeSession() {
+  if (!timerSubject || !isPaused) return;
+  segmentStart = Date.now();
+  isPaused = false;
+  startTimerTick();
+  updatePauseUI();
+}
+
+function updatePauseUI() {
+  const overlay = document.getElementById("focus-overlay");
+  document.getElementById("focus-pause-btn").textContent = isPaused ? "再開" : "一時停止";
+  overlay.classList.toggle("paused", isPaused);
+  updateMiniStatus();
+  updateFocusDisplay();
 }
 
 document.getElementById("focus-pause-btn").addEventListener("click", () => {
-  if (!timerSubject) return;
-  const overlay = document.getElementById("focus-overlay");
-  const pauseBtn = document.getElementById("focus-pause-btn");
-  if (isPaused) {
-    segmentStart = Date.now();
-    isPaused = false;
-    startTimerTick();
-    pauseBtn.textContent = "一時停止";
-    overlay.classList.remove("paused");
-  } else {
-    accumulatedMs += Date.now() - segmentStart;
-    segmentStart = null;
-    isPaused = true;
-    stopTimerTick();
-    pauseBtn.textContent = "再開";
-    overlay.classList.add("paused");
+  if (isPaused) resumeSession();
+  else pauseSession();
+});
+
+document.getElementById("mini-pause-btn").addEventListener("click", () => {
+  if (isPaused) resumeSession();
+  else pauseSession();
+});
+
+document.getElementById("mini-timer-bar").addEventListener("click", (e) => {
+  if (e.target.closest("button")) return;
+  expandFocusOverlay();
+});
+
+// visibility change (screen lock / switch to another app): clock-only sessions auto-pause
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden && timerSubject && sessionClockOnly && !isPaused) {
+    pauseSession();
   }
 });
 
-document.getElementById("focus-stop-btn").addEventListener("click", async () => {
-  if (!timerSubject) return;
-  const totalMs = currentElapsedMs();
-  stopTimerTick();
-  const elapsedMinutes = Math.max(1, Math.round(totalMs / 60000));
+async function finishSession(elapsedMinutes) {
   const subject = timerSubject;
   const todoId = activeTodoId;
+  stopTimerTick();
   timerSubject = null;
   activeTodoId = null;
   accumulatedMs = 0;
   segmentStart = null;
   isPaused = false;
+  sessionMode = "countup";
+  sessionTargetMs = null;
+  sessionClockOnly = false;
+  sessionCompleted = false;
+  overlayMinimized = false;
   closeFocusOverlay();
+  hideMiniBar();
   await api("/api/study-logs", {
     method: "POST",
     body: JSON.stringify({ subject, minutes: elapsedMinutes }),
@@ -614,6 +775,33 @@ document.getElementById("focus-stop-btn").addEventListener("click", async () => 
   loadStudyLogList();
   loadStudyChart();
   loadGoalProgress();
+}
+
+function notifySessionEnd(subject) {
+  if (navigator.vibrate) navigator.vibrate([200, 100, 200, 100, 200]);
+  alert(`${subject}: 設定した時間が終了しました`);
+}
+
+async function completeCountdown() {
+  stopTimerTick();
+  const subject = timerSubject;
+  const totalMinutes = Math.max(1, Math.round(sessionTargetMs / 60000));
+  notifySessionEnd(subject);
+  await finishSession(totalMinutes);
+}
+
+document.getElementById("focus-stop-btn").addEventListener("click", async () => {
+  if (!timerSubject) return;
+  const totalMs = currentElapsedMs();
+  const elapsedMinutes = Math.max(1, Math.round(totalMs / 60000));
+  await finishSession(elapsedMinutes);
+});
+
+document.getElementById("mini-stop-btn").addEventListener("click", async () => {
+  if (!timerSubject) return;
+  const totalMs = currentElapsedMs();
+  const elapsedMinutes = Math.max(1, Math.round(totalMs / 60000));
+  await finishSession(elapsedMinutes);
 });
 
 // ---------- daily / weekly chart ----------
