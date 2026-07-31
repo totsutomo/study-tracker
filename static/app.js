@@ -1190,12 +1190,14 @@ document.getElementById("goal-form").addEventListener("submit", async (e) => {
 // ---------- calendar (events) ----------
 
 function populateEventCategorySelect(cats) {
-  const select = document.getElementById("event-category");
-  const previous = select.value;
-  select.innerHTML =
-    `<option value="">カテゴリ: なし</option>` +
-    cats.map((c) => `<option value="${escapeHtml(c.name)}">${escapeHtml(c.name)}</option>`).join("");
-  if (cats.some((c) => c.name === previous)) select.value = previous;
+  ["event-category", "event-detail-category"].forEach((id) => {
+    const select = document.getElementById(id);
+    const previous = select.value;
+    select.innerHTML =
+      `<option value="">カテゴリ: なし</option>` +
+      cats.map((c) => `<option value="${escapeHtml(c.name)}">${escapeHtml(c.name)}</option>`).join("");
+    if (cats.some((c) => c.name === previous)) select.value = previous;
+  });
 }
 
 let calYear, calMonth; // calMonth is 1-based
@@ -1662,6 +1664,37 @@ document.querySelectorAll("#event-form [data-recur-preset]").forEach((btn) => {
   });
 });
 
+const selectedEventDetailRecurrenceDays = new Set();
+
+function setEventDetailRecurrenceDays(days) {
+  selectedEventDetailRecurrenceDays.clear();
+  days.forEach((d) => selectedEventDetailRecurrenceDays.add(d));
+  document.querySelectorAll("#event-detail-recurrence-picker .weekday-btn").forEach((btn) => {
+    btn.classList.toggle("active", selectedEventDetailRecurrenceDays.has(btn.dataset.day));
+  });
+}
+
+document.querySelectorAll("#event-detail-recurrence-picker .weekday-btn").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    const day = btn.dataset.day;
+    if (selectedEventDetailRecurrenceDays.has(day)) {
+      selectedEventDetailRecurrenceDays.delete(day);
+    } else {
+      selectedEventDetailRecurrenceDays.add(day);
+    }
+    btn.classList.toggle("active", selectedEventDetailRecurrenceDays.has(day));
+  });
+});
+
+document.querySelectorAll("#event-detail-form [data-recur-preset]").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    const preset = btn.dataset.recurPreset;
+    if (preset === "daily") setEventDetailRecurrenceDays(WEEKDAY_ORDER);
+    else if (preset === "weekdays") setEventDetailRecurrenceDays(["mon", "tue", "wed", "thu", "fri"]);
+    else setEventDetailRecurrenceDays([]);
+  });
+});
+
 document.getElementById("event-form").addEventListener("submit", async (e) => {
   e.preventDefault();
   const title = document.getElementById("event-title").value.trim();
@@ -1701,14 +1734,15 @@ let currentDetailEventId = null;
 
 function openEventDetail(ev) {
   currentDetailEventId = ev.id;
-  document.getElementById("event-detail-title").textContent = ev.title;
-  const dateLabel = `日付: ${ev.occurrence_date || ev.date}`;
-  const timeLabel = `時間: ${ev.start_time}〜${ev.end_time}`;
-  const categoryLabel = ev.category ? `カテゴリ: ${ev.category}` : "";
-  const recurLabel = ev.recurrence ? "繰り返しあり" : "";
-  document.getElementById("event-detail-meta").textContent = [categoryLabel, dateLabel, timeLabel, recurLabel]
-    .filter(Boolean)
-    .join(" / ");
+  document.getElementById("event-detail-title").value = ev.title;
+  document.getElementById("event-detail-category").value = ev.category || "";
+  document.getElementById("event-detail-date").value = ev.date;
+  document.getElementById("event-detail-start-time").value = ev.start_time;
+  document.getElementById("event-detail-end-time").value = ev.end_time;
+  document.getElementById("event-detail-notify").value =
+    ev.notify_offset_minutes === null || ev.notify_offset_minutes === undefined ? "" : String(ev.notify_offset_minutes);
+  document.getElementById("event-detail-recurrence-until").value = ev.recurrence_until || "";
+  setEventDetailRecurrenceDays(ev.recurrence ? ev.recurrence.split(",") : []);
   document.getElementById("event-detail-note").value = ev.note || "";
   document.getElementById("event-detail-status").textContent = "";
   document.getElementById("event-detail-panel").classList.remove("hidden");
@@ -1724,11 +1758,36 @@ function closeEventDetail() {
 document.getElementById("event-detail-close").addEventListener("click", closeEventDetail);
 document.getElementById("event-detail-backdrop").addEventListener("click", closeEventDetail);
 
-document.getElementById("event-detail-save").addEventListener("click", async () => {
+document.getElementById("event-detail-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
   if (!currentDetailEventId) return;
+  const title = document.getElementById("event-detail-title").value.trim();
+  const category = document.getElementById("event-detail-category").value || null;
+  const evDate = document.getElementById("event-detail-date").value;
+  const startTime = document.getElementById("event-detail-start-time").value;
+  const endTime = document.getElementById("event-detail-end-time").value;
+  const recurrenceUntilInput = document.getElementById("event-detail-recurrence-until").value || null;
+  const notifyVal = document.getElementById("event-detail-notify").value;
+  const notify_offset_minutes = notifyVal !== "" ? parseInt(notifyVal, 10) : null;
   const note = document.getElementById("event-detail-note").value.trim() || null;
-  await api(`/api/events/${currentDetailEventId}/note`, { method: "PUT", body: JSON.stringify({ note }) });
+  if (!title || !evDate || !startTime || !endTime) return;
+  const recurrence = selectedEventDetailRecurrenceDays.size ? [...selectedEventDetailRecurrenceDays].join(",") : null;
+  await api(`/api/events/${currentDetailEventId}`, {
+    method: "PUT",
+    body: JSON.stringify({
+      title,
+      category,
+      date: evDate,
+      start_time: startTime,
+      end_time: endTime,
+      recurrence,
+      recurrence_until: recurrence ? recurrenceUntilInput : null,
+      notify_offset_minutes,
+      note,
+    }),
+  });
   document.getElementById("event-detail-status").textContent = "保存しました";
+  closeEventDetail();
   loadCalendar();
 });
 

@@ -74,7 +74,15 @@ class EventCreate(BaseModel):
     note: str | None = None
 
 
-class EventNoteUpdate(BaseModel):
+class EventUpdate(BaseModel):
+    title: str
+    category: str | None = None
+    date: str
+    start_time: str
+    end_time: str
+    recurrence: str | None = None
+    recurrence_until: str | None = None
+    notify_offset_minutes: int | None = None
     note: str | None = None
 
 
@@ -519,14 +527,19 @@ def create_event(event: EventCreate):
     return {"id": new_id}
 
 
-@app.put("/api/events/{event_id}/note")
-def update_event_note(event_id: int, payload: EventNoteUpdate):
+@app.put("/api/events/{event_id}")
+def update_event(event_id: int, event: EventUpdate):
     conn = get_connection()
     row = conn.execute("SELECT id FROM events WHERE id = ?", (event_id,)).fetchone()
     if row is None:
         conn.close()
         raise HTTPException(status_code=404, detail="event not found")
-    conn.execute("UPDATE events SET note = ? WHERE id = ?", (payload.note, event_id))
+    conn.execute(
+        "UPDATE events SET title = ?, category = ?, date = ?, start_time = ?, end_time = ?, "
+        "recurrence = ?, recurrence_until = ?, notify_offset_minutes = ?, note = ? WHERE id = ?",
+        (event.title, event.category, event.date, event.start_time, event.end_time,
+         event.recurrence, event.recurrence_until, event.notify_offset_minutes, event.note, event_id),
+    )
     conn.commit()
     conn.close()
     return {"ok": True}

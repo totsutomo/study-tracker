@@ -259,12 +259,46 @@
     <div id="event-detail-backdrop" class="backdrop hidden"></div>
     <div id="event-detail-panel" class="add-panel hidden">
       <div class="panel-header">
-        <h3 id="event-detail-title"></h3>
+        <h3>予定を編集</h3>
         <button type="button" id="event-detail-close" class="panel-close" aria-label="閉じる">×</button>
       </div>
-      <p class="meta" id="event-detail-meta"></p>
-      <textarea id="event-detail-note" rows="4" placeholder="メモ(任意)"></textarea>
-      <button type="button" id="event-detail-save">メモを保存</button>
+      <form id="event-detail-form" class="add-form">
+        <input type="text" id="event-detail-title" placeholder="予定のタイトル" required>
+        <select id="event-detail-category">
+          <option value="">カテゴリ: なし</option>
+        </select>
+        <div class="form-row">
+          <input type="date" id="event-detail-date" required>
+        </div>
+        <div class="form-row">
+          <input type="time" id="event-detail-start-time" required>
+          <input type="time" id="event-detail-end-time" required>
+        </div>
+        <select id="event-detail-notify">
+          <option value="">通知しない</option>
+          <option value="0">開始時刻に通知</option>
+          <option value="10">10分前に通知</option>
+          <option value="30">30分前に通知</option>
+          <option value="60">1時間前に通知</option>
+        </select>
+        <div class="due-row">
+          <button type="button" class="quick-date-btn" data-recur-preset="daily">毎日</button>
+          <button type="button" class="quick-date-btn" data-recur-preset="weekdays">平日</button>
+          <button type="button" class="quick-date-btn" data-recur-preset="clear">クリア</button>
+        </div>
+        <div class="weekday-picker" id="event-detail-recurrence-picker">
+          <button type="button" class="weekday-btn" data-day="mon">月</button>
+          <button type="button" class="weekday-btn" data-day="tue">火</button>
+          <button type="button" class="weekday-btn" data-day="wed">水</button>
+          <button type="button" class="weekday-btn" data-day="thu">木</button>
+          <button type="button" class="weekday-btn" data-day="fri">金</button>
+          <button type="button" class="weekday-btn" data-day="sat">土</button>
+          <button type="button" class="weekday-btn" data-day="sun">日</button>
+        </div>
+        <input type="date" id="event-detail-recurrence-until" placeholder="繰り返し終了日(任意)">
+        <textarea id="event-detail-note" rows="3" placeholder="メモ(任意)"></textarea>
+        <button type="submit">保存</button>
+      </form>
       <span class="meta" id="event-detail-status"></span>
     </div>
   </section>
