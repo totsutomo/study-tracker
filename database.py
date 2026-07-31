@@ -21,13 +21,6 @@ CREATE TABLE IF NOT EXISTS todos (
     recurrence TEXT
 );
 
-CREATE TABLE IF NOT EXISTS diary_entries (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    date TEXT UNIQUE NOT NULL,
-    content TEXT NOT NULL,
-    updated_at TEXT DEFAULT (datetime('now'))
-);
-
 CREATE TABLE IF NOT EXISTS study_logs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     subject TEXT NOT NULL,

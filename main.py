@@ -46,11 +46,6 @@ class SettingsUpdate(BaseModel):
     monthly_goal_minutes: int | None = None
 
 
-class DiaryUpsert(BaseModel):
-    date: str
-    content: str
-
-
 class StudyLogCreate(BaseModel):
     subject: str
     minutes: int
@@ -238,45 +233,6 @@ def update_category(category_id: int, category: CategoryUpdate):
 def delete_category(category_id: int):
     conn = get_connection()
     conn.execute("DELETE FROM categories WHERE id = ?", (category_id,))
-    conn.commit()
-    conn.close()
-    return {"ok": True}
-
-
-# ---------- diary ----------
-
-@app.get("/api/diary")
-def list_diary():
-    conn = get_connection()
-    cur = conn.execute("SELECT * FROM diary_entries ORDER BY date DESC")
-    result = rows_to_dicts(cur)
-    conn.close()
-    return result
-
-
-@app.get("/api/diary/{entry_date}")
-def get_diary_entry(entry_date: str):
-    conn = get_connection()
-    cur = conn.execute("SELECT * FROM diary_entries WHERE date = ?", (entry_date,))
-    row = cur.fetchone()
-    result = row_to_dict(cur, row)
-    conn.close()
-    if result is None:
-        return {"date": entry_date, "content": ""}
-    return result
-
-
-@app.put("/api/diary")
-def upsert_diary(entry: DiaryUpsert):
-    conn = get_connection()
-    conn.execute(
-        """
-        INSERT INTO diary_entries (date, content) VALUES (?, ?)
-        ON CONFLICT(date) DO UPDATE SET content = excluded.content,
-                                         updated_at = datetime('now')
-        """,
-        (entry.date, entry.content),
-    )
     conn.commit()
     conn.close()
     return {"ok": True}

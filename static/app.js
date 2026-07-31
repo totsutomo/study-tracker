@@ -419,42 +419,6 @@ function escapeHtml(str) {
   return div.innerHTML;
 }
 
-// ---------- diary ----------
-
-let currentDiaryDate = todayStr();
-
-async function loadDiaryEditor(dateStr) {
-  currentDiaryDate = dateStr;
-  document.getElementById("diary-date-label").textContent = dateStr;
-  const entry = await api(`/api/diary/${dateStr}`);
-  document.getElementById("diary-content").value = entry.content || "";
-  document.getElementById("diary-status").textContent = "";
-}
-
-async function loadDiaryList() {
-  const entries = await api("/api/diary");
-  const list = document.getElementById("diary-list");
-  list.innerHTML = "";
-  entries.forEach((e) => {
-    const li = document.createElement("li");
-    const preview = e.content.length > 30 ? e.content.slice(0, 30) + "..." : e.content;
-    li.innerHTML = `<strong>${e.date}</strong><span class="meta">${escapeHtml(preview)}</span>`;
-    li.style.cursor = "pointer";
-    li.addEventListener("click", () => loadDiaryEditor(e.date));
-    list.appendChild(li);
-  });
-}
-
-document.getElementById("diary-save").addEventListener("click", async () => {
-  const content = document.getElementById("diary-content").value;
-  await api("/api/diary", {
-    method: "PUT",
-    body: JSON.stringify({ date: currentDiaryDate, content }),
-  });
-  document.getElementById("diary-status").textContent = "保存しました";
-  loadDiaryList();
-});
-
 // ---------- study logs ----------
 
 function renderStudyButtons(cats) {
@@ -1310,8 +1274,6 @@ updatePushStatus();
   await loadCategories(); // study-buttons and the chart's subject list depend on categories being loaded first
   loadTodos();
   loadTodoStats();
-  loadDiaryEditor(todayStr());
-  loadDiaryList();
   loadStudySummary();
   loadStudyLogList();
   loadStudyChart();

@@ -331,22 +331,6 @@ h3.collapsible {
   min-width: 100px;
 }
 
-.diary-editor textarea {
-  width: 100%;
-  resize: vertical;
-}
-
-.diary-editor {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-#diary-status {
-  font-size: 12px;
-  color: var(--success);
-}
-
 .study-buttons {
   display: flex;
   gap: 8px;

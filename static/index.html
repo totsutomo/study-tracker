@@ -95,18 +95,6 @@
     </div>
   </section>
 
-  <section id="tab-diary" class="tab-panel">
-    <h2>日記</h2>
-    <div class="diary-editor">
-      <label id="diary-date-label" for="diary-content"></label>
-      <textarea id="diary-content" rows="8" placeholder="今日あったこと..."></textarea>
-      <button id="diary-save">保存</button>
-      <span id="diary-status"></span>
-    </div>
-    <h3>過去の日記</h3>
-    <ul id="diary-list" class="list"></ul>
-  </section>
-
   <section id="tab-study" class="tab-panel">
     <h2>学習ログ</h2>
     <div class="study-buttons" id="study-buttons"></div>
@@ -278,10 +266,9 @@
 
 <nav id="tabbar">
   <button class="tab-btn active" data-tab="tab-todo">ToDo</button>
-  <button class="tab-btn" data-tab="tab-diary">日記</button>
+  <button class="tab-btn" data-tab="tab-calendar">予定</button>
   <button class="tab-btn" data-tab="tab-study">学習ログ</button>
   <button class="tab-btn" data-tab="tab-goal">目標</button>
-  <button class="tab-btn" data-tab="tab-calendar">予定</button>
 </nav>
 
 <script src="/static/app.js"></script>
