@@ -717,6 +717,7 @@ function persistSession() {
       sessionMode,
       sessionTargetMs,
       sessionClockOnly,
+      sessionCompleted,
       overlayMinimized,
     })
   );
@@ -745,7 +746,7 @@ function restoreSession() {
   sessionMode = saved.sessionMode;
   sessionTargetMs = saved.sessionTargetMs;
   sessionClockOnly = saved.sessionClockOnly;
-  sessionCompleted = false;
+  sessionCompleted = !!saved.sessionCompleted;
   overlayMinimized = saved.overlayMinimized;
 
   if (overlayMinimized) {
@@ -778,19 +779,31 @@ function updateFocusDisplay() {
   const elapsed = currentElapsedMs();
   let displayMs = elapsed;
   let progress;
+  let prefix = "";
   if (sessionMode === "countdown") {
-    const remaining = Math.max(0, sessionTargetMs - elapsed);
-    displayMs = remaining;
-    progress = remaining / sessionTargetMs;
-    if (remaining <= 0 && !sessionCompleted) {
-      sessionCompleted = true;
-      completeCountdown();
-      return;
+    const remaining = sessionTargetMs - elapsed;
+    if (remaining <= 0) {
+      if (!sessionCompleted) {
+        sessionCompleted = true;
+        notifySessionEnd(timerSubject);
+        persistSession();
+      }
+      // keep running past the target instead of auto-stopping: there's a real lag between
+      // the countdown hitting zero and the user noticing the notification, and that gap was
+      // silently getting dropped from the recorded time. Now it just counts up as overtime
+      // (reusing the countup ring's lap animation) until the user taps stop themselves.
+      const overtime = -remaining;
+      displayMs = overtime;
+      prefix = "+";
+      progress = (overtime % RING_PERIOD_MS) / RING_PERIOD_MS;
+    } else {
+      displayMs = remaining;
+      progress = remaining / sessionTargetMs;
     }
   } else {
     progress = (elapsed % RING_PERIOD_MS) / RING_PERIOD_MS;
   }
-  const text = formatElapsed(displayMs);
+  const text = prefix + formatElapsed(displayMs);
   document.getElementById("focus-timer").textContent = text;
   document.getElementById("focus-ring-fill").style.strokeDashoffset = RING_CIRCUMFERENCE * (1 - progress);
   const miniTime = document.getElementById("mini-timer-time");
@@ -989,16 +1002,8 @@ async function notifyLocal(title, body) {
 
 function notifySessionEnd(subject) {
   if (navigator.vibrate) navigator.vibrate(SESSION_END_VIBRATE_PATTERN);
-  notifyLocal("study-tracker", `${subject}: 設定した時間が終了しました`);
-  alert(`${subject}: 設定した時間が終了しました`);
-}
-
-async function completeCountdown() {
-  stopTimerTick();
-  const subject = timerSubject;
-  const totalMinutes = Math.max(1, Math.round(sessionTargetMs / 60000));
-  notifySessionEnd(subject);
-  await finishSession(totalMinutes);
+  notifyLocal("study-tracker", `${subject}: 設定した時間が終了しました(停止するまで記録は続きます)`);
+  alert(`${subject}: 設定した時間が終了しました\n停止するまでそのまま記録が続きます`);
 }
 
 document.getElementById("focus-stop-btn").addEventListener("click", async () => {
