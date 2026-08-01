@@ -661,6 +661,12 @@ document.getElementById("start-begin-btn").addEventListener("click", () => {
       return;
     }
     targetMs = minutes * 60000;
+    // countdown completion relies on a real system notification (see notifyLocal) to reach the
+    // user even if the tab is backgrounded/screen locked; ask for permission up front so it's
+    // ready by the time the countdown ends, instead of only via the settings-tab toggle.
+    if ("Notification" in window && Notification.permission === "default") {
+      Notification.requestPermission();
+    }
   }
   closeStartPanel();
   beginSession(subject, todoId, startMode, targetMs, clockOnly);
@@ -956,8 +962,23 @@ async function finishSession(elapsedMinutes) {
   loadGoalProgress();
 }
 
+// alert()/vibrate() only reach the user while this tab is focused; a background tab or locked
+// screen suppresses both silently, which is why countdown completion went unnoticed. A real
+// system notification (via the already-registered service worker) survives that case.
+async function notifyLocal(title, body) {
+  if (!("Notification" in window) || Notification.permission !== "granted") return;
+  if (!("serviceWorker" in navigator)) return;
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    reg.showNotification(title, { body, icon: "/static/icon-192.png", badge: "/static/icon-192.png" });
+  } catch (e) {
+    // notification best-effort; alert() below still covers the foreground case
+  }
+}
+
 function notifySessionEnd(subject) {
   if (navigator.vibrate) navigator.vibrate([200, 100, 200, 100, 200]);
+  notifyLocal("study-tracker", `${subject}: 設定した時間が終了しました`);
   alert(`${subject}: 設定した時間が終了しました`);
 }
 
