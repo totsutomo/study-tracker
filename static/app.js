@@ -771,7 +771,7 @@ function updateFocusDisplay() {
   if (sessionMode === "countdown") {
     const remaining = Math.max(0, sessionTargetMs - elapsed);
     displayMs = remaining;
-    progress = 1 - remaining / sessionTargetMs;
+    progress = remaining / sessionTargetMs;
     if (remaining <= 0 && !sessionCompleted) {
       sessionCompleted = true;
       completeCountdown();
