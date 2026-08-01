@@ -689,6 +689,10 @@ let overlayMinimized = false;
 const RING_CIRCUMFERENCE = 2 * Math.PI * 54;
 const RING_PERIOD_MS = 25 * 60 * 1000; // countup ring completes one lap every 25 min, purely decorative
 const FOCUS_SESSION_KEY = "focusSession";
+// longer/heavier than a typical notification buzz so a countdown finishing reads as more
+// urgent than a routine ping; still a single fixed pattern (no repeat/loop, browsers don't
+// allow web content to keep vibrating after a notification is shown).
+const SESSION_END_VIBRATE_PATTERN = [300, 150, 300, 150, 300, 150, 300, 150, 300];
 
 function currentElapsedMs() {
   return accumulatedMs + (segmentStart ? Date.now() - segmentStart : 0);
@@ -970,14 +974,21 @@ async function notifyLocal(title, body) {
   if (!("serviceWorker" in navigator)) return;
   try {
     const reg = await navigator.serviceWorker.ready;
-    reg.showNotification(title, { body, icon: "/static/icon-192.png", badge: "/static/icon-192.png" });
+    reg.showNotification(title, {
+      body,
+      icon: "/static/icon-192.png",
+      badge: "/static/icon-192.png",
+      // the OS-level notification vibration (Android) fires even while this page isn't
+      // focused, unlike navigator.vibrate() below which only works in the foreground.
+      vibrate: SESSION_END_VIBRATE_PATTERN,
+    });
   } catch (e) {
     // notification best-effort; alert() below still covers the foreground case
   }
 }
 
 function notifySessionEnd(subject) {
-  if (navigator.vibrate) navigator.vibrate([200, 100, 200, 100, 200]);
+  if (navigator.vibrate) navigator.vibrate(SESSION_END_VIBRATE_PATTERN);
   notifyLocal("study-tracker", `${subject}: 設定した時間が終了しました`);
   alert(`${subject}: 設定した時間が終了しました`);
 }
