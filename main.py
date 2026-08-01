@@ -57,6 +57,11 @@ class SettingsUpdate(BaseModel):
     daily_minimum_minutes: int | None = None
 
 
+class FocusSessionSync(BaseModel):
+    remaining_seconds: int | None = None  # None = no active countdown (paused/stopped)
+    subject: str | None = None
+
+
 class StudyLogCreate(BaseModel):
     subject: str
     minutes: int
@@ -756,6 +761,35 @@ def push_unsubscribe(sub: PushSubscribeIn):
     return {"ok": True}
 
 
+# focus-timer countdowns run entirely client-side (localStorage), so a backgrounded/suspended
+# tab has nothing watching the clock once its own setInterval gets throttled. This mirrors that
+# one active countdown's target end time into `settings` so the existing push_check() cron can
+# catch completion server-side too, as a backstop for when the client-side notify never fires.
+@app.post("/api/focus-session/sync")
+def focus_session_sync(payload: FocusSessionSync):
+    conn = get_connection()
+    if payload.remaining_seconds is None:
+        conn.execute(
+            "DELETE FROM settings WHERE key IN "
+            "('focus_target_end_at', 'focus_target_notified', 'focus_target_subject')"
+        )
+    else:
+        target_end_at = (datetime.now() + timedelta(seconds=payload.remaining_seconds)).isoformat()
+        for key, value in (
+            ("focus_target_end_at", target_end_at),
+            ("focus_target_notified", "0"),
+            ("focus_target_subject", payload.subject or ""),
+        ):
+            conn.execute(
+                "INSERT INTO settings (key, value) VALUES (?, ?) "
+                "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                (key, value),
+            )
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
 def _send_push_to_all(conn, payload: dict) -> int:
     subs = rows_to_dicts(conn.execute("SELECT * FROM push_subscriptions"))
     sent = 0
@@ -857,6 +891,23 @@ def push_check(token: str | None = None):
             })
             conn.execute(
                 "UPDATE activation_logs SET reminded_at = datetime('now') WHERE id = ?", (act["id"],)
+            )
+
+    focus_rows = {row[0]: row[1] for row in conn.execute(
+        "SELECT key, value FROM settings WHERE key IN "
+        "('focus_target_end_at', 'focus_target_notified', 'focus_target_subject')"
+    ).fetchall()}
+    focus_end_at = focus_rows.get("focus_target_end_at")
+    if focus_end_at and focus_rows.get("focus_target_notified") != "1":
+        if datetime.fromisoformat(focus_end_at) <= now:
+            sent_count += _send_push_to_all(conn, {
+                "title": "study-tracker",
+                "body": f"{focus_rows.get('focus_target_subject') or '学習'}: 設定した時間が終了しました",
+                "tag": "focus-session",
+            })
+            conn.execute(
+                "INSERT INTO settings (key, value) VALUES ('focus_target_notified', '1') "
+                "ON CONFLICT(key) DO UPDATE SET value = excluded.value"
             )
 
     conn.commit()

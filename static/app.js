@@ -698,6 +698,17 @@ function currentElapsedMs() {
   return accumulatedMs + (segmentStart ? Date.now() - segmentStart : 0);
 }
 
+// keeps the server aware of the countdown's true end time so the existing push-notification
+// cron (already polling for ToDo/event reminders) can catch completion even if this tab is
+// fully backgrounded/suspended and its own setInterval never runs notifyLocal(). Best-effort:
+// pass remainingSeconds=null to clear tracking (pause/stop), a number to (re)arm it.
+function syncFocusSessionServer(remainingSeconds, subject) {
+  api("/api/focus-session/sync", {
+    method: "POST",
+    body: JSON.stringify({ remaining_seconds: remainingSeconds, subject: subject || null }),
+  }).catch(() => {});
+}
+
 // timer state lives in plain JS vars, which a page reload (manual refresh, PWA relaunch,
 // server cold-start forcing a reconnect) wipes out; persist it so restoreSession() can rebuild
 // the running clock from wall-clock timestamps instead of losing it silently.
@@ -773,6 +784,9 @@ function beginSession(subject, todoId, mode, targetMs, clockOnly) {
   openFocusOverlay();
   startTimerTick();
   persistSession();
+  if (mode === "countdown") {
+    syncFocusSessionServer(Math.round(targetMs / 1000), subject);
+  }
 }
 
 function updateFocusDisplay() {
@@ -896,6 +910,11 @@ function pauseSession() {
   stopTimerTick();
   updatePauseUI();
   persistSession();
+  // stop server-side tracking while paused, since the countdown isn't actually progressing;
+  // resumeSession() re-arms it with the recomputed remaining time.
+  if (sessionMode === "countdown" && !sessionCompleted) {
+    syncFocusSessionServer(null, null);
+  }
 }
 
 function resumeSession() {
@@ -905,6 +924,10 @@ function resumeSession() {
   startTimerTick();
   updatePauseUI();
   persistSession();
+  if (sessionMode === "countdown" && !sessionCompleted) {
+    const remainingSeconds = Math.max(0, Math.round((sessionTargetMs - currentElapsedMs()) / 1000));
+    syncFocusSessionServer(remainingSeconds, timerSubject);
+  }
 }
 
 function updatePauseUI() {
@@ -939,6 +962,7 @@ document.addEventListener("visibilitychange", () => {
 
 function resetSessionState() {
   stopTimerTick();
+  const wasCountdown = sessionMode === "countdown";
   timerSubject = null;
   activeTodoId = null;
   accumulatedMs = 0;
@@ -952,6 +976,9 @@ function resetSessionState() {
   closeFocusOverlay();
   hideMiniBar();
   localStorage.removeItem(FOCUS_SESSION_KEY);
+  if (wasCountdown) {
+    syncFocusSessionServer(null, null);
+  }
 }
 
 function discardSession() {
