@@ -3,17 +3,19 @@
 const tabButtons = document.querySelectorAll(".tab-btn");
 const tabPanels = document.querySelectorAll(".tab-panel");
 
+function switchTab(tabId) {
+  tabButtons.forEach((b) => b.classList.toggle("active", b.dataset.tab === tabId));
+  tabPanels.forEach((p) => p.classList.toggle("active", p.id === tabId));
+  if (typeof timerSubject !== "undefined" && timerSubject && !overlayMinimized) {
+    minimizeFocusOverlay();
+  }
+}
+
 tabButtons.forEach((btn) => {
-  btn.addEventListener("click", () => {
-    tabButtons.forEach((b) => b.classList.remove("active"));
-    tabPanels.forEach((p) => p.classList.remove("active"));
-    btn.classList.add("active");
-    document.getElementById(btn.dataset.tab).classList.add("active");
-    if (typeof timerSubject !== "undefined" && timerSubject && !overlayMinimized) {
-      minimizeFocusOverlay();
-    }
-  });
+  btn.addEventListener("click", () => switchTab(btn.dataset.tab));
 });
+
+document.getElementById("daily-min-banner").addEventListener("click", () => switchTab("tab-study"));
 
 // ---------- helpers ----------
 
@@ -1235,13 +1237,23 @@ async function loadGoalProgress() {
 
   const dailyMinLabel = document.getElementById("daily-min-label");
   const dailyMinFill = document.getElementById("daily-min-fill");
+  const banner = document.getElementById("daily-min-banner");
+  const bannerLabel = document.getElementById("daily-min-banner-label");
+  const bannerFill = document.getElementById("daily-min-banner-fill");
   if (p.daily_minimum_minutes) {
     const reached = p.today_minutes >= p.daily_minimum_minutes;
-    dailyMinLabel.textContent = `${p.today_minutes} / ${p.daily_minimum_minutes}分${reached ? " ✓" : ""}`;
-    dailyMinFill.style.width = `${Math.min(100, (p.today_minutes / p.daily_minimum_minutes) * 100)}%`;
+    const labelText = `${p.today_minutes} / ${p.daily_minimum_minutes}分${reached ? " ✓" : ""}`;
+    const fillPct = `${Math.min(100, (p.today_minutes / p.daily_minimum_minutes) * 100)}%`;
+    dailyMinLabel.textContent = labelText;
+    dailyMinFill.style.width = fillPct;
+    banner.classList.remove("hidden");
+    banner.classList.toggle("reached", reached);
+    bannerLabel.textContent = reached ? `今日の最低ライン ${labelText}` : `今日あと${p.daily_minimum_minutes - p.today_minutes}分`;
+    bannerFill.style.width = fillPct;
   } else {
     dailyMinLabel.textContent = "未設定";
     dailyMinFill.style.width = "0%";
+    banner.classList.add("hidden");
   }
   document.getElementById("daily-goal-input").value = p.daily_minimum_minutes || "";
 

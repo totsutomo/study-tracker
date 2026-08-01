@@ -45,6 +45,39 @@ header h1 {
   animation: activation-pulse 2s ease-in-out infinite;
 }
 
+.daily-min-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 16px;
+  background: var(--card);
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+}
+
+.daily-min-banner.hidden {
+  display: none;
+}
+
+.daily-min-banner span {
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.daily-min-banner.reached span {
+  color: var(--accent);
+}
+
+.daily-min-banner .stat-bar-track {
+  height: 5px;
+}
+
+.daily-min-banner.reached .stat-bar-fill {
+  background: var(--accent);
+  box-shadow: 0 0 6px var(--accent-dim);
+}
+
 #settings-activation-status {
   margin-bottom: 8px;
 }
