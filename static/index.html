@@ -13,7 +13,7 @@
 <header>
   <button type="button" id="settings-btn" class="icon-btn" aria-label="設定">⚙️</button>
   <h1>study-tracker</h1>
-  <button type="button" id="activation-btn" class="icon-btn activation-btn" aria-label="発動ログ">🌀</button>
+  <button type="button" id="activation-btn" class="icon-btn activation-btn" aria-label="発動ログ">🧭</button>
 </header>
 
 <main id="app">
@@ -386,6 +386,9 @@
     <h3>設定</h3>
     <button type="button" id="settings-close" class="panel-close" aria-label="閉じる">×</button>
   </div>
+  <h3>発動ログ</h3>
+  <p class="meta" id="settings-activation-status">発動中ではありません</p>
+  <button type="button" id="settings-activation-return-btn" class="hidden">復帰する</button>
   <h3>カテゴリ管理</h3>
   <ul id="category-list" class="list"></ul>
   <form id="category-form" class="add-form">

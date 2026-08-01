@@ -41,8 +41,16 @@ header h1 {
 }
 
 .activation-btn.active {
-  color: var(--neutral-flag);
+  color: var(--accent);
   animation: activation-pulse 2s ease-in-out infinite;
+}
+
+#settings-activation-status {
+  margin-bottom: 8px;
+}
+
+#settings-activation-return-btn {
+  margin-bottom: 20px;
 }
 
 @keyframes activation-pulse {

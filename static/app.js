@@ -1264,16 +1264,32 @@ async function loadActivationActive() {
   activationActiveLog = await api("/api/activation-logs/active");
   const btn = document.getElementById("activation-btn");
   const statusEl = document.getElementById("activation-current-status");
+  const settingsStatusEl = document.getElementById("settings-activation-status");
+  const settingsReturnBtn = document.getElementById("settings-activation-return-btn");
   if (activationActiveLog) {
     btn.classList.add("active");
     btn.title = "タップで復帰を記録";
     const noteText = activationActiveLog.note ? ` ${activationActiveLog.note}` : "";
-    statusEl.textContent = `発動中: ${formatLoggedAt(activationActiveLog.triggered_at)}〜${noteText}`;
+    const label = `発動中: ${formatLoggedAt(activationActiveLog.triggered_at)}〜${noteText}`;
+    statusEl.textContent = label;
+    settingsStatusEl.textContent = label;
+    settingsReturnBtn.classList.remove("hidden");
   } else {
     btn.classList.remove("active");
     btn.title = "";
     statusEl.textContent = "";
+    settingsStatusEl.textContent = "発動中ではありません";
+    settingsReturnBtn.classList.add("hidden");
   }
+}
+
+async function returnActivation() {
+  if (!activationActiveLog) return;
+  await api(`/api/activation-logs/${activationActiveLog.id}/return`, {
+    method: "PUT",
+    body: JSON.stringify({ returned_at: nowLocalTimestamp() }),
+  });
+  refreshActivation();
 }
 
 async function loadActivationStats() {
@@ -1340,15 +1356,13 @@ activationBackdrop.addEventListener("click", closeActivationPanel);
 
 document.getElementById("activation-btn").addEventListener("click", async () => {
   if (activationActiveLog) {
-    await api(`/api/activation-logs/${activationActiveLog.id}/return`, {
-      method: "PUT",
-      body: JSON.stringify({ returned_at: nowLocalTimestamp() }),
-    });
-    refreshActivation();
+    await returnActivation();
   } else {
     openActivationPanel();
   }
 });
+
+document.getElementById("settings-activation-return-btn").addEventListener("click", returnActivation);
 
 document.getElementById("activation-form").addEventListener("submit", async (e) => {
   e.preventDefault();
