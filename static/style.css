@@ -41,8 +41,35 @@ header h1 {
 }
 
 .activation-btn.active {
-  color: var(--accent);
+  color: var(--danger);
   animation: activation-pulse 2s ease-in-out infinite;
+}
+
+.activation-banner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 10px 16px;
+  background: var(--danger);
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  animation: activation-banner-pulse 2s ease-in-out infinite;
+}
+
+.activation-banner.hidden {
+  display: none;
+}
+
+.activation-banner span {
+  font-size: 13px;
+  font-weight: 700;
+  color: #1a1a1a;
+  white-space: nowrap;
+}
+
+@keyframes activation-banner-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.8; }
 }
 
 .daily-min-banner {

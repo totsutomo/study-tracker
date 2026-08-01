@@ -1402,6 +1402,20 @@ document.getElementById("goal-form").addEventListener("submit", async (e) => {
 // ---------- activation logs ----------
 
 let activationActiveLog = null;
+let activationTickInterval = null;
+
+function updateActivationBanner() {
+  const banner = document.getElementById("activation-banner");
+  const label = document.getElementById("activation-banner-label");
+  if (!activationActiveLog) {
+    banner.classList.add("hidden");
+    return;
+  }
+  const triggered = new Date(activationActiveLog.triggered_at.replace(" ", "T"));
+  const elapsedMin = Math.max(0, Math.floor((Date.now() - triggered.getTime()) / 60000));
+  label.textContent = `⚠️ 発動中・経過 ${formatLogDuration(elapsedMin)}`;
+  banner.classList.remove("hidden");
+}
 
 async function loadActivationActive() {
   activationActiveLog = await api("/api/activation-logs/active");
@@ -1417,13 +1431,21 @@ async function loadActivationActive() {
     statusEl.textContent = label;
     settingsStatusEl.textContent = label;
     settingsReturnBtn.classList.remove("hidden");
+    if (!activationTickInterval) {
+      activationTickInterval = setInterval(updateActivationBanner, 30000);
+    }
   } else {
     btn.classList.remove("active");
     btn.title = "";
     statusEl.textContent = "";
     settingsStatusEl.textContent = "発動中ではありません";
     settingsReturnBtn.classList.add("hidden");
+    if (activationTickInterval) {
+      clearInterval(activationTickInterval);
+      activationTickInterval = null;
+    }
   }
+  updateActivationBanner();
 }
 
 async function returnActivation() {
@@ -1506,6 +1528,7 @@ document.getElementById("activation-btn").addEventListener("click", async () => 
 });
 
 document.getElementById("settings-activation-return-btn").addEventListener("click", returnActivation);
+document.getElementById("activation-banner").addEventListener("click", openSettingsPanel);
 
 document.getElementById("activation-form").addEventListener("submit", async (e) => {
   e.preventDefault();
