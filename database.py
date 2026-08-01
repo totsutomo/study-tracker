@@ -74,7 +74,9 @@ CREATE TABLE IF NOT EXISTS activation_logs (
     triggered_at TEXT NOT NULL,
     note TEXT,
     returned_at TEXT,
-    reminded_at TEXT
+    reminded_at TEXT,
+    mood TEXT,
+    mood_reason TEXT
 );
 """
 
@@ -132,6 +134,12 @@ def _migrate(conn):
         conn.execute("ALTER TABLE events ADD COLUMN last_notified_occurrence TEXT")
     if "note" not in event_cols:
         conn.execute("ALTER TABLE events ADD COLUMN note TEXT")
+
+    activation_cols = [row[1] for row in conn.execute("PRAGMA table_info(activation_logs)").fetchall()]
+    if "mood" not in activation_cols:
+        conn.execute("ALTER TABLE activation_logs ADD COLUMN mood TEXT")
+    if "mood_reason" not in activation_cols:
+        conn.execute("ALTER TABLE activation_logs ADD COLUMN mood_reason TEXT")
     conn.commit()
 
 

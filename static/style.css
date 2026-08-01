@@ -415,6 +415,52 @@ button.secondary {
   border-color: var(--accent);
 }
 
+.mood-picker,
+.mood-reason-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.mood-btn,
+.reason-btn {
+  flex: 1;
+  min-width: 70px;
+  background: var(--card);
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 6px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.mood-btn.active,
+.reason-btn.active {
+  background: var(--accent);
+  color: #06141a;
+  border-color: var(--accent);
+}
+
+.mood-reason-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  list-style: none;
+  padding: 0;
+  margin: 4px 0;
+}
+
+.mood-reason-list li {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
 .quick-date-btn,
 .time-toggle-btn {
   background: var(--card);
@@ -1086,6 +1132,20 @@ body.focus-open #tabbar {
   border-radius: 50%;
   background: var(--neutral-flag);
   display: inline-block;
+}
+
+.cal-min-mark {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #04222a;
+  font-size: 7px;
+  font-weight: 800;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 #activation-export-text {

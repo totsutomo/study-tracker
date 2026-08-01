@@ -105,6 +105,8 @@ class PushSubscribeIn(BaseModel):
 class ActivationLogCreate(BaseModel):
     triggered_at: str  # "YYYY-MM-DD HH:MM:SS", client local time
     note: str | None = None
+    mood: str | None = None  # "good" | "normal" | "heavy"
+    mood_reason: str | None = None  # only meaningful when mood == "heavy"
 
 
 class ActivationLogReturn(BaseModel):
@@ -373,6 +375,25 @@ def study_log_days(year: int, month: int):
     return result
 
 
+@app.get("/api/study-logs/minimum-achieved-days")
+def study_log_minimum_achieved_days(year: int, month: int):
+    conn = get_connection()
+    settings = _read_settings(conn)
+    minimum = settings.get("daily_minimum_minutes")
+    if not minimum:
+        conn.close()
+        return []
+    cur = conn.execute(
+        "SELECT date(logged_at) AS d, SUM(minutes) AS total_minutes FROM study_logs "
+        "WHERE strftime('%Y', logged_at) = ? AND strftime('%m', logged_at) = ? "
+        "GROUP BY d HAVING total_minutes >= ?",
+        (str(year), f"{month:02d}", minimum),
+    )
+    result = [row[0] for row in cur.fetchall()]
+    conn.close()
+    return result
+
+
 @app.get("/api/study-logs/daily")
 def study_log_daily():
     conn = get_connection()
@@ -382,6 +403,23 @@ def study_log_daily():
         FROM study_logs
         WHERE logged_at >= datetime('now', '-13 days', 'start of day')
         GROUP BY d, subject
+        ORDER BY d
+        """
+    )
+    result = rows_to_dicts(cur)
+    conn.close()
+    return result
+
+
+@app.get("/api/study-logs/daily-trend")
+def study_log_daily_trend():
+    conn = get_connection()
+    cur = conn.execute(
+        """
+        SELECT date(logged_at) AS d, SUM(minutes) AS total_minutes
+        FROM study_logs
+        WHERE logged_at >= datetime('now', '-13 days', 'start of day')
+        GROUP BY d
         ORDER BY d
         """
     )
@@ -487,6 +525,8 @@ def update_settings(payload: SettingsUpdate):
 # ---------- activation logs ----------
 
 ACTIVATION_REMINDER_MINUTES = 45
+ACTIVATION_ENCOURAGEMENT_WINDOW_DAYS = 14
+ACTIVATION_ENCOURAGEMENT_HOUR = 18
 
 
 @app.get("/api/activation-logs")
@@ -539,6 +579,21 @@ def activation_log_stats():
     return {"week_count": week_count, "month_count": month_count, "total_count": total_count}
 
 
+@app.get("/api/activation-logs/mood-reasons")
+def activation_log_mood_reasons(days: int = 30):
+    conn = get_connection()
+    cur = conn.execute(
+        "SELECT mood_reason, COUNT(*) AS count FROM activation_logs "
+        "WHERE mood = 'heavy' AND mood_reason IS NOT NULL "
+        "AND triggered_at >= datetime('now', ? , 'start of day') "
+        "GROUP BY mood_reason ORDER BY count DESC",
+        (f"-{days} days",),
+    )
+    result = rows_to_dicts(cur)
+    conn.close()
+    return result
+
+
 @app.get("/api/activation-logs/export")
 def export_activation_logs(since: str | None = None):
     conn = get_connection()
@@ -566,8 +621,8 @@ def export_activation_logs(since: str | None = None):
 def create_activation_log(log: ActivationLogCreate):
     conn = get_connection()
     cur = conn.execute(
-        "INSERT INTO activation_logs (triggered_at, note) VALUES (?, ?)",
-        (log.triggered_at, log.note),
+        "INSERT INTO activation_logs (triggered_at, note, mood, mood_reason) VALUES (?, ?, ?, ?)",
+        (log.triggered_at, log.note, log.mood, log.mood_reason if log.mood == "heavy" else None),
     )
     conn.commit()
     new_id = cur.lastrowid
@@ -892,6 +947,56 @@ def push_check(token: str | None = None):
             conn.execute(
                 "UPDATE activation_logs SET reminded_at = datetime('now') WHERE id = ?", (act["id"],)
             )
+
+    if int(conn.execute("SELECT CAST(strftime('%H', 'now') AS INTEGER)").fetchone()[0]) >= ACTIVATION_ENCOURAGEMENT_HOUR:
+        today_str = conn.execute("SELECT date('now')").fetchone()[0]
+        last_notified_row = conn.execute(
+            "SELECT value FROM settings WHERE key = 'activation_encouragement_notified_date'"
+        ).fetchone()
+        if not last_notified_row or last_notified_row[0] != today_str:
+            avg_count = conn.execute(
+                "SELECT COUNT(*) * 1.0 / ? FROM activation_logs "
+                "WHERE triggered_at >= datetime('now', ?, 'start of day') "
+                "AND triggered_at < datetime('now', 'start of day')",
+                (ACTIVATION_ENCOURAGEMENT_WINDOW_DAYS, f"-{ACTIVATION_ENCOURAGEMENT_WINDOW_DAYS} days"),
+            ).fetchone()[0]
+            today_count = conn.execute(
+                "SELECT COUNT(*) FROM activation_logs WHERE triggered_at >= datetime('now', 'start of day')"
+            ).fetchone()[0]
+            avg_first_min = conn.execute(
+                "SELECT AVG(first_min) FROM ("
+                "SELECT MIN(CAST(strftime('%H', triggered_at) AS INTEGER) * 60 "
+                "+ CAST(strftime('%M', triggered_at) AS INTEGER)) AS first_min "
+                "FROM activation_logs "
+                "WHERE triggered_at >= datetime('now', ?, 'start of day') "
+                "AND triggered_at < datetime('now', 'start of day') "
+                "GROUP BY date(triggered_at))",
+                (f"-{ACTIVATION_ENCOURAGEMENT_WINDOW_DAYS} days",),
+            ).fetchone()[0]
+            today_first_min = conn.execute(
+                "SELECT MIN(CAST(strftime('%H', triggered_at) AS INTEGER) * 60 "
+                "+ CAST(strftime('%M', triggered_at) AS INTEGER)) "
+                "FROM activation_logs WHERE triggered_at >= datetime('now', 'start of day')"
+            ).fetchone()[0]
+
+            notably_fewer = avg_count >= 1 and today_count <= avg_count * 0.5
+            notably_later = (
+                avg_first_min is not None
+                and today_first_min is not None
+                and today_first_min - avg_first_min >= 120
+            )
+
+            if notably_fewer or notably_later:
+                sent_count += _send_push_to_all(conn, {
+                    "title": "study-tracker",
+                    "body": "今日は少し記録が静かだね。無理のない範囲で大丈夫だよ",
+                    "tag": "activation-encouragement",
+                })
+                conn.execute(
+                    "INSERT INTO settings (key, value) VALUES ('activation_encouragement_notified_date', ?) "
+                    "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                    (today_str,),
+                )
 
     focus_rows = {row[0]: row[1] for row in conn.execute(
         "SELECT key, value FROM settings WHERE key IN "

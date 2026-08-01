@@ -155,6 +155,13 @@
       </div>
       <div class="stat-bar-track"><div class="stat-bar-fill" id="month-progress-fill"></div></div>
     </div>
+    <div class="goal-progress-card">
+      <div class="goal-progress-row">
+        <span>直近14日間の推移</span>
+      </div>
+      <div id="trend-chart"></div>
+      <p class="meta" id="trend-chart-detail">棒をタップすると内訳が表示されます</p>
+    </div>
     <form id="goal-minutes-form" class="add-form">
       <input type="number" id="daily-goal-input" placeholder="1日の最低ライン(分)" min="0" step="1">
       <input type="number" id="weekly-goal-input" placeholder="週間目標(時間)" min="0" step="0.5">
@@ -198,6 +205,7 @@
     <h2>発動ログ</h2>
     <p class="meta" id="activation-current-status"></p>
     <p class="meta" id="activation-stats"></p>
+    <ul id="activation-mood-reasons" class="mood-reason-list hidden"></ul>
     <ul id="activation-list" class="list"></ul>
     <div class="due-row">
       <button type="button" id="activation-export-btn" class="quick-date-btn">直近7日分をエクスポート</button>
@@ -418,6 +426,17 @@
   <form id="activation-form" class="add-form">
     <p class="meta" id="activation-time-preview"></p>
     <textarea id="activation-note" rows="3" placeholder="きっかけ(任意)"></textarea>
+    <div class="mood-picker" id="activation-mood-picker">
+      <button type="button" class="mood-btn" data-mood="good">絶好調</button>
+      <button type="button" class="mood-btn" data-mood="normal">普通</button>
+      <button type="button" class="mood-btn" data-mood="heavy">重い</button>
+    </div>
+    <div class="mood-reason-picker hidden" id="activation-reason-picker">
+      <button type="button" class="reason-btn" data-reason="寝不足">寝不足</button>
+      <button type="button" class="reason-btn" data-reason="前日の遅れ">前日の遅れ</button>
+      <button type="button" class="reason-btn" data-reason="タスク過多">タスク過多</button>
+      <button type="button" class="reason-btn" data-reason="特になし">特になし</button>
+    </div>
     <button type="submit">記録</button>
   </form>
 </div>

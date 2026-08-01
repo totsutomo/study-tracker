@@ -1278,6 +1278,52 @@ async function loadGoalProgress() {
 
   document.getElementById("weekly-goal-input").value = weekGoalHours || "";
   document.getElementById("monthly-goal-input").value = monthGoalHours || "";
+
+  loadTrendChart();
+}
+
+async function loadTrendChart() {
+  const raw = await api("/api/study-logs/daily-trend");
+  const dates = last14Dates();
+  const totalsByDate = {};
+  dates.forEach((d) => {
+    totalsByDate[d] = 0;
+  });
+  raw.forEach((row) => {
+    totalsByDate[row.d] = row.total_minutes;
+  });
+  renderTrendChart(dates, dates.map((d) => totalsByDate[d]));
+}
+
+function renderTrendChart(dates, totals) {
+  const container = document.getElementById("trend-chart");
+  const maxTotal = Math.max(60, ...totals);
+  const chartW = 320;
+  const chartH = 70;
+  const padBottom = 12;
+  const plotH = chartH - padBottom;
+  const barGap = 3;
+  const barW = chartW / dates.length - barGap;
+
+  const bars = dates
+    .map((d, i) => {
+      const x = i * (barW + barGap);
+      const minutes = totals[i];
+      const h = (minutes / maxTotal) * plotH;
+      const y = plotH - h;
+      const axisLabel = d.slice(8, 10);
+      return `<rect x="${x}" y="${y}" width="${Math.max(barW, 0)}" height="${Math.max(h, 0)}" fill="var(--accent)" rx="2" data-date="${d}" data-minutes="${minutes}"></rect><text x="${x + barW / 2}" y="${chartH}" font-size="7" fill="var(--text-muted)" text-anchor="middle">${axisLabel}</text>`;
+    })
+    .join("");
+
+  container.innerHTML = `<svg viewBox="0 0 ${chartW} ${chartH}" class="study-svg-chart">${bars}</svg>`;
+
+  container.querySelectorAll("rect[data-date]").forEach((rect) => {
+    rect.addEventListener("click", () => {
+      const { date: d, minutes } = rect.dataset;
+      document.getElementById("trend-chart-detail").textContent = `${d} 合計: ${minutes}分`;
+    });
+  });
 }
 
 document.getElementById("goal-minutes-form").addEventListener("submit", async (e) => {
@@ -1463,6 +1509,22 @@ async function loadActivationStats() {
     `今週 ${s.week_count}件 / 今月 ${s.month_count}件 / 累計 ${s.total_count}件`;
 }
 
+async function loadActivationMoodReasons() {
+  const rows = await api("/api/activation-logs/mood-reasons?days=30");
+  const list = document.getElementById("activation-mood-reasons");
+  list.innerHTML = "";
+  if (rows.length === 0) {
+    list.classList.add("hidden");
+    return;
+  }
+  list.classList.remove("hidden");
+  rows.forEach((r) => {
+    const li = document.createElement("li");
+    li.textContent = `${r.mood_reason} ${r.count}件`;
+    list.appendChild(li);
+  });
+}
+
 async function loadActivationList() {
   const logs = await api("/api/activation-logs?limit=30");
   const list = document.getElementById("activation-list");
@@ -1487,6 +1549,7 @@ async function loadActivationList() {
       loadActivationList();
       loadActivationActive();
       loadActivationStats();
+      loadActivationMoodReasons();
       loadCalendar();
     });
     list.appendChild(li);
@@ -1497,17 +1560,51 @@ function refreshActivation() {
   loadActivationActive();
   loadActivationList();
   loadActivationStats();
+  loadActivationMoodReasons();
   loadCalendar();
 }
 
 const activationPanel = document.getElementById("activation-panel");
 const activationBackdrop = document.getElementById("activation-backdrop");
+let activationSelectedMood = null;
+let activationSelectedReason = null;
+
+document.querySelectorAll("#activation-mood-picker .mood-btn").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    const isSame = activationSelectedMood === btn.dataset.mood;
+    activationSelectedMood = isSame ? null : btn.dataset.mood;
+    document.querySelectorAll("#activation-mood-picker .mood-btn").forEach((b) => {
+      b.classList.toggle("active", b === btn && !isSame);
+    });
+    const reasonPicker = document.getElementById("activation-reason-picker");
+    reasonPicker.classList.toggle("hidden", activationSelectedMood !== "heavy");
+    if (activationSelectedMood !== "heavy") {
+      activationSelectedReason = null;
+      document.querySelectorAll("#activation-reason-picker .reason-btn").forEach((b) => b.classList.remove("active"));
+    }
+  });
+});
+
+document.querySelectorAll("#activation-reason-picker .reason-btn").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    const isSame = activationSelectedReason === btn.dataset.reason;
+    activationSelectedReason = isSame ? null : btn.dataset.reason;
+    document.querySelectorAll("#activation-reason-picker .reason-btn").forEach((b) => {
+      b.classList.toggle("active", b === btn && !isSame);
+    });
+  });
+});
 
 function openActivationPanel() {
   activationPanel.classList.remove("hidden");
   activationBackdrop.classList.remove("hidden");
   document.getElementById("activation-time-preview").textContent = `記録時刻: ${nowHHMM()}`;
   document.getElementById("activation-note").value = "";
+  activationSelectedMood = null;
+  activationSelectedReason = null;
+  document.querySelectorAll("#activation-mood-picker .mood-btn").forEach((b) => b.classList.remove("active"));
+  document.querySelectorAll("#activation-reason-picker .reason-btn").forEach((b) => b.classList.remove("active"));
+  document.getElementById("activation-reason-picker").classList.add("hidden");
   document.getElementById("activation-note").focus();
 }
 
@@ -1535,7 +1632,12 @@ document.getElementById("activation-form").addEventListener("submit", async (e) 
   const note = document.getElementById("activation-note").value.trim() || null;
   await api("/api/activation-logs", {
     method: "POST",
-    body: JSON.stringify({ triggered_at: nowLocalTimestamp(), note }),
+    body: JSON.stringify({
+      triggered_at: nowLocalTimestamp(),
+      note,
+      mood: activationSelectedMood,
+      mood_reason: activationSelectedReason,
+    }),
   });
   closeActivationPanel();
   refreshActivation();
@@ -1584,6 +1686,7 @@ let calEventsCache = [];
 let calTodosCache = [];
 let calStudyDaysCache = new Set();
 let calActivationDaysCache = new Set();
+let calMinAchievedDaysCache = new Set();
 const CAL_HOUR_HEIGHT = 52; // px per hour in the week time grid
 
 function timeToMinutes(t) {
@@ -1628,7 +1731,7 @@ async function loadCalendar() {
       `${startD.getFullYear()}-${startD.getMonth() + 1}`,
       `${endD.getFullYear()}-${endD.getMonth() + 1}`,
     ]);
-    const [eventLists, todos, studyDayLists, activationDayLists] = await Promise.all([
+    const [eventLists, todos, studyDayLists, activationDayLists, minAchievedDayLists] = await Promise.all([
       Promise.all(
         [...monthKeys].map((key) => {
           const [y, m] = key.split("-").map(Number);
@@ -1648,23 +1751,32 @@ async function loadCalendar() {
           return api(`/api/activation-logs/days?year=${y}&month=${m}`);
         })
       ),
+      Promise.all(
+        [...monthKeys].map((key) => {
+          const [y, m] = key.split("-").map(Number);
+          return api(`/api/study-logs/minimum-achieved-days?year=${y}&month=${m}`);
+        })
+      ),
     ]);
     calEventsCache = eventLists.flat();
     calTodosCache = todos.filter((t) => t.due_date);
     calStudyDaysCache = new Set(studyDayLists.flat());
     calActivationDaysCache = new Set(activationDayLists.flat());
+    calMinAchievedDaysCache = new Set(minAchievedDayLists.flat());
   } else {
     document.getElementById("cal-month-label").textContent = `${calYear}年${calMonth}月`;
-    const [events, todos, studyDays, activationDays] = await Promise.all([
+    const [events, todos, studyDays, activationDays, minAchievedDays] = await Promise.all([
       api(`/api/events?year=${calYear}&month=${calMonth}`),
       api("/api/todos"),
       api(`/api/study-logs/days?year=${calYear}&month=${calMonth}`),
       api(`/api/activation-logs/days?year=${calYear}&month=${calMonth}`),
+      api(`/api/study-logs/minimum-achieved-days?year=${calYear}&month=${calMonth}`),
     ]);
     calEventsCache = events;
     calTodosCache = todos.filter((t) => t.due_date);
     calStudyDaysCache = new Set(studyDays);
     calActivationDaysCache = new Set(activationDays);
+    calMinAchievedDaysCache = new Set(minAchievedDays);
   }
 
   const isWeek = calViewMode === "week";
@@ -1715,6 +1827,7 @@ function renderCalGrid() {
       const todoMark = dayTodos.length ? `<span class="cal-todo-dot"></span>` : "";
       const studyMark = calStudyDaysCache.has(c.date) ? `<span class="cal-log-dot"></span>` : "";
       const activationMark = calActivationDaysCache.has(c.date) ? `<span class="cal-activation-dot"></span>` : "";
+      const minAchievedMark = calMinAchievedDaysCache.has(c.date) ? `<span class="cal-min-mark">✓</span>` : "";
       const classes = ["cal-day"];
       const weekdayCol = i % 7;
       if (weekdayCol === 5) classes.push("sat");
@@ -1724,7 +1837,7 @@ function renderCalGrid() {
       return `
         <div class="${classes.join(" ")}" data-date="${c.date}">
           <span class="cal-day-num">${c.day}</span>
-          <div class="cal-day-marks">${dots}${todoMark}${studyMark}${activationMark}</div>
+          <div class="cal-day-marks">${dots}${todoMark}${studyMark}${activationMark}${minAchievedMark}</div>
         </div>
       `;
     })
@@ -2282,6 +2395,7 @@ updatePushStatus();
   loadActivationActive();
   loadActivationList();
   loadActivationStats();
+  loadActivationMoodReasons();
   loadCalendar();
   restoreSession();
 })();
