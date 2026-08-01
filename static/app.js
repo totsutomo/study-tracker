@@ -682,9 +682,70 @@ let overlayMinimized = false;
 
 const RING_CIRCUMFERENCE = 2 * Math.PI * 54;
 const RING_PERIOD_MS = 25 * 60 * 1000; // countup ring completes one lap every 25 min, purely decorative
+const FOCUS_SESSION_KEY = "focusSession";
 
 function currentElapsedMs() {
   return accumulatedMs + (segmentStart ? Date.now() - segmentStart : 0);
+}
+
+// timer state lives in plain JS vars, which a page reload (manual refresh, PWA relaunch,
+// server cold-start forcing a reconnect) wipes out; persist it so restoreSession() can rebuild
+// the running clock from wall-clock timestamps instead of losing it silently.
+function persistSession() {
+  if (!timerSubject) {
+    localStorage.removeItem(FOCUS_SESSION_KEY);
+    return;
+  }
+  localStorage.setItem(
+    FOCUS_SESSION_KEY,
+    JSON.stringify({
+      subject: timerSubject,
+      todoId: activeTodoId,
+      accumulatedMs,
+      segmentStart,
+      isPaused,
+      sessionMode,
+      sessionTargetMs,
+      sessionClockOnly,
+      overlayMinimized,
+    })
+  );
+}
+
+function restoreSession() {
+  const raw = localStorage.getItem(FOCUS_SESSION_KEY);
+  if (!raw) return;
+  let saved;
+  try {
+    saved = JSON.parse(raw);
+  } catch {
+    localStorage.removeItem(FOCUS_SESSION_KEY);
+    return;
+  }
+  if (!saved.subject) {
+    localStorage.removeItem(FOCUS_SESSION_KEY);
+    return;
+  }
+
+  timerSubject = saved.subject;
+  activeTodoId = saved.todoId;
+  accumulatedMs = saved.accumulatedMs;
+  segmentStart = saved.segmentStart;
+  isPaused = saved.isPaused;
+  sessionMode = saved.sessionMode;
+  sessionTargetMs = saved.sessionTargetMs;
+  sessionClockOnly = saved.sessionClockOnly;
+  sessionCompleted = false;
+  overlayMinimized = saved.overlayMinimized;
+
+  if (overlayMinimized) {
+    showMiniBar();
+  } else {
+    openFocusOverlay();
+  }
+  syncFocusOpenBodyClass();
+  updatePauseUI();
+  if (!isPaused) startTimerTick();
 }
 
 function beginSession(subject, todoId, mode, targetMs, clockOnly) {
@@ -700,6 +761,7 @@ function beginSession(subject, todoId, mode, targetMs, clockOnly) {
   overlayMinimized = false;
   openFocusOverlay();
   startTimerTick();
+  persistSession();
 }
 
 function updateFocusDisplay() {
@@ -770,6 +832,7 @@ function minimizeFocusOverlay() {
   if (sessionClockOnly && !isPaused) {
     pauseSession();
   }
+  persistSession();
 }
 
 function expandFocusOverlay() {
@@ -778,6 +841,7 @@ function expandFocusOverlay() {
   hideMiniBar();
   document.getElementById("focus-overlay").classList.remove("hidden");
   syncFocusOpenBodyClass();
+  persistSession();
 }
 
 document.getElementById("focus-minimize-btn").addEventListener("click", minimizeFocusOverlay);
@@ -808,6 +872,7 @@ function pauseSession() {
   isPaused = true;
   stopTimerTick();
   updatePauseUI();
+  persistSession();
 }
 
 function resumeSession() {
@@ -816,6 +881,7 @@ function resumeSession() {
   isPaused = false;
   startTimerTick();
   updatePauseUI();
+  persistSession();
 }
 
 function updatePauseUI() {
@@ -862,6 +928,7 @@ function resetSessionState() {
   overlayMinimized = false;
   closeFocusOverlay();
   hideMiniBar();
+  localStorage.removeItem(FOCUS_SESSION_KEY);
 }
 
 function discardSession() {
@@ -2117,6 +2184,7 @@ updatePushStatus();
   loadActivationList();
   loadActivationStats();
   loadCalendar();
+  restoreSession();
 })();
 
 if ("serviceWorker" in navigator) {
