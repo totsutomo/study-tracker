@@ -589,6 +589,7 @@ ACTIVATION_ENCOURAGEMENT_WINDOW_DAYS = 14
 ACTIVATION_ENCOURAGEMENT_HOUR = 18
 
 MOOD_REMINDER_HOUR = 21
+MOOD_REMINDER_ENABLED = False  # 一時停止中
 
 
 @app.get("/api/activation-logs")
@@ -1060,7 +1061,7 @@ def push_check(token: str | None = None):
                     (today_str,),
                 )
 
-    if int(conn.execute("SELECT CAST(strftime('%H', 'now') AS INTEGER)").fetchone()[0]) >= MOOD_REMINDER_HOUR:
+    if MOOD_REMINDER_ENABLED and int(conn.execute("SELECT CAST(strftime('%H', 'now') AS INTEGER)").fetchone()[0]) >= MOOD_REMINDER_HOUR:
         today_str = conn.execute("SELECT date('now')").fetchone()[0]
         mood_logged_today = conn.execute(
             "SELECT 1 FROM mood_logs WHERE date = ?", (today_str,)
