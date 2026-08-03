@@ -155,26 +155,6 @@
       </div>
       <div class="stat-bar-track"><div class="stat-bar-fill" id="month-progress-fill"></div></div>
     </div>
-    <div class="goal-progress-card">
-      <div class="goal-progress-row">
-        <span>今日の気持ち</span>
-        <span class="meta" id="mood-today-status">未記録</span>
-      </div>
-      <div class="mood-slider-row">
-        <input type="range" id="mood-slider" class="mood-slider" min="1" max="10" step="1" value="5">
-        <span id="mood-slider-value">5</span>
-      </div>
-      <div class="mood-scale-labels"><span>1: つらい</span><span>10: 絶好調</span></div>
-      <input type="text" id="mood-note" placeholder="メモ(任意)">
-      <button type="button" id="mood-save-btn">記録する</button>
-    </div>
-    <div class="goal-progress-card">
-      <div class="goal-progress-row">
-        <span>気持ちの推移(直近14日間)</span>
-      </div>
-      <div id="mood-chart"></div>
-      <p class="meta" id="mood-chart-detail">点をタップすると詳細が表示されます</p>
-    </div>
     <form id="goal-minutes-form" class="add-form">
       <input type="number" id="daily-goal-input" placeholder="1日の最低ライン(分)" min="0" step="1">
       <input type="number" id="weekly-goal-input" placeholder="週間目標(時間)" min="0" step="0.5">
@@ -203,6 +183,38 @@
 
     <h3>ログ履歴</h3>
     <ul id="study-log-list" class="list"></ul>
+  </section>
+
+  <section id="tab-mood" class="tab-panel">
+    <h2>気持ち</h2>
+    <div class="goal-progress-card">
+      <div class="goal-progress-row">
+        <span>今日の気持ち</span>
+        <span class="meta" id="mood-today-status">未記録</span>
+      </div>
+      <div class="mood-scale-buttons" id="mood-scale-buttons">
+        <button type="button" class="mood-scale-btn" data-score="1">1</button>
+        <button type="button" class="mood-scale-btn" data-score="2">2</button>
+        <button type="button" class="mood-scale-btn" data-score="3">3</button>
+        <button type="button" class="mood-scale-btn" data-score="4">4</button>
+        <button type="button" class="mood-scale-btn" data-score="5">5</button>
+        <button type="button" class="mood-scale-btn" data-score="6">6</button>
+        <button type="button" class="mood-scale-btn" data-score="7">7</button>
+        <button type="button" class="mood-scale-btn" data-score="8">8</button>
+        <button type="button" class="mood-scale-btn" data-score="9">9</button>
+        <button type="button" class="mood-scale-btn" data-score="10">10</button>
+      </div>
+      <div class="mood-scale-labels"><span>1: つらい</span><span>10: 絶好調</span></div>
+      <input type="text" id="mood-note" placeholder="メモ(任意)">
+      <button type="button" id="mood-save-btn">記録する</button>
+    </div>
+    <div class="goal-progress-card">
+      <div class="goal-progress-row">
+        <span>気持ちの推移(直近14日間)</span>
+      </div>
+      <div id="mood-chart"></div>
+      <p class="meta" id="mood-chart-detail">点をタップすると詳細が表示されます</p>
+    </div>
   </section>
 
   <section id="tab-goal" class="tab-panel">
@@ -460,6 +472,7 @@
   <button class="tab-btn active" data-tab="tab-todo">ToDo</button>
   <button class="tab-btn" data-tab="tab-calendar">予定</button>
   <button class="tab-btn" data-tab="tab-study">学習ログ</button>
+  <button class="tab-btn" data-tab="tab-mood">気持ち</button>
   <button class="tab-btn" data-tab="tab-goal">目標</button>
 </nav>
 

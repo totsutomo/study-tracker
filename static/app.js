@@ -1299,23 +1299,30 @@ async function loadGoalProgress() {
   loadMoodPanel();
 }
 
+let selectedMoodScore = 5;
+
+function setSelectedMoodScore(score) {
+  selectedMoodScore = score;
+  document.querySelectorAll(".mood-scale-btn").forEach((btn) => {
+    btn.classList.toggle("active", parseInt(btn.dataset.score, 10) === score);
+  });
+}
+
 async function loadMoodPanel() {
   const rows = await api("/api/mood-logs?days=14");
   const today = todayStr();
   const todayEntry = rows.find((r) => r.date === today);
 
   const status = document.getElementById("mood-today-status");
-  const slider = document.getElementById("mood-slider");
-  const sliderValue = document.getElementById("mood-slider-value");
   const noteInput = document.getElementById("mood-note");
   if (todayEntry) {
     status.textContent = "記録済み";
-    slider.value = todayEntry.score;
     noteInput.value = todayEntry.note || "";
+    setSelectedMoodScore(todayEntry.score);
   } else {
     status.textContent = "未記録";
+    setSelectedMoodScore(selectedMoodScore);
   }
-  sliderValue.textContent = slider.value;
 
   const dates = last14Dates();
   const scoreByDate = {};
@@ -1373,12 +1380,12 @@ function renderMoodChart(dates, scores, noteByDate) {
   });
 }
 
-document.getElementById("mood-slider").addEventListener("input", (e) => {
-  document.getElementById("mood-slider-value").textContent = e.target.value;
+document.querySelectorAll(".mood-scale-btn").forEach((btn) => {
+  btn.addEventListener("click", () => setSelectedMoodScore(parseInt(btn.dataset.score, 10)));
 });
 
 document.getElementById("mood-save-btn").addEventListener("click", async () => {
-  const score = parseInt(document.getElementById("mood-slider").value, 10);
+  const score = selectedMoodScore;
   const note = document.getElementById("mood-note").value.trim();
   await api("/api/mood-logs", {
     method: "PUT",

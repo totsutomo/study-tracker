@@ -830,23 +830,27 @@ body.focus-open #tabbar {
   display: block;
 }
 
-.mood-slider-row {
+.mood-scale-buttons {
   display: flex;
-  align-items: center;
-  gap: 10px;
+  gap: 4px;
 }
 
-.mood-slider {
+.mood-scale-btn {
   flex: 1;
-  accent-color: var(--accent);
+  min-height: 40px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+  padding: 0;
 }
 
-#mood-slider-value {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--accent);
-  min-width: 24px;
-  text-align: right;
+.mood-scale-btn.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
 }
 
 .mood-scale-labels {
