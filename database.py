@@ -78,6 +78,14 @@ CREATE TABLE IF NOT EXISTS activation_logs (
     mood TEXT,
     mood_reason TEXT
 );
+
+CREATE TABLE IF NOT EXISTS mood_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    date TEXT UNIQUE NOT NULL,
+    score INTEGER NOT NULL,
+    note TEXT,
+    logged_at TEXT DEFAULT (datetime('now'))
+);
 """
 
 DEFAULT_CATEGORIES = ("英語", "数学", "世界史", "その他")

@@ -1296,60 +1296,96 @@ async function loadGoalProgress() {
   document.getElementById("weekly-goal-input").value = weekGoalHours || "";
   document.getElementById("monthly-goal-input").value = monthGoalHours || "";
 
-  loadTrendChart(p.daily_minimum_minutes);
+  loadMoodPanel();
 }
 
-async function loadTrendChart(minimumMinutes) {
-  const raw = await api("/api/study-logs/daily-trend");
+async function loadMoodPanel() {
+  const rows = await api("/api/mood-logs?days=14");
+  const today = todayStr();
+  const todayEntry = rows.find((r) => r.date === today);
+
+  const status = document.getElementById("mood-today-status");
+  const slider = document.getElementById("mood-slider");
+  const sliderValue = document.getElementById("mood-slider-value");
+  const noteInput = document.getElementById("mood-note");
+  if (todayEntry) {
+    status.textContent = "記録済み";
+    slider.value = todayEntry.score;
+    noteInput.value = todayEntry.note || "";
+  } else {
+    status.textContent = "未記録";
+  }
+  sliderValue.textContent = slider.value;
+
   const dates = last14Dates();
-  const totalsByDate = {};
-  dates.forEach((d) => {
-    totalsByDate[d] = 0;
+  const scoreByDate = {};
+  const noteByDate = {};
+  rows.forEach((row) => {
+    scoreByDate[row.date] = row.score;
+    noteByDate[row.date] = row.note;
   });
-  raw.forEach((row) => {
-    totalsByDate[row.d] = row.total_minutes;
-  });
-  renderTrendChart(dates, dates.map((d) => totalsByDate[d]), minimumMinutes);
+  renderMoodChart(dates, dates.map((d) => (d in scoreByDate ? scoreByDate[d] : null)), noteByDate);
 }
 
-function renderTrendChart(dates, totals, minimumMinutes) {
-  const container = document.getElementById("trend-chart");
-  const maxTotal = Math.max(60, minimumMinutes || 0, ...totals);
+function renderMoodChart(dates, scores, noteByDate) {
+  const container = document.getElementById("mood-chart");
   const chartW = 320;
   const chartH = 70;
   const padBottom = 12;
+  const padX = 8;
   const plotH = chartH - padBottom;
-  const barGap = 3;
-  const barW = chartW / dates.length - barGap;
+  const plotW = chartW - padX * 2;
+  const stepX = dates.length > 1 ? plotW / (dates.length - 1) : 0;
+  const xs = dates.map((_, i) => padX + i * stepX);
 
-  const bars = dates
-    .map((d, i) => {
-      const x = i * (barW + barGap);
-      const minutes = totals[i];
-      const h = (minutes / maxTotal) * plotH;
-      const y = plotH - h;
-      const axisLabel = d.slice(8, 10);
-      const achieved = minimumMinutes ? minutes >= minimumMinutes : true;
-      const fill = achieved ? "var(--accent)" : "var(--neutral-flag)";
-      return `<rect x="${x}" y="${y}" width="${Math.max(barW, 0)}" height="${Math.max(h, 0)}" fill="${fill}" rx="2" data-date="${d}" data-minutes="${minutes}"></rect><text x="${x + barW / 2}" y="${chartH}" font-size="7" fill="var(--text-muted)" text-anchor="middle">${axisLabel}</text>`;
-    })
+  const axisLabels = dates
+    .map((d, i) => `<text x="${xs[i]}" y="${chartH}" font-size="7" fill="var(--text-muted)" text-anchor="middle">${d.slice(8, 10)}</text>`)
     .join("");
 
-  container.innerHTML = `<svg viewBox="0 0 ${chartW} ${chartH}" class="study-svg-chart">${bars}</svg>`;
+  let pathD = "";
+  let drawing = false;
+  const dots = [];
+  dates.forEach((d, i) => {
+    const score = scores[i];
+    if (score == null) {
+      drawing = false;
+      return;
+    }
+    const y = plotH - ((score - 1) / 9) * plotH;
+    pathD += `${drawing ? "L" : "M"}${xs[i]},${y} `;
+    drawing = true;
+    dots.push(`<circle cx="${xs[i]}" cy="${y}" r="4" fill="var(--accent)" data-date="${d}" data-score="${score}"></circle>`);
+  });
 
-  container.querySelectorAll("rect[data-date]").forEach((rect) => {
-    rect.addEventListener("click", () => {
-      const { date: d, minutes } = rect.dataset;
-      const detail = document.getElementById("trend-chart-detail");
-      if (minimumMinutes) {
-        const reached = Number(minutes) >= minimumMinutes;
-        detail.textContent = `${d} 合計: ${minutes}分${reached ? " ✓達成" : ""}`;
-      } else {
-        detail.textContent = `${d} 合計: ${minutes}分`;
-      }
+  const path = pathD
+    ? `<path d="${pathD.trim()}" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>`
+    : "";
+
+  container.innerHTML = `<svg viewBox="0 0 ${chartW} ${chartH}" class="study-svg-chart">${path}${dots.join("")}${axisLabels}</svg>`;
+
+  container.querySelectorAll("circle[data-date]").forEach((circle) => {
+    circle.addEventListener("click", () => {
+      const { date: d, score } = circle.dataset;
+      const note = noteByDate[d];
+      const detail = document.getElementById("mood-chart-detail");
+      detail.textContent = note ? `${d} 気分: ${score}/10 (${note})` : `${d} 気分: ${score}/10`;
     });
   });
 }
+
+document.getElementById("mood-slider").addEventListener("input", (e) => {
+  document.getElementById("mood-slider-value").textContent = e.target.value;
+});
+
+document.getElementById("mood-save-btn").addEventListener("click", async () => {
+  const score = parseInt(document.getElementById("mood-slider").value, 10);
+  const note = document.getElementById("mood-note").value.trim();
+  await api("/api/mood-logs", {
+    method: "PUT",
+    body: JSON.stringify({ date: todayStr(), score, note: note || null }),
+  });
+  loadMoodPanel();
+});
 
 document.getElementById("goal-minutes-form").addEventListener("submit", async (e) => {
   e.preventDefault();

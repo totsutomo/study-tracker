@@ -830,6 +830,43 @@ body.focus-open #tabbar {
   display: block;
 }
 
+.mood-slider-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.mood-slider {
+  flex: 1;
+  accent-color: var(--accent);
+}
+
+#mood-slider-value {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--accent);
+  min-width: 24px;
+  text-align: right;
+}
+
+.mood-scale-labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--text-muted);
+  margin: 4px 0 10px;
+}
+
+#mood-note {
+  width: 100%;
+  box-sizing: border-box;
+  margin-bottom: 8px;
+}
+
+#mood-save-btn {
+  width: 100%;
+}
+
 .stats-header {
   display: flex;
   background: var(--card);

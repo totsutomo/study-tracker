@@ -157,10 +157,23 @@
     </div>
     <div class="goal-progress-card">
       <div class="goal-progress-row">
-        <span>直近14日間の最低ライン達成状況</span>
+        <span>今日の気持ち</span>
+        <span class="meta" id="mood-today-status">未記録</span>
       </div>
-      <div id="trend-chart"></div>
-      <p class="meta" id="trend-chart-detail">棒をタップすると分数が表示されます</p>
+      <div class="mood-slider-row">
+        <input type="range" id="mood-slider" class="mood-slider" min="1" max="10" step="1" value="5">
+        <span id="mood-slider-value">5</span>
+      </div>
+      <div class="mood-scale-labels"><span>1: つらい</span><span>10: 絶好調</span></div>
+      <input type="text" id="mood-note" placeholder="メモ(任意)">
+      <button type="button" id="mood-save-btn">記録する</button>
+    </div>
+    <div class="goal-progress-card">
+      <div class="goal-progress-row">
+        <span>気持ちの推移(直近14日間)</span>
+      </div>
+      <div id="mood-chart"></div>
+      <p class="meta" id="mood-chart-detail">点をタップすると詳細が表示されます</p>
     </div>
     <form id="goal-minutes-form" class="add-form">
       <input type="number" id="daily-goal-input" placeholder="1日の最低ライン(分)" min="0" step="1">

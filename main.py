@@ -125,6 +125,12 @@ class ActivationLogReturn(BaseModel):
     returned_at: str  # "YYYY-MM-DD HH:MM:SS", client local time
 
 
+class MoodLogUpsert(BaseModel):
+    date: str  # "YYYY-MM-DD", client local date
+    score: int  # 1-10
+    note: str | None = None
+
+
 WEEKDAY_CODES = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]  # index matches date.weekday()
 
 
@@ -423,21 +429,30 @@ def study_log_daily():
     return result
 
 
-@app.get("/api/study-logs/daily-trend")
-def study_log_daily_trend():
+@app.get("/api/mood-logs")
+def list_mood_logs(days: int = 14):
     conn = get_connection()
     cur = conn.execute(
-        """
-        SELECT date(logged_at) AS d, SUM(minutes) AS total_minutes
-        FROM study_logs
-        WHERE logged_at >= datetime('now', '-13 days', 'start of day')
-        GROUP BY d
-        ORDER BY d
-        """
+        "SELECT date, score, note FROM mood_logs ORDER BY date DESC LIMIT ?",
+        (days,),
     )
     result = rows_to_dicts(cur)
     conn.close()
+    result.reverse()
     return result
+
+
+@app.put("/api/mood-logs")
+def upsert_mood_log(payload: MoodLogUpsert):
+    conn = get_connection()
+    conn.execute(
+        "INSERT INTO mood_logs (date, score, note) VALUES (?, ?, ?) "
+        "ON CONFLICT(date) DO UPDATE SET score = excluded.score, note = excluded.note",
+        (payload.date, payload.score, payload.note),
+    )
+    conn.commit()
+    conn.close()
+    return {"ok": True}
 
 
 WEEKLY_CHART_WEEKS = 10
