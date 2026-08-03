@@ -1296,10 +1296,10 @@ async function loadGoalProgress() {
   document.getElementById("weekly-goal-input").value = weekGoalHours || "";
   document.getElementById("monthly-goal-input").value = monthGoalHours || "";
 
-  loadTrendChart();
+  loadTrendChart(p.daily_minimum_minutes);
 }
 
-async function loadTrendChart() {
+async function loadTrendChart(minimumMinutes) {
   const raw = await api("/api/study-logs/daily-trend");
   const dates = last14Dates();
   const totalsByDate = {};
@@ -1309,12 +1309,12 @@ async function loadTrendChart() {
   raw.forEach((row) => {
     totalsByDate[row.d] = row.total_minutes;
   });
-  renderTrendChart(dates, dates.map((d) => totalsByDate[d]));
+  renderTrendChart(dates, dates.map((d) => totalsByDate[d]), minimumMinutes);
 }
 
-function renderTrendChart(dates, totals) {
+function renderTrendChart(dates, totals, minimumMinutes) {
   const container = document.getElementById("trend-chart");
-  const maxTotal = Math.max(60, ...totals);
+  const maxTotal = Math.max(60, minimumMinutes || 0, ...totals);
   const chartW = 320;
   const chartH = 70;
   const padBottom = 12;
@@ -1329,7 +1329,9 @@ function renderTrendChart(dates, totals) {
       const h = (minutes / maxTotal) * plotH;
       const y = plotH - h;
       const axisLabel = d.slice(8, 10);
-      return `<rect x="${x}" y="${y}" width="${Math.max(barW, 0)}" height="${Math.max(h, 0)}" fill="var(--accent)" rx="2" data-date="${d}" data-minutes="${minutes}"></rect><text x="${x + barW / 2}" y="${chartH}" font-size="7" fill="var(--text-muted)" text-anchor="middle">${axisLabel}</text>`;
+      const achieved = minimumMinutes ? minutes >= minimumMinutes : true;
+      const fill = achieved ? "var(--accent)" : "var(--neutral-flag)";
+      return `<rect x="${x}" y="${y}" width="${Math.max(barW, 0)}" height="${Math.max(h, 0)}" fill="${fill}" rx="2" data-date="${d}" data-minutes="${minutes}"></rect><text x="${x + barW / 2}" y="${chartH}" font-size="7" fill="var(--text-muted)" text-anchor="middle">${axisLabel}</text>`;
     })
     .join("");
 
@@ -1338,7 +1340,13 @@ function renderTrendChart(dates, totals) {
   container.querySelectorAll("rect[data-date]").forEach((rect) => {
     rect.addEventListener("click", () => {
       const { date: d, minutes } = rect.dataset;
-      document.getElementById("trend-chart-detail").textContent = `${d} 合計: ${minutes}分`;
+      const detail = document.getElementById("trend-chart-detail");
+      if (minimumMinutes) {
+        const reached = Number(minutes) >= minimumMinutes;
+        detail.textContent = `${d} 合計: ${minutes}分${reached ? " ✓達成" : ""}`;
+      } else {
+        detail.textContent = `${d} 合計: ${minutes}分`;
+      }
     });
   });
 }
