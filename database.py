@@ -84,6 +84,7 @@ CREATE TABLE IF NOT EXISTS mood_logs (
     date TEXT UNIQUE NOT NULL,
     score INTEGER NOT NULL,
     note TEXT,
+    reason TEXT,
     logged_at TEXT DEFAULT (datetime('now'))
 );
 """
@@ -148,6 +149,10 @@ def _migrate(conn):
         conn.execute("ALTER TABLE activation_logs ADD COLUMN mood TEXT")
     if "mood_reason" not in activation_cols:
         conn.execute("ALTER TABLE activation_logs ADD COLUMN mood_reason TEXT")
+
+    mood_log_cols = [row[1] for row in conn.execute("PRAGMA table_info(mood_logs)").fetchall()]
+    if "reason" not in mood_log_cols:
+        conn.execute("ALTER TABLE mood_logs ADD COLUMN reason TEXT")
     conn.commit()
 
 

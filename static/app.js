@@ -1344,11 +1344,19 @@ async function loadGoalProgress() {
 }
 
 let selectedMoodScore = 5;
+let selectedMoodReason = null;
 
 function setSelectedMoodScore(score) {
   selectedMoodScore = score;
   document.querySelectorAll(".mood-scale-btn").forEach((btn) => {
     btn.classList.toggle("active", parseInt(btn.dataset.score, 10) === score);
+  });
+}
+
+function setSelectedMoodReason(reason) {
+  selectedMoodReason = reason;
+  document.querySelectorAll("#mood-reason-picker .reason-btn").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.reason === reason);
   });
 }
 
@@ -1363,22 +1371,50 @@ async function loadMoodPanel() {
     status.textContent = "記録済み";
     noteInput.value = todayEntry.note || "";
     setSelectedMoodScore(todayEntry.score);
+    setSelectedMoodReason(todayEntry.reason || null);
   } else {
     status.textContent = "未記録";
     setSelectedMoodScore(selectedMoodScore);
+    setSelectedMoodReason(null);
   }
 
   const dates = last14Dates();
   const scoreByDate = {};
   const noteByDate = {};
+  const reasonByDate = {};
   rows.forEach((row) => {
     scoreByDate[row.date] = row.score;
     noteByDate[row.date] = row.note;
+    reasonByDate[row.date] = row.reason;
   });
-  renderMoodChart(dates, dates.map((d) => (d in scoreByDate ? scoreByDate[d] : null)), noteByDate);
+  renderMoodChart(dates, dates.map((d) => (d in scoreByDate ? scoreByDate[d] : null)), noteByDate, reasonByDate);
+  loadMoodStats();
+  loadMoodReasonStats();
 }
 
-function renderMoodChart(dates, scores, noteByDate) {
+async function loadMoodStats() {
+  const s = await api("/api/mood-logs/stats");
+  document.getElementById("mood-stat-week").textContent = s.week_avg != null ? `${s.week_avg}` : "-";
+  document.getElementById("mood-stat-month").textContent = s.month_avg != null ? `${s.month_avg}` : "-";
+}
+
+async function loadMoodReasonStats() {
+  const rows = await api("/api/mood-logs/reason-stats?days=30");
+  const list = document.getElementById("mood-reason-stats");
+  list.innerHTML = "";
+  if (rows.length === 0) {
+    list.classList.add("hidden");
+    return;
+  }
+  list.classList.remove("hidden");
+  rows.forEach((r) => {
+    const li = document.createElement("li");
+    li.textContent = `${r.reason} 平均${r.avg_score} (${r.count}件)`;
+    list.appendChild(li);
+  });
+}
+
+function renderMoodChart(dates, scores, noteByDate, reasonByDate) {
   const container = document.getElementById("mood-chart");
   const chartW = 320;
   const chartH = 70;
@@ -1418,8 +1454,10 @@ function renderMoodChart(dates, scores, noteByDate) {
     circle.addEventListener("click", () => {
       const { date: d, score } = circle.dataset;
       const note = noteByDate[d];
+      const reason = reasonByDate[d];
+      const tags = [reason, note].filter(Boolean).join(" / ");
       const detail = document.getElementById("mood-chart-detail");
-      detail.textContent = note ? `${d} 気分: ${score}/10 (${note})` : `${d} 気分: ${score}/10`;
+      detail.textContent = tags ? `${d} 気分: ${score}/10 (${tags})` : `${d} 気分: ${score}/10`;
     });
   });
 }
@@ -1428,12 +1466,19 @@ document.querySelectorAll(".mood-scale-btn").forEach((btn) => {
   btn.addEventListener("click", () => setSelectedMoodScore(parseInt(btn.dataset.score, 10)));
 });
 
+document.querySelectorAll("#mood-reason-picker .reason-btn").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    const isSame = selectedMoodReason === btn.dataset.reason;
+    setSelectedMoodReason(isSame ? null : btn.dataset.reason);
+  });
+});
+
 document.getElementById("mood-save-btn").addEventListener("click", async () => {
   const score = selectedMoodScore;
   const note = document.getElementById("mood-note").value.trim();
   await api("/api/mood-logs", {
     method: "PUT",
-    body: JSON.stringify({ date: todayStr(), score, note: note || null }),
+    body: JSON.stringify({ date: todayStr(), score, note: note || null, reason: selectedMoodReason }),
   });
   loadMoodPanel();
 });

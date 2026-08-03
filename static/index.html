@@ -205,9 +205,22 @@
         <button type="button" class="mood-scale-btn" data-score="10">10</button>
       </div>
       <div class="mood-scale-labels"><span>1: つらい</span><span>10: 絶好調</span></div>
+      <div class="mood-reason-picker" id="mood-reason-picker">
+        <button type="button" class="reason-btn" data-reason="勉強がはかどった">勉強がはかどった</button>
+        <button type="button" class="reason-btn" data-reason="寝不足">寝不足</button>
+        <button type="button" class="reason-btn" data-reason="人間関係">人間関係</button>
+        <button type="button" class="reason-btn" data-reason="体調不良">体調不良</button>
+        <button type="button" class="reason-btn" data-reason="特になし">特になし</button>
+      </div>
       <input type="text" id="mood-note" placeholder="メモ(任意)">
       <button type="button" id="mood-save-btn">記録する</button>
     </div>
+
+    <div class="stats-header">
+      <div class="stat-cell"><span class="stat-label">今週平均</span><span class="stat-value" id="mood-stat-week"></span></div>
+      <div class="stat-cell"><span class="stat-label">今月平均</span><span class="stat-value" id="mood-stat-month"></span></div>
+    </div>
+
     <div class="goal-progress-card">
       <div class="goal-progress-row">
         <span>気持ちの推移(直近14日間)</span>
@@ -215,17 +228,8 @@
       <div id="mood-chart"></div>
       <p class="meta" id="mood-chart-detail">点をタップすると詳細が表示されます</p>
     </div>
-  </section>
 
-  <section id="tab-goal" class="tab-panel">
-    <h2>目標達成度</h2>
-    <div id="countdown"></div>
-    <ul id="goal-list" class="list"></ul>
-    <form id="goal-form" class="add-form">
-      <input type="text" id="goal-title" placeholder="達成したい項目(例: 単語1800語)" required>
-      <button type="submit">+ 追加</button>
-    </form>
-    <div id="goal-progress"></div>
+    <ul id="mood-reason-stats" class="mood-reason-list hidden"></ul>
 
     <h2>発動ログ</h2>
     <p class="meta" id="activation-current-status"></p>
@@ -237,6 +241,17 @@
       <button type="button" id="activation-copy-btn" class="quick-date-btn hidden">コピー</button>
     </div>
     <textarea id="activation-export-text" rows="6" class="hidden" readonly></textarea>
+  </section>
+
+  <section id="tab-goal" class="tab-panel">
+    <h2>目標達成度</h2>
+    <div id="countdown"></div>
+    <ul id="goal-list" class="list"></ul>
+    <form id="goal-form" class="add-form">
+      <input type="text" id="goal-title" placeholder="達成したい項目(例: 単語1800語)" required>
+      <button type="submit">+ 追加</button>
+    </form>
+    <div id="goal-progress"></div>
   </section>
 
   <section id="tab-calendar" class="tab-panel">
