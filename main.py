@@ -21,6 +21,18 @@ VAPID_CLAIMS_EMAIL = os.environ.get("VAPID_CLAIMS_EMAIL", "example@example.com")
 CRON_SECRET = os.environ.get("CRON_SECRET")
 
 
+def _load_last_updated() -> str:
+    build_info_path = os.path.join(os.path.dirname(__file__), "build_info.txt")
+    try:
+        with open(build_info_path) as f:
+            return f.read().strip()
+    except FileNotFoundError:
+        return datetime.now().astimezone().isoformat()
+
+
+LAST_UPDATED = _load_last_updated()
+
+
 # ---------- schemas ----------
 
 class TodoCreate(BaseModel):
@@ -1038,3 +1050,8 @@ def manifest():
 @app.get("/service-worker.js")
 def service_worker():
     return FileResponse("static/service-worker.js")
+
+
+@app.get("/api/build-info")
+def build_info():
+    return {"lastUpdated": LAST_UPDATED}

@@ -429,6 +429,23 @@ document.getElementById("settings-btn").addEventListener("click", openSettingsPa
 document.getElementById("settings-close").addEventListener("click", closeSettingsPanel);
 settingsBackdrop.addEventListener("click", closeSettingsPanel);
 
+async function updateLastUpdated() {
+  const el = document.getElementById("settings-last-updated");
+  try {
+    const { lastUpdated } = await api("/api/build-info");
+    el.textContent = `最終更新: ${new Date(lastUpdated).toLocaleString("ja-JP", {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+    })}`;
+  } catch {
+    el.textContent = "最終更新: 取得できませんでした";
+  }
+}
+updateLastUpdated();
+
 document.getElementById("todo-time-toggle").addEventListener("click", () => {
   const timeInput = document.getElementById("todo-due-time");
   const notifySelect = document.getElementById("todo-notify");

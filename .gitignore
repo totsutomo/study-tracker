@@ -4,3 +4,4 @@ __pycache__/
 data.db
 data.db.old_sqlite3_backup
 .env
+build_info.txt
