@@ -1387,7 +1387,14 @@ async function loadMoodPanel() {
     noteByDate[row.date] = row.note;
     reasonByDate[row.date] = row.reason;
   });
-  renderMoodChart(dates, dates.map((d) => (d in scoreByDate ? scoreByDate[d] : null)), noteByDate, reasonByDate);
+
+  const dailyStudy = await api("/api/study-logs/daily");
+  const minutesByDate = {};
+  dailyStudy.forEach((row) => {
+    minutesByDate[row.d] = (minutesByDate[row.d] || 0) + row.total_minutes;
+  });
+
+  renderMoodChart(dates, dates.map((d) => (d in scoreByDate ? scoreByDate[d] : null)), noteByDate, reasonByDate, minutesByDate);
   loadMoodStats();
   loadMoodReasonStats();
 }
@@ -1414,7 +1421,7 @@ async function loadMoodReasonStats() {
   });
 }
 
-function renderMoodChart(dates, scores, noteByDate, reasonByDate) {
+function renderMoodChart(dates, scores, noteByDate, reasonByDate, minutesByDate) {
   const container = document.getElementById("mood-chart");
   const chartW = 320;
   const chartH = 70;
@@ -1424,6 +1431,18 @@ function renderMoodChart(dates, scores, noteByDate, reasonByDate) {
   const plotW = chartW - padX * 2;
   const stepX = dates.length > 1 ? plotW / (dates.length - 1) : 0;
   const xs = dates.map((_, i) => padX + i * stepX);
+
+  const minutesValues = dates.map((d) => (minutesByDate && minutesByDate[d]) || 0);
+  const maxMinutes = Math.max(60, ...minutesValues);
+  const barW = Math.max(stepX * 0.5, 2);
+  const bars = dates
+    .map((d, i) => {
+      const minutes = minutesValues[i];
+      if (minutes <= 0) return "";
+      const h = (minutes / maxMinutes) * plotH;
+      return `<rect x="${xs[i] - barW / 2}" y="${plotH - h}" width="${barW}" height="${h}" fill="var(--accent-dim)" rx="1"></rect>`;
+    })
+    .join("");
 
   const axisLabels = dates
     .map((d, i) => `<text x="${xs[i]}" y="${chartH}" font-size="7" fill="var(--text-muted)" text-anchor="middle">${d.slice(8, 10)}</text>`)
@@ -1448,7 +1467,7 @@ function renderMoodChart(dates, scores, noteByDate, reasonByDate) {
     ? `<path d="${pathD.trim()}" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>`
     : "";
 
-  container.innerHTML = `<svg viewBox="0 0 ${chartW} ${chartH}" class="study-svg-chart">${path}${dots.join("")}${axisLabels}</svg>`;
+  container.innerHTML = `<svg viewBox="0 0 ${chartW} ${chartH}" class="study-svg-chart">${bars}${path}${dots.join("")}${axisLabels}</svg>`;
 
   container.querySelectorAll("circle[data-date]").forEach((circle) => {
     circle.addEventListener("click", () => {

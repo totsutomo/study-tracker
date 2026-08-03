@@ -588,6 +588,8 @@ ACTIVATION_REMINDER_MINUTES = 45
 ACTIVATION_ENCOURAGEMENT_WINDOW_DAYS = 14
 ACTIVATION_ENCOURAGEMENT_HOUR = 18
 
+MOOD_REMINDER_HOUR = 21
+
 
 @app.get("/api/activation-logs")
 def list_activation_logs(limit: int = 200):
@@ -1054,6 +1056,27 @@ def push_check(token: str | None = None):
                 })
                 conn.execute(
                     "INSERT INTO settings (key, value) VALUES ('activation_encouragement_notified_date', ?) "
+                    "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                    (today_str,),
+                )
+
+    if int(conn.execute("SELECT CAST(strftime('%H', 'now') AS INTEGER)").fetchone()[0]) >= MOOD_REMINDER_HOUR:
+        today_str = conn.execute("SELECT date('now')").fetchone()[0]
+        mood_logged_today = conn.execute(
+            "SELECT 1 FROM mood_logs WHERE date = ?", (today_str,)
+        ).fetchone()
+        if not mood_logged_today:
+            last_notified_row = conn.execute(
+                "SELECT value FROM settings WHERE key = 'mood_reminder_notified_date'"
+            ).fetchone()
+            if not last_notified_row or last_notified_row[0] != today_str:
+                sent_count += _send_push_to_all(conn, {
+                    "title": "今日の気持ち",
+                    "body": "今日の気分がまだ記録されていないよ",
+                    "tag": "mood-reminder",
+                })
+                conn.execute(
+                    "INSERT INTO settings (key, value) VALUES ('mood_reminder_notified_date', ?) "
                     "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
                     (today_str,),
                 )
