@@ -786,7 +786,10 @@ function restoreSession() {
   }
   syncFocusOpenBodyClass();
   updatePauseUI();
-  if (!isPaused) startTimerTick();
+  if (!isPaused) {
+    startTimerTick();
+    if (sessionClockOnly) requestWakeLock();
+  }
 }
 
 function beginSession(subject, todoId, mode, targetMs, clockOnly) {
@@ -803,6 +806,9 @@ function beginSession(subject, todoId, mode, targetMs, clockOnly) {
   openFocusOverlay();
   startTimerTick();
   persistSession();
+  if (clockOnly) {
+    requestWakeLock();
+  }
   if (mode === "countdown") {
     syncFocusSessionServer(Math.round(targetMs / 1000), subject);
   }
@@ -927,6 +933,7 @@ function pauseSession() {
   segmentStart = null;
   isPaused = true;
   stopTimerTick();
+  releaseWakeLock();
   updatePauseUI();
   persistSession();
   // stop server-side tracking while paused, since the countdown isn't actually progressing;
@@ -943,6 +950,9 @@ function resumeSession() {
   startTimerTick();
   updatePauseUI();
   persistSession();
+  if (sessionClockOnly) {
+    requestWakeLock();
+  }
   if (sessionMode === "countdown" && !sessionCompleted) {
     const remainingSeconds = Math.max(0, Math.round((sessionTargetMs - currentElapsedMs()) / 1000));
     syncFocusSessionServer(remainingSeconds, timerSubject);
@@ -972,15 +982,49 @@ document.getElementById("mini-timer-bar").addEventListener("click", (e) => {
   expandFocusOverlay();
 });
 
-// visibility change (screen lock / switch to another app): clock-only sessions auto-pause
+// ---------- screen wake lock (clock-only mode) ----------
+// clock-only sessions are meant to pause when you actually leave (switch app, lock the
+// phone), but the phone's own screen-timeout blanks the display the same way and was
+// silently triggering that same pause. Holding a wake lock stops the OS from timing the
+// screen out on its own; a real app-switch or manual lock-button press still fires
+// visibilitychange and pauses as before.
+let wakeLock = null;
+
+async function requestWakeLock() {
+  if (!("wakeLock" in navigator)) return;
+  try {
+    wakeLock = await navigator.wakeLock.request("screen");
+    wakeLock.addEventListener("release", () => {
+      wakeLock = null;
+    });
+  } catch {
+    wakeLock = null;
+  }
+}
+
+function releaseWakeLock() {
+  if (wakeLock) {
+    wakeLock.release().catch(() => {});
+    wakeLock = null;
+  }
+}
+
+// visibility change (screen lock / switch to another app): clock-only sessions auto-pause.
+// The OS also force-releases any wake lock whenever the tab goes hidden, so re-acquire it
+// once a still-running clock-only session becomes visible again.
 document.addEventListener("visibilitychange", () => {
-  if (document.hidden && timerSubject && sessionClockOnly && !isPaused) {
-    pauseSession();
+  if (document.hidden) {
+    if (timerSubject && sessionClockOnly && !isPaused) {
+      pauseSession();
+    }
+  } else if (timerSubject && sessionClockOnly && !isPaused) {
+    requestWakeLock();
   }
 });
 
 function resetSessionState() {
   stopTimerTick();
+  releaseWakeLock();
   const wasCountdown = sessionMode === "countdown";
   timerSubject = null;
   activeTodoId = null;
