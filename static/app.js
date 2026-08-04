@@ -1785,6 +1785,16 @@ async function loadActivationStats() {
     `今週 ${s.week_count}件 / 今月 ${s.month_count}件 / 累計 ${s.total_count}件`;
 }
 
+async function loadActivationPostReturnStats() {
+  const s = await api("/api/activation-logs/post-return-stats?days=30");
+  const el = document.getElementById("activation-post-return-stats");
+  if (!el) return;
+  el.textContent =
+    s.count > 0
+      ? `復帰後の学習(直近30日): 平均${s.avg_minutes}分 (${s.count}件)`
+      : "復帰後の学習(直近30日): データなし";
+}
+
 async function loadActivationMoodReasons() {
   const rows = await api("/api/activation-logs/mood-reasons?days=30");
   const list = document.getElementById("activation-mood-reasons");
@@ -1813,10 +1823,17 @@ async function loadActivationList() {
     const li = document.createElement("li");
     const returnedPart = l.returned_at ? `→ ${formatLoggedAt(l.returned_at)}` : "進行中";
     const noteMark = l.note ? `<span class="meta">${escapeHtml(l.note)}</span>` : "";
+    let postReturnMark = "";
+    if (l.returned_at) {
+      const label =
+        l.post_return_minutes > 0 ? `復帰後${l.post_return_minutes}分学習` : "学習記録なし";
+      postReturnMark = `<span class="meta">${label}</span>`;
+    }
     li.innerHTML = `
       <span class="log-info">
         <span>${formatLoggedAt(l.triggered_at)} ${returnedPart}</span>
         ${noteMark}
+        ${postReturnMark}
       </span>
       <button class="delete-btn" title="削除">×</button>
     `;
@@ -1825,6 +1842,7 @@ async function loadActivationList() {
       loadActivationList();
       loadActivationActive();
       loadActivationStats();
+      loadActivationPostReturnStats();
       loadActivationMoodReasons();
       loadCalendar();
     });
@@ -1836,6 +1854,7 @@ function refreshActivation() {
   loadActivationActive();
   loadActivationList();
   loadActivationStats();
+  loadActivationPostReturnStats();
   loadActivationMoodReasons();
   loadCalendar();
 }
@@ -2671,6 +2690,7 @@ updatePushStatus();
   loadActivationActive();
   loadActivationList();
   loadActivationStats();
+  loadActivationPostReturnStats();
   loadActivationMoodReasons();
   loadCalendar();
   restoreSession();

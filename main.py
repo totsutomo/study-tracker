@@ -665,6 +665,14 @@ MOOD_REMINDER_HOUR = 21
 MOOD_REMINDER_ENABLED = False  # 一時停止中
 
 
+def _post_return_minutes(conn, returned_at: str) -> int:
+    return conn.execute(
+        "SELECT COALESCE(SUM(minutes), 0) FROM study_logs "
+        "WHERE logged_at > ? AND date(logged_at) = date(?)",
+        (returned_at, returned_at),
+    ).fetchone()[0]
+
+
 @app.get("/api/activation-logs")
 def list_activation_logs(limit: int = 200):
     conn = get_connection()
@@ -672,6 +680,10 @@ def list_activation_logs(limit: int = 200):
         "SELECT * FROM activation_logs ORDER BY triggered_at DESC LIMIT ?", (limit,)
     )
     result = rows_to_dicts(cur)
+    for row in result:
+        row["post_return_minutes"] = (
+            _post_return_minutes(conn, row["returned_at"]) if row["returned_at"] else None
+        )
     conn.close()
     return result
 
@@ -713,6 +725,21 @@ def activation_log_stats():
     total_count = conn.execute("SELECT COUNT(*) FROM activation_logs").fetchone()[0]
     conn.close()
     return {"week_count": week_count, "month_count": month_count, "total_count": total_count}
+
+
+@app.get("/api/activation-logs/post-return-stats")
+def activation_log_post_return_stats(days: int = 30):
+    conn = get_connection()
+    cur = conn.execute(
+        "SELECT returned_at FROM activation_logs "
+        "WHERE returned_at IS NOT NULL AND triggered_at >= datetime('now', ?, 'start of day')",
+        (f"-{days} days",),
+    )
+    minutes_list = [_post_return_minutes(conn, row[0]) for row in cur.fetchall()]
+    conn.close()
+    count = len(minutes_list)
+    avg_minutes = round(sum(minutes_list) / count, 1) if count else 0
+    return {"count": count, "avg_minutes": avg_minutes}
 
 
 @app.get("/api/activation-logs/mood-reasons")
