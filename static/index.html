@@ -235,7 +235,7 @@
     <h2>気持ち</h2>
     <div class="goal-progress-card">
       <div class="goal-progress-row">
-        <span>今日の気持ち</span>
+        <span>今の気持ち</span>
         <span class="meta" id="mood-today-status">未記録</span>
       </div>
       <div class="mood-scale-buttons" id="mood-scale-buttons">
@@ -252,13 +252,17 @@
       </div>
       <div class="mood-scale-labels"><span>1: つらい</span><span>10: 絶好調</span></div>
       <div class="mood-reason-picker" id="mood-reason-picker">
-        <button type="button" class="reason-btn" data-reason="勉強がはかどった">勉強がはかどった</button>
-        <button type="button" class="reason-btn" data-reason="寝不足">寝不足</button>
-        <button type="button" class="reason-btn" data-reason="人間関係">人間関係</button>
-        <button type="button" class="reason-btn" data-reason="体調不良">体調不良</button>
-        <button type="button" class="reason-btn" data-reason="特になし">特になし</button>
+        <button type="button" class="reason-btn" data-reason="体調不良" data-tier="low">体調不良</button>
+        <button type="button" class="reason-btn" data-reason="寝不足" data-tier="low">寝不足</button>
+        <button type="button" class="reason-btn" data-reason="人間関係" data-tier="low">人間関係</button>
+        <button type="button" class="reason-btn" data-reason="勉強がはかどった" data-tier="high">勉強がはかどった</button>
+        <button type="button" class="reason-btn" data-reason="やる気が出た" data-tier="high">やる気が出た</button>
+        <button type="button" class="reason-btn" data-reason="よく眠れた" data-tier="high">よく眠れた</button>
+        <button type="button" class="reason-btn" data-reason="楽しいことがあった" data-tier="high">楽しいことがあった</button>
+        <button type="button" class="reason-btn" data-reason="特になし" data-tier="both">特になし</button>
       </div>
       <input type="text" id="mood-note" placeholder="メモ(任意)">
+      <div class="mood-today-list" id="mood-today-list"></div>
       <button type="button" id="mood-save-btn">記録する</button>
     </div>
 

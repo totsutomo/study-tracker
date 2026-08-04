@@ -137,11 +137,12 @@ class ActivationLogReturn(BaseModel):
     returned_at: str  # "YYYY-MM-DD HH:MM:SS", client local time
 
 
-class MoodLogUpsert(BaseModel):
+class MoodLogCreate(BaseModel):
     date: str  # "YYYY-MM-DD", client local date
     score: int  # 1-10
     note: str | None = None
     reason: str | None = None
+    logged_at: str | None = None  # "YYYY-MM-DD HH:MM:SS", client local time
 
 
 class SleepLogCreate(BaseModel):
@@ -490,23 +491,27 @@ LOW_MOOD_THRESHOLD = 4  # mood_logs.score の日平均がこれ以下なら「�
 def list_mood_logs(days: int = 14):
     conn = get_connection()
     cur = conn.execute(
-        "SELECT date, score, note, reason FROM mood_logs ORDER BY date DESC LIMIT ?",
-        (days,),
+        "SELECT id, date, score, note, reason, logged_at FROM mood_logs "
+        "WHERE date >= date('now', ?) ORDER BY logged_at ASC",
+        (f"-{days - 1} days",),
     )
     result = rows_to_dicts(cur)
     conn.close()
-    result.reverse()
     return result
 
 
 @app.get("/api/mood-logs/stats")
 def mood_log_stats():
+    # 1日に複数件記録できるため、まず日次平均に集計してから週/月平均を出す
+    # (記録件数が多い日に平均が引っ張られないよう、日ごとの重みを揃える)
     conn = get_connection()
     week_avg = conn.execute(
-        "SELECT AVG(score) FROM mood_logs WHERE date >= date('now', '-6 days')"
+        "SELECT AVG(day_avg) FROM (SELECT AVG(score) AS day_avg FROM mood_logs "
+        "WHERE date >= date('now', '-6 days') GROUP BY date)"
     ).fetchone()[0]
     month_avg = conn.execute(
-        "SELECT AVG(score) FROM mood_logs WHERE date >= date('now', 'start of month')"
+        "SELECT AVG(day_avg) FROM (SELECT AVG(score) AS day_avg FROM mood_logs "
+        "WHERE date >= date('now', 'start of month') GROUP BY date)"
     ).fetchone()[0]
     conn.close()
     return {
@@ -572,14 +577,19 @@ def mood_log_low_mood_achievement(days: int = 30):
     }
 
 
-@app.put("/api/mood-logs")
-def upsert_mood_log(payload: MoodLogUpsert):
+@app.post("/api/mood-logs")
+def create_mood_log(payload: MoodLogCreate):
     conn = get_connection()
-    conn.execute(
-        "INSERT INTO mood_logs (date, score, note, reason) VALUES (?, ?, ?, ?) "
-        "ON CONFLICT(date) DO UPDATE SET score = excluded.score, note = excluded.note, reason = excluded.reason",
-        (payload.date, payload.score, payload.note, payload.reason),
-    )
+    if payload.logged_at:
+        conn.execute(
+            "INSERT INTO mood_logs (date, score, note, reason, logged_at) VALUES (?, ?, ?, ?, ?)",
+            (payload.date, payload.score, payload.note, payload.reason, payload.logged_at),
+        )
+    else:
+        conn.execute(
+            "INSERT INTO mood_logs (date, score, note, reason) VALUES (?, ?, ?, ?)",
+            (payload.date, payload.score, payload.note, payload.reason),
+        )
     conn.commit()
     conn.close()
     return {"ok": True}

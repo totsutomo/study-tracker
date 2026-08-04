@@ -82,12 +82,14 @@ CREATE TABLE IF NOT EXISTS activation_logs (
 
 CREATE TABLE IF NOT EXISTS mood_logs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    date TEXT UNIQUE NOT NULL,
+    date TEXT NOT NULL,
     score INTEGER NOT NULL,
     note TEXT,
     reason TEXT,
     logged_at TEXT DEFAULT (datetime('now'))
 );
+
+CREATE INDEX IF NOT EXISTS idx_mood_logs_date ON mood_logs(date);
 
 CREATE TABLE IF NOT EXISTS sleep_logs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -161,6 +163,37 @@ def _migrate(conn):
     mood_log_cols = [row[1] for row in conn.execute("PRAGMA table_info(mood_logs)").fetchall()]
     if "reason" not in mood_log_cols:
         conn.execute("ALTER TABLE mood_logs ADD COLUMN reason TEXT")
+
+    # 旧スキーマは date に UNIQUE 制約があり1日1件しか記録できなかった。
+    # 1日に複数回記録できるよう、UNIQUE制約なしのテーブルに作り直す(SQLiteはUNIQUE制約を直接DROPできない)。
+    mood_unique_date = False
+    for idx in conn.execute("PRAGMA index_list(mood_logs)").fetchall():
+        idx_name, idx_unique = idx[1], idx[2]
+        if idx_unique:
+            idx_cols = [c[2] for c in conn.execute(f"PRAGMA index_info({idx_name})").fetchall()]
+            if idx_cols == ["date"]:
+                mood_unique_date = True
+                break
+    if mood_unique_date:
+        conn.execute("ALTER TABLE mood_logs RENAME TO mood_logs_old")
+        conn.execute(
+            """
+            CREATE TABLE mood_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                date TEXT NOT NULL,
+                score INTEGER NOT NULL,
+                note TEXT,
+                reason TEXT,
+                logged_at TEXT DEFAULT (datetime('now'))
+            )
+            """
+        )
+        conn.execute(
+            "INSERT INTO mood_logs (id, date, score, note, reason, logged_at) "
+            "SELECT id, date, score, note, reason, logged_at FROM mood_logs_old"
+        )
+        conn.execute("DROP TABLE mood_logs_old")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_mood_logs_date ON mood_logs(date)")
 
     study_log_cols = [row[1] for row in conn.execute("PRAGMA table_info(study_logs)").fetchall()]
     if "start_trigger" not in study_log_cols:
