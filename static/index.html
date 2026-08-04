@@ -74,10 +74,10 @@
         </div>
         <div class="due-row">
           <input type="date" id="todo-due-date">
-          <button type="button" class="quick-date-btn" data-quick="today">今日</button>
-          <button type="button" class="quick-date-btn" data-quick="tomorrow">明日</button>
-          <button type="button" class="quick-date-btn" data-quick="nextweek">来週</button>
-          <button type="button" class="quick-date-btn" data-quick="clear">クリア</button>
+          <button type="button" class="quick-date-btn" data-quick="today" data-quick-target="todo-due-date">今日</button>
+          <button type="button" class="quick-date-btn" data-quick="tomorrow" data-quick-target="todo-due-date">明日</button>
+          <button type="button" class="quick-date-btn" data-quick="nextweek" data-quick-target="todo-due-date">来週</button>
+          <button type="button" class="quick-date-btn" data-quick="clear" data-quick-target="todo-due-date">クリア</button>
         </div>
         <button type="button" id="todo-time-toggle" class="time-toggle-btn">+ 時刻を追加</button>
         <input type="time" id="todo-due-time" style="display:none;">
@@ -110,12 +110,52 @@
     <div id="todo-detail-backdrop" class="backdrop hidden"></div>
     <div id="todo-detail-panel" class="add-panel hidden">
       <div class="panel-header">
-        <h3 id="todo-detail-title"></h3>
+        <h3>タスクを編集</h3>
         <button type="button" id="todo-detail-close" class="panel-close" aria-label="閉じる">×</button>
       </div>
-      <p class="meta" id="todo-detail-meta"></p>
-      <textarea id="todo-detail-note" rows="4" placeholder="メモ(任意)"></textarea>
-      <button type="button" id="todo-detail-save">メモを保存</button>
+      <form id="todo-detail-form" class="add-form">
+        <input type="text" id="todo-detail-title" placeholder="タスク名" required>
+        <div class="form-row">
+          <select id="todo-detail-category"></select>
+          <select id="todo-detail-priority">
+            <option value="high">優先度: 高</option>
+            <option value="medium">優先度: 中</option>
+            <option value="low">優先度: 低</option>
+          </select>
+        </div>
+        <div class="due-row">
+          <input type="date" id="todo-detail-due-date">
+          <button type="button" class="quick-date-btn" data-quick="today" data-quick-target="todo-detail-due-date">今日</button>
+          <button type="button" class="quick-date-btn" data-quick="tomorrow" data-quick-target="todo-detail-due-date">明日</button>
+          <button type="button" class="quick-date-btn" data-quick="nextweek" data-quick-target="todo-detail-due-date">来週</button>
+          <button type="button" class="quick-date-btn" data-quick="clear" data-quick-target="todo-detail-due-date">クリア</button>
+        </div>
+        <button type="button" id="todo-detail-time-toggle" class="time-toggle-btn">+ 時刻を追加</button>
+        <input type="time" id="todo-detail-due-time" style="display:none;">
+        <select id="todo-detail-notify" style="display:none;">
+          <option value="">通知しない</option>
+          <option value="0">その時刻に通知</option>
+          <option value="10">10分前に通知</option>
+          <option value="30">30分前に通知</option>
+          <option value="60">1時間前に通知</option>
+        </select>
+        <div class="due-row">
+          <button type="button" class="quick-date-btn" data-recur-preset="daily">毎日</button>
+          <button type="button" class="quick-date-btn" data-recur-preset="weekdays">平日</button>
+          <button type="button" class="quick-date-btn" data-recur-preset="clear">クリア</button>
+        </div>
+        <div class="weekday-picker" id="todo-detail-recurrence-picker">
+          <button type="button" class="weekday-btn" data-day="sun">日</button>
+          <button type="button" class="weekday-btn" data-day="mon">月</button>
+          <button type="button" class="weekday-btn" data-day="tue">火</button>
+          <button type="button" class="weekday-btn" data-day="wed">水</button>
+          <button type="button" class="weekday-btn" data-day="thu">木</button>
+          <button type="button" class="weekday-btn" data-day="fri">金</button>
+          <button type="button" class="weekday-btn" data-day="sat">土</button>
+        </div>
+        <textarea id="todo-detail-note" rows="3" placeholder="メモ(任意)"></textarea>
+        <button type="submit">保存</button>
+      </form>
       <span class="meta" id="todo-detail-status"></span>
     </div>
   </section>

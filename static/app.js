@@ -286,7 +286,7 @@ todoAddBackdrop.addEventListener("click", closeTodoAddPanel);
 
 document.querySelectorAll("[data-quick]").forEach((btn) => {
   btn.addEventListener("click", () => {
-    const dateInput = document.getElementById("todo-due-date");
+    const dateInput = document.getElementById(btn.dataset.quickTarget || "todo-due-date");
     const quick = btn.dataset.quick;
     if (quick === "clear") {
       dateInput.value = "";
@@ -332,6 +332,37 @@ document.querySelectorAll("#todo-form [data-recur-preset]").forEach((btn) => {
   });
 });
 
+const selectedDetailRecurrenceDays = new Set();
+
+function setDetailRecurrenceDays(days) {
+  selectedDetailRecurrenceDays.clear();
+  days.forEach((d) => selectedDetailRecurrenceDays.add(d));
+  document.querySelectorAll("#todo-detail-recurrence-picker .weekday-btn").forEach((btn) => {
+    btn.classList.toggle("active", selectedDetailRecurrenceDays.has(btn.dataset.day));
+  });
+}
+
+document.querySelectorAll("#todo-detail-recurrence-picker .weekday-btn").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    const day = btn.dataset.day;
+    if (selectedDetailRecurrenceDays.has(day)) {
+      selectedDetailRecurrenceDays.delete(day);
+    } else {
+      selectedDetailRecurrenceDays.add(day);
+    }
+    btn.classList.toggle("active", selectedDetailRecurrenceDays.has(day));
+  });
+});
+
+document.querySelectorAll("#todo-detail-form [data-recur-preset]").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    const preset = btn.dataset.recurPreset;
+    if (preset === "daily") setDetailRecurrenceDays(WEEKDAY_ORDER);
+    else if (preset === "weekdays") setDetailRecurrenceDays(["mon", "tue", "wed", "thu", "fri"]);
+    else setDetailRecurrenceDays([]);
+  });
+});
+
 // ---------- category management ----------
 
 const CATEGORY_COLOR_PALETTE = ["#3987e5", "#d95926", "#199e70", "#c98500", "#d55181", "#9085e9", "#e66767"];
@@ -360,14 +391,17 @@ async function loadCategories() {
   cats.forEach((c) => renderCategoryItem(c, list));
 
   const addSelect = document.getElementById("todo-category");
+  const detailSelect = document.getElementById("todo-detail-category");
   const filterSelect = document.getElementById("todo-filter-category");
   const addCurrent = addSelect.value;
+  const detailCurrent = detailSelect.value;
   const filterCurrent = filterSelect.value;
-  addSelect.innerHTML = cats.map((c) => `<option value="${escapeHtml(c.name)}">${escapeHtml(c.name)}</option>`).join("");
-  filterSelect.innerHTML =
-    `<option value="">カテゴリ: すべて</option>` +
-    cats.map((c) => `<option value="${escapeHtml(c.name)}">${escapeHtml(c.name)}</option>`).join("");
+  const optionsHtml = cats.map((c) => `<option value="${escapeHtml(c.name)}">${escapeHtml(c.name)}</option>`).join("");
+  addSelect.innerHTML = optionsHtml;
+  detailSelect.innerHTML = optionsHtml;
+  filterSelect.innerHTML = `<option value="">カテゴリ: すべて</option>` + optionsHtml;
   if (cats.some((c) => c.name === addCurrent)) addSelect.value = addCurrent;
+  if (cats.some((c) => c.name === detailCurrent)) detailSelect.value = detailCurrent;
   filterSelect.value = filterCurrent;
 }
 
@@ -472,6 +506,32 @@ document.getElementById("todo-time-toggle").addEventListener("click", () => {
   }
 });
 
+document.getElementById("todo-detail-time-toggle").addEventListener("click", () => {
+  const timeInput = document.getElementById("todo-detail-due-time");
+  const notifySelect = document.getElementById("todo-detail-notify");
+  const toggleBtn = document.getElementById("todo-detail-time-toggle");
+  const showing = timeInput.style.display !== "none";
+  if (showing) {
+    timeInput.style.display = "none";
+    timeInput.value = "";
+    notifySelect.style.display = "none";
+    notifySelect.value = "";
+    toggleBtn.textContent = "+ 時刻を追加";
+  } else {
+    timeInput.style.display = "";
+    notifySelect.style.display = "";
+    toggleBtn.textContent = "− 時刻を削除";
+    timeInput.focus();
+    if (timeInput.showPicker) {
+      try {
+        timeInput.showPicker();
+      } catch (err) {
+        // showPicker can throw if not called from a direct user gesture on some browsers; ignore
+      }
+    }
+  }
+});
+
 document.getElementById("todo-form").addEventListener("submit", async (e) => {
   e.preventDefault();
   const title = document.getElementById("todo-title").value.trim();
@@ -508,14 +568,27 @@ let currentDetailTodoId = null;
 
 function openTodoDetail(t) {
   currentDetailTodoId = t.id;
-  document.getElementById("todo-detail-title").textContent = t.title;
-  const dueLabel = t.due_date ? `期限: ${t.due_date}${t.due_time ? " " + t.due_time : ""}` : "期限なし";
-  const priorityLabel = `優先度: ${PRIORITY_LABEL[t.priority] || t.priority}`;
-  const categoryLabel = t.category ? `カテゴリ: ${t.category}` : "";
-  const recurLabel = t.recurrence ? `繰り返し:${recurrenceLabel(t.recurrence)}` : "";
-  document.getElementById("todo-detail-meta").textContent = [priorityLabel, categoryLabel, dueLabel, recurLabel]
-    .filter(Boolean)
-    .join(" / ");
+  document.getElementById("todo-detail-title").value = t.title;
+  document.getElementById("todo-detail-category").value = t.category || "";
+  document.getElementById("todo-detail-priority").value = t.priority || "medium";
+  document.getElementById("todo-detail-due-date").value = t.due_date || "";
+  const timeInput = document.getElementById("todo-detail-due-time");
+  const notifySelect = document.getElementById("todo-detail-notify");
+  const toggleBtn = document.getElementById("todo-detail-time-toggle");
+  if (t.due_time) {
+    timeInput.style.display = "";
+    notifySelect.style.display = "";
+    toggleBtn.textContent = "− 時刻を削除";
+    timeInput.value = t.due_time;
+    notifySelect.value = t.notify_offset_minutes != null ? String(t.notify_offset_minutes) : "";
+  } else {
+    timeInput.style.display = "none";
+    notifySelect.style.display = "none";
+    toggleBtn.textContent = "+ 時刻を追加";
+    timeInput.value = "";
+    notifySelect.value = "";
+  }
+  setDetailRecurrenceDays(t.recurrence ? t.recurrence.split(",") : []);
   document.getElementById("todo-detail-note").value = t.note || "";
   document.getElementById("todo-detail-status").textContent = "";
   document.getElementById("todo-detail-panel").classList.remove("hidden");
@@ -531,12 +604,30 @@ function closeTodoDetail() {
 document.getElementById("todo-detail-close").addEventListener("click", closeTodoDetail);
 document.getElementById("todo-detail-backdrop").addEventListener("click", closeTodoDetail);
 
-document.getElementById("todo-detail-save").addEventListener("click", async () => {
+document.getElementById("todo-detail-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
   if (!currentDetailTodoId) return;
+  const title = document.getElementById("todo-detail-title").value.trim();
+  const category = document.getElementById("todo-detail-category").value || null;
+  const priority = document.getElementById("todo-detail-priority").value;
+  const due_date = document.getElementById("todo-detail-due-date").value || null;
+  const due_time = document.getElementById("todo-detail-due-time").value || null;
+  const notifyVal = document.getElementById("todo-detail-notify").value;
+  const notify_offset_minutes = due_time && notifyVal !== "" ? parseInt(notifyVal, 10) : null;
+  const recurrence =
+    selectedDetailRecurrenceDays.size > 0
+      ? WEEKDAY_ORDER.filter((d) => selectedDetailRecurrenceDays.has(d)).join(",")
+      : null;
   const note = document.getElementById("todo-detail-note").value.trim() || null;
-  await api(`/api/todos/${currentDetailTodoId}/note`, { method: "PUT", body: JSON.stringify({ note }) });
+  if (!title) return;
+  await api(`/api/todos/${currentDetailTodoId}`, {
+    method: "PUT",
+    body: JSON.stringify({ title, category, priority, due_date, due_time, recurrence, notify_offset_minutes, note }),
+  });
   document.getElementById("todo-detail-status").textContent = "保存しました";
   loadTodos();
+  loadCalendar();
+  closeTodoDetail();
 });
 
 function escapeHtml(str) {

@@ -55,6 +55,17 @@ class TodoDueUpdate(BaseModel):
     due_time: str | None = None
 
 
+class TodoUpdate(BaseModel):
+    title: str
+    category: str | None = None
+    priority: str = "medium"
+    due_date: str | None = None
+    due_time: str | None = None
+    recurrence: str | None = None
+    notify_offset_minutes: int | None = None
+    note: str | None = None
+
+
 class CategoryCreate(BaseModel):
     name: str
 
@@ -222,6 +233,24 @@ def update_todo_due(todo_id: int, payload: TodoDueUpdate):
     conn.execute(
         "UPDATE todos SET due_date = ?, due_time = ?, notified_at = NULL WHERE id = ?",
         (payload.due_date, payload.due_time, todo_id),
+    )
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+@app.put("/api/todos/{todo_id}")
+def update_todo(todo_id: int, todo: TodoUpdate):
+    conn = get_connection()
+    row = conn.execute("SELECT id FROM todos WHERE id = ?", (todo_id,)).fetchone()
+    if row is None:
+        conn.close()
+        raise HTTPException(status_code=404, detail="todo not found")
+    conn.execute(
+        "UPDATE todos SET title = ?, category = ?, priority = ?, due_date = ?, due_time = ?, "
+        "recurrence = ?, notify_offset_minutes = ?, note = ?, notified_at = NULL WHERE id = ?",
+        (todo.title, todo.category, todo.priority, todo.due_date, todo.due_time, todo.recurrence,
+         todo.notify_offset_minutes if todo.due_time else None, todo.note, todo_id),
     )
     conn.commit()
     conn.close()
