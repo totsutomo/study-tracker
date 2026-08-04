@@ -26,7 +26,8 @@ CREATE TABLE IF NOT EXISTS study_logs (
     subject TEXT NOT NULL,
     minutes INTEGER NOT NULL,
     note TEXT,
-    logged_at TEXT DEFAULT (datetime('now'))
+    logged_at TEXT DEFAULT (datetime('now')),
+    start_trigger TEXT
 );
 
 CREATE TABLE IF NOT EXISTS events (
@@ -153,6 +154,10 @@ def _migrate(conn):
     mood_log_cols = [row[1] for row in conn.execute("PRAGMA table_info(mood_logs)").fetchall()]
     if "reason" not in mood_log_cols:
         conn.execute("ALTER TABLE mood_logs ADD COLUMN reason TEXT")
+
+    study_log_cols = [row[1] for row in conn.execute("PRAGMA table_info(study_logs)").fetchall()]
+    if "start_trigger" not in study_log_cols:
+        conn.execute("ALTER TABLE study_logs ADD COLUMN start_trigger TEXT")
     conn.commit()
 
 

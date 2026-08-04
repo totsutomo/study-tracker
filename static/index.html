@@ -278,6 +278,7 @@
     <p class="meta" id="activation-stats"></p>
     <p class="meta" id="activation-post-return-stats"></p>
     <ul id="activation-mood-reasons" class="mood-reason-list hidden"></ul>
+    <ul id="study-trigger-stats" class="mood-reason-list hidden"></ul>
     <ul id="activation-list" class="list"></ul>
     <div class="due-row">
       <button type="button" id="activation-export-btn" class="quick-date-btn">直近7日分をエクスポート</button>
@@ -477,6 +478,13 @@
   <label class="checkbox-label start-clockonly-label">
     <input type="checkbox" id="start-clockonly"> 時計だけモード(画面から離れると一時停止)
   </label>
+  <div class="mood-reason-picker" id="start-trigger-picker">
+    <button type="button" class="reason-btn" data-trigger="通知がきたから">通知がきたから</button>
+    <button type="button" class="reason-btn" data-trigger="決めていた時間だから">決めていた時間だから</button>
+    <button type="button" class="reason-btn" data-trigger="やる気があったから">やる気があったから</button>
+    <button type="button" class="reason-btn" data-trigger="興味があったから">興味があったから</button>
+    <button type="button" class="reason-btn" data-trigger="なんとなく">なんとなく</button>
+  </div>
   <button type="button" id="start-begin-btn">開始</button>
 </div>
 

@@ -90,6 +90,7 @@ class StudyLogCreate(BaseModel):
     minutes: int
     note: str | None = None
     logged_at: str | None = None  # "YYYY-MM-DD HH:MM:SS", optional; defaults to now
+    start_trigger: str | None = None
 
 
 class GoalCreate(BaseModel):
@@ -382,18 +383,32 @@ def study_log_summary():
     return result
 
 
+@app.get("/api/study-logs/trigger-stats")
+def study_log_trigger_stats(days: int = 30):
+    conn = get_connection()
+    cur = conn.execute(
+        "SELECT start_trigger, COUNT(*) AS count FROM study_logs "
+        "WHERE start_trigger IS NOT NULL AND logged_at >= datetime('now', ?, 'start of day') "
+        "GROUP BY start_trigger ORDER BY count DESC",
+        (f"-{days} days",),
+    )
+    result = rows_to_dicts(cur)
+    conn.close()
+    return result
+
+
 @app.post("/api/study-logs")
 def create_study_log(log: StudyLogCreate):
     conn = get_connection()
     if log.logged_at:
         cur = conn.execute(
-            "INSERT INTO study_logs (subject, minutes, note, logged_at) VALUES (?, ?, ?, ?)",
-            (log.subject, log.minutes, log.note, log.logged_at),
+            "INSERT INTO study_logs (subject, minutes, note, logged_at, start_trigger) VALUES (?, ?, ?, ?, ?)",
+            (log.subject, log.minutes, log.note, log.logged_at, log.start_trigger),
         )
     else:
         cur = conn.execute(
-            "INSERT INTO study_logs (subject, minutes, note) VALUES (?, ?, ?)",
-            (log.subject, log.minutes, log.note),
+            "INSERT INTO study_logs (subject, minutes, note, start_trigger) VALUES (?, ?, ?, ?)",
+            (log.subject, log.minutes, log.note, log.start_trigger),
         )
     conn.commit()
     new_id = cur.lastrowid

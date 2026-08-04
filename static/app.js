@@ -714,6 +714,7 @@ function formatElapsed(ms) {
 
 let pendingStart = null; // { subject, todoId }
 let startMode = "countup";
+let startTrigger = null;
 
 const startBackdrop = document.getElementById("start-backdrop");
 const startPanel = document.getElementById("start-panel");
@@ -728,6 +729,10 @@ function openStartPanel(subject, todoId) {
   setStartMode("countup");
   document.getElementById("start-duration-input").value = 25;
   document.getElementById("start-clockonly").checked = false;
+  startTrigger = null;
+  document.querySelectorAll("#start-trigger-picker .reason-btn").forEach((b) => {
+    b.classList.remove("active");
+  });
   startBackdrop.classList.remove("hidden");
   startPanel.classList.remove("hidden");
 }
@@ -759,6 +764,16 @@ document.querySelectorAll("#start-duration-row [data-minutes]").forEach((btn) =>
   });
 });
 
+document.querySelectorAll("#start-trigger-picker .reason-btn").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    const isSame = startTrigger === btn.dataset.trigger;
+    startTrigger = isSame ? null : btn.dataset.trigger;
+    document.querySelectorAll("#start-trigger-picker .reason-btn").forEach((b) => {
+      b.classList.toggle("active", b === btn && !isSame);
+    });
+  });
+});
+
 document.getElementById("start-begin-btn").addEventListener("click", () => {
   if (!pendingStart) return;
   const { subject, todoId } = pendingStart;
@@ -778,8 +793,9 @@ document.getElementById("start-begin-btn").addEventListener("click", () => {
       Notification.requestPermission();
     }
   }
+  const trigger = startTrigger;
   closeStartPanel();
-  beginSession(subject, todoId, startMode, targetMs, clockOnly);
+  beginSession(subject, todoId, startMode, targetMs, clockOnly, trigger);
 });
 
 // ---------- focus timer (start / pause / resume / stop / minimize) ----------
@@ -795,6 +811,7 @@ let sessionTargetMs = null;
 let sessionClockOnly = false;
 let sessionCompleted = false;
 let overlayMinimized = false;
+let sessionStartTrigger = null;
 
 const RING_CIRCUMFERENCE = 2 * Math.PI * 54;
 const RING_PERIOD_MS = 25 * 60 * 1000; // countup ring completes one lap every 25 min, purely decorative
@@ -840,6 +857,7 @@ function persistSession() {
       sessionClockOnly,
       sessionCompleted,
       overlayMinimized,
+      sessionStartTrigger,
     })
   );
 }
@@ -869,6 +887,7 @@ function restoreSession() {
   sessionClockOnly = saved.sessionClockOnly;
   sessionCompleted = !!saved.sessionCompleted;
   overlayMinimized = saved.overlayMinimized;
+  sessionStartTrigger = saved.sessionStartTrigger || null;
 
   if (overlayMinimized) {
     showMiniBar();
@@ -883,7 +902,7 @@ function restoreSession() {
   }
 }
 
-function beginSession(subject, todoId, mode, targetMs, clockOnly) {
+function beginSession(subject, todoId, mode, targetMs, clockOnly, trigger) {
   timerSubject = subject;
   activeTodoId = todoId;
   accumulatedMs = 0;
@@ -894,6 +913,7 @@ function beginSession(subject, todoId, mode, targetMs, clockOnly) {
   sessionClockOnly = clockOnly;
   sessionCompleted = false;
   overlayMinimized = false;
+  sessionStartTrigger = trigger || null;
   openFocusOverlay();
   startTimerTick();
   persistSession();
@@ -1127,6 +1147,7 @@ function resetSessionState() {
   sessionClockOnly = false;
   sessionCompleted = false;
   overlayMinimized = false;
+  sessionStartTrigger = null;
   closeFocusOverlay();
   hideMiniBar();
   localStorage.removeItem(FOCUS_SESSION_KEY);
@@ -1144,10 +1165,16 @@ function discardSession() {
 async function finishSession(elapsedMinutes) {
   const subject = timerSubject;
   const todoId = activeTodoId;
+  const startTrigger = sessionStartTrigger;
   resetSessionState();
   await api("/api/study-logs", {
     method: "POST",
-    body: JSON.stringify({ subject, minutes: elapsedMinutes, logged_at: `${localDatetimeNow().replace("T", " ")}:00` }),
+    body: JSON.stringify({
+      subject,
+      minutes: elapsedMinutes,
+      logged_at: `${localDatetimeNow().replace("T", " ")}:00`,
+      start_trigger: startTrigger,
+    }),
   });
   if (todoId && confirm("このタスクを完了にする?")) {
     await api(`/api/todos/${todoId}/toggle`, { method: "POST" });
@@ -1489,6 +1516,7 @@ async function loadMoodPanel() {
   loadMoodStats();
   loadMoodReasonStats();
   loadLowMoodAchievement();
+  loadStudyTriggerStats();
 }
 
 async function loadMoodStats() {
@@ -1807,6 +1835,22 @@ async function loadActivationMoodReasons() {
   rows.forEach((r) => {
     const li = document.createElement("li");
     li.textContent = `${r.mood_reason} ${r.count}件`;
+    list.appendChild(li);
+  });
+}
+
+async function loadStudyTriggerStats() {
+  const rows = await api("/api/study-logs/trigger-stats?days=30");
+  const list = document.getElementById("study-trigger-stats");
+  list.innerHTML = "";
+  if (rows.length === 0) {
+    list.classList.add("hidden");
+    return;
+  }
+  list.classList.remove("hidden");
+  rows.forEach((r) => {
+    const li = document.createElement("li");
+    li.textContent = `${r.start_trigger} ${r.count}件`;
     list.appendChild(li);
   });
 }
