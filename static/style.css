@@ -752,7 +752,7 @@ body.focus-open #tabbar {
   left: 0;
   right: 0;
   bottom: 44px; /* JS overrides this to sit flush above the tabbar's actual rendered height */
-  z-index: 40;
+  z-index: 25; /* must stay below .backdrop(29)/.add-panel(30) so modal panels eclipse it instead of floating on top */
   background: var(--card);
   border-top: 1px solid var(--border);
   border-left: 3px solid var(--subject-color, var(--accent));
