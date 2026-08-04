@@ -1488,12 +1488,21 @@ async function loadMoodPanel() {
   renderMoodChart(dates, dates.map((d) => (d in scoreByDate ? scoreByDate[d] : null)), noteByDate, reasonByDate, minutesByDate);
   loadMoodStats();
   loadMoodReasonStats();
+  loadLowMoodAchievement();
 }
 
 async function loadMoodStats() {
   const s = await api("/api/mood-logs/stats");
   document.getElementById("mood-stat-week").textContent = s.week_avg != null ? `${s.week_avg}` : "-";
   document.getElementById("mood-stat-month").textContent = s.month_avg != null ? `${s.month_avg}` : "-";
+}
+
+async function loadLowMoodAchievement() {
+  const s = await api("/api/mood-logs/low-mood-achievement?days=30");
+  const el = document.getElementById("mood-stat-low-mood-rate");
+  if (s.status === "not_configured") el.textContent = "未設定";
+  else if (s.status === "insufficient_data") el.textContent = "データ不足";
+  else el.textContent = `${s.rate}% (${s.achieved_days}/${s.low_mood_days}日)`;
 }
 
 async function loadMoodReasonStats() {

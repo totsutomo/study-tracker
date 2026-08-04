@@ -459,6 +459,9 @@ def study_log_daily():
     return result
 
 
+LOW_MOOD_THRESHOLD = 4  # mood_logs.score の日平均がこれ以下なら「低気分日」
+
+
 @app.get("/api/mood-logs")
 def list_mood_logs(days: int = 14):
     conn = get_connection()
@@ -502,6 +505,47 @@ def mood_log_reason_stats(days: int = 30):
     for row in result:
         row["avg_score"] = round(row["avg_score"], 1)
     return result
+
+
+@app.get("/api/mood-logs/low-mood-achievement")
+def mood_log_low_mood_achievement(days: int = 30):
+    conn = get_connection()
+    settings = _read_settings(conn)
+    minimum = settings.get("daily_minimum_minutes")
+    if not minimum:
+        conn.close()
+        return {"status": "not_configured", "low_mood_days": 0, "achieved_days": 0, "rate": None}
+
+    mood_rows = conn.execute(
+        "SELECT date, score FROM mood_logs WHERE date >= date('now', ?)",
+        (f"-{days} days",),
+    ).fetchall()
+    scores_by_date = {}
+    for d, score in mood_rows:
+        scores_by_date.setdefault(d, []).append(score)
+    low_mood_dates = [
+        d for d, scores in scores_by_date.items() if sum(scores) / len(scores) <= LOW_MOOD_THRESHOLD
+    ]
+
+    if not low_mood_dates:
+        conn.close()
+        return {"status": "insufficient_data", "low_mood_days": 0, "achieved_days": 0, "rate": None}
+
+    study_rows = conn.execute(
+        "SELECT date(logged_at) AS d, SUM(minutes) AS total_minutes FROM study_logs "
+        "WHERE logged_at >= datetime('now', ?, 'start of day') GROUP BY d",
+        (f"-{days} days",),
+    ).fetchall()
+    minutes_by_date = dict(study_rows)
+    conn.close()
+
+    achieved_days = sum(1 for d in low_mood_dates if minutes_by_date.get(d, 0) >= minimum)
+    return {
+        "status": "ok",
+        "low_mood_days": len(low_mood_dates),
+        "achieved_days": achieved_days,
+        "rate": round(achieved_days / len(low_mood_dates) * 100),
+    }
 
 
 @app.put("/api/mood-logs")
