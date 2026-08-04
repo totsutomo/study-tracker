@@ -144,6 +144,15 @@ class MoodLogUpsert(BaseModel):
     reason: str | None = None
 
 
+class SleepLogCreate(BaseModel):
+    bedtime_at: str  # "YYYY-MM-DD HH:MM:SS", client local time
+
+
+class SleepLogUpdate(BaseModel):
+    bedtime_at: str | None = None  # "YYYY-MM-DD HH:MM:SS"; omitted fields are left unchanged
+    wake_at: str | None = None
+
+
 WEEKDAY_CODES = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]  # index matches date.weekday()
 
 
@@ -828,6 +837,88 @@ def return_activation_log(log_id: int, payload: ActivationLogReturn):
 def delete_activation_log(log_id: int):
     conn = get_connection()
     conn.execute("DELETE FROM activation_logs WHERE id = ?", (log_id,))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+# ---------- sleep logs ----------
+
+@app.get("/api/sleep-logs")
+def list_sleep_logs(limit: int = 30):
+    conn = get_connection()
+    cur = conn.execute(
+        "SELECT * FROM sleep_logs ORDER BY bedtime_at DESC LIMIT ?", (limit,)
+    )
+    result = rows_to_dicts(cur)
+    conn.close()
+    return result
+
+
+@app.get("/api/sleep-logs/active")
+def active_sleep_log():
+    conn = get_connection()
+    cur = conn.execute(
+        "SELECT * FROM sleep_logs WHERE wake_at IS NULL ORDER BY bedtime_at DESC LIMIT 1"
+    )
+    row = cur.fetchone()
+    result = row_to_dict(cur, row)
+    conn.close()
+    return result
+
+
+@app.get("/api/sleep-logs/stats")
+def sleep_log_stats(days: int = 30):
+    conn = get_connection()
+    cur = conn.execute(
+        "SELECT (julianday(wake_at) - julianday(bedtime_at)) * 24 * 60 AS minutes FROM sleep_logs "
+        "WHERE wake_at IS NOT NULL AND bedtime_at >= datetime('now', ?, 'start of day')",
+        (f"-{days} days",),
+    )
+    minutes_list = [row[0] for row in cur.fetchall()]
+    conn.close()
+    count = len(minutes_list)
+    avg_minutes = round(sum(minutes_list) / count, 1) if count else 0
+    return {"count": count, "avg_minutes": avg_minutes}
+
+
+@app.post("/api/sleep-logs")
+def create_sleep_log(log: SleepLogCreate):
+    conn = get_connection()
+    cur = conn.execute(
+        "INSERT INTO sleep_logs (bedtime_at) VALUES (?)",
+        (log.bedtime_at,),
+    )
+    conn.commit()
+    new_id = cur.lastrowid
+    conn.close()
+    return {"id": new_id}
+
+
+@app.put("/api/sleep-logs/{log_id}")
+def update_sleep_log(log_id: int, payload: SleepLogUpdate):
+    conn = get_connection()
+    cur = conn.execute("SELECT * FROM sleep_logs WHERE id = ?", (log_id,))
+    row = cur.fetchone()
+    if row is None:
+        conn.close()
+        raise HTTPException(status_code=404, detail="sleep log not found")
+    current = row_to_dict(cur, row)
+    bedtime_at = payload.bedtime_at if payload.bedtime_at is not None else current["bedtime_at"]
+    wake_at = payload.wake_at if payload.wake_at is not None else current["wake_at"]
+    conn.execute(
+        "UPDATE sleep_logs SET bedtime_at = ?, wake_at = ? WHERE id = ?",
+        (bedtime_at, wake_at, log_id),
+    )
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+@app.delete("/api/sleep-logs/{log_id}")
+def delete_sleep_log(log_id: int):
+    conn = get_connection()
+    conn.execute("DELETE FROM sleep_logs WHERE id = ?", (log_id,))
     conn.commit()
     conn.close()
     return {"ok": True}

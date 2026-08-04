@@ -88,6 +88,13 @@ CREATE TABLE IF NOT EXISTS mood_logs (
     reason TEXT,
     logged_at TEXT DEFAULT (datetime('now'))
 );
+
+CREATE TABLE IF NOT EXISTS sleep_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    bedtime_at TEXT NOT NULL,
+    wake_at TEXT,
+    logged_at TEXT DEFAULT (datetime('now'))
+);
 """
 
 DEFAULT_CATEGORIES = ("英語", "数学", "世界史", "その他")

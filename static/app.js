@@ -1517,6 +1517,7 @@ async function loadMoodPanel() {
   loadMoodReasonStats();
   loadLowMoodAchievement();
   loadStudyTriggerStats();
+  loadSleepPanel();
 }
 
 async function loadMoodStats() {
@@ -2003,6 +2004,227 @@ document.getElementById("activation-copy-btn").addEventListener("click", async (
   }
   setTimeout(() => { copyBtn.textContent = "コピー"; }, 1500);
 });
+
+// ---------- sleep logs ----------
+
+let sleepActiveLog = null;
+
+function toDatetimeLocalValue(s) {
+  return s ? s.replace(" ", "T").slice(0, 16) : "";
+}
+
+function fromDatetimeLocalValue(v) {
+  return v ? `${v.replace("T", " ")}:00` : null;
+}
+
+function sleepDurationMinutes(bedtimeAt, wakeAt) {
+  if (!wakeAt) return null;
+  const bed = new Date(bedtimeAt.replace(" ", "T"));
+  const wake = new Date(wakeAt.replace(" ", "T"));
+  return Math.round((wake.getTime() - bed.getTime()) / 60000);
+}
+
+async function loadSleepActive() {
+  sleepActiveLog = await api("/api/sleep-logs/active");
+  const btn = document.getElementById("sleep-btn");
+  const settingsStatusEl = document.getElementById("settings-sleep-status");
+  const settingsWakeBtn = document.getElementById("settings-sleep-wake-btn");
+  if (sleepActiveLog) {
+    btn.classList.add("active");
+    btn.title = "タップで起床を記録";
+    settingsStatusEl.textContent = `就寝中: ${formatLoggedAt(sleepActiveLog.bedtime_at)}〜`;
+    settingsWakeBtn.classList.remove("hidden");
+  } else {
+    btn.classList.remove("active");
+    btn.title = "";
+    settingsStatusEl.textContent = "就寝中ではありません";
+    settingsWakeBtn.classList.add("hidden");
+  }
+}
+
+async function wakeUp() {
+  if (!sleepActiveLog) return;
+  await api(`/api/sleep-logs/${sleepActiveLog.id}`, {
+    method: "PUT",
+    body: JSON.stringify({ wake_at: nowLocalTimestamp() }),
+  });
+  loadSleepActive();
+  loadSleepPanel();
+}
+
+async function loadSleepPanel() {
+  const [logs, stats] = await Promise.all([
+    api("/api/sleep-logs?limit=30"),
+    api("/api/sleep-logs/stats?days=30"),
+  ]);
+  renderSleepStats(logs, stats);
+  renderSleepLogList(logs);
+}
+
+function renderSleepStats(logs, stats) {
+  const lastNightEl = document.getElementById("sleep-stat-last-night");
+  const avgEl = document.getElementById("sleep-stat-avg");
+  const lastCompleted = logs.find((l) => l.wake_at);
+  lastNightEl.textContent = lastCompleted
+    ? formatLogDuration(sleepDurationMinutes(lastCompleted.bedtime_at, lastCompleted.wake_at))
+    : "-";
+  avgEl.textContent = stats.count > 0 ? `${formatLogDuration(Math.round(stats.avg_minutes))} (${stats.count}件)` : "データなし";
+}
+
+function renderSleepLogList(logs) {
+  const list = document.getElementById("sleep-log-list");
+  list.innerHTML = "";
+  if (logs.length === 0) {
+    list.innerHTML = "<li>記録がありません</li>";
+    return;
+  }
+  logs.forEach((l) => {
+    const li = document.createElement("li");
+    const minutes = sleepDurationMinutes(l.bedtime_at, l.wake_at);
+    const durationLabel = minutes != null ? ` (${formatLogDuration(minutes)})` : " (就寝中)";
+    li.innerHTML = `
+      <span class="log-info">
+        <span>${formatLoggedAt(l.bedtime_at)} → ${l.wake_at ? formatLoggedAt(l.wake_at) : "..."}${durationLabel}</span>
+      </span>
+      <button class="edit-btn icon-btn" title="編集">✎</button>
+      <button class="delete-btn" title="削除">×</button>
+      <div class="sleep-edit-row hidden">
+        <input type="datetime-local" class="sleep-edit-bedtime" value="${toDatetimeLocalValue(l.bedtime_at)}">
+        <input type="datetime-local" class="sleep-edit-wake" value="${toDatetimeLocalValue(l.wake_at)}">
+        <button type="button" class="quick-date-btn sleep-edit-save">保存</button>
+      </div>
+    `;
+    li.querySelector(".edit-btn").addEventListener("click", () => {
+      li.querySelector(".sleep-edit-row").classList.toggle("hidden");
+    });
+    li.querySelector(".sleep-edit-save").addEventListener("click", async () => {
+      const bedtimeVal = li.querySelector(".sleep-edit-bedtime").value;
+      const wakeVal = li.querySelector(".sleep-edit-wake").value;
+      await api(`/api/sleep-logs/${l.id}`, {
+        method: "PUT",
+        body: JSON.stringify({
+          bedtime_at: fromDatetimeLocalValue(bedtimeVal),
+          wake_at: fromDatetimeLocalValue(wakeVal),
+        }),
+      });
+      loadSleepActive();
+      loadSleepPanel();
+    });
+    li.querySelector(".delete-btn").addEventListener("click", async () => {
+      await api(`/api/sleep-logs/${l.id}`, { method: "DELETE" });
+      loadSleepActive();
+      loadSleepPanel();
+    });
+    list.appendChild(li);
+  });
+}
+
+const bedtimePanel = document.getElementById("bedtime-panel");
+const bedtimeBackdrop = document.getElementById("bedtime-backdrop");
+
+function closeBedtimePanel() {
+  bedtimePanel.classList.add("hidden");
+  bedtimeBackdrop.classList.add("hidden");
+}
+
+document.getElementById("bedtime-close").addEventListener("click", closeBedtimePanel);
+bedtimeBackdrop.addEventListener("click", closeBedtimePanel);
+
+function toggleBedtimeCarryoverEmpty() {
+  const list = document.getElementById("bedtime-carryover-list");
+  document.getElementById("bedtime-carryover-empty").classList.toggle("hidden", list.children.length > 0);
+}
+
+async function renderBedtimeCarryoverList() {
+  const todos = await api("/api/todos");
+  const today = todayStr();
+  const carryover = todos.filter((t) => !t.done && t.due_date === today);
+  const list = document.getElementById("bedtime-carryover-list");
+  list.innerHTML = "";
+  carryover.forEach((t) => {
+    const li = document.createElement("li");
+    li.innerHTML = `
+      <span class="log-info"><span>${escapeHtml(t.title)}</span></span>
+      <div class="bedtime-actions">
+        <button type="button" class="reschedule-btn" data-action="tomorrow">明日へ</button>
+        <button type="button" class="reschedule-btn" data-action="keep">そのまま</button>
+        <button type="button" class="reschedule-btn danger-text" data-action="delete">削除</button>
+      </div>
+    `;
+    li.querySelector('[data-action="tomorrow"]').addEventListener("click", async () => {
+      await api(`/api/todos/${t.id}/due`, {
+        method: "PUT",
+        body: JSON.stringify({ due_date: addDaysToDate(t.due_date, 1), due_time: t.due_time || null }),
+      });
+      li.remove();
+      loadTodos();
+      loadCalendar();
+      toggleBedtimeCarryoverEmpty();
+    });
+    li.querySelector('[data-action="keep"]').addEventListener("click", () => {
+      li.remove();
+      toggleBedtimeCarryoverEmpty();
+    });
+    li.querySelector('[data-action="delete"]').addEventListener("click", async () => {
+      await api(`/api/todos/${t.id}`, { method: "DELETE" });
+      li.remove();
+      loadTodos();
+      toggleBedtimeCarryoverEmpty();
+    });
+    list.appendChild(li);
+  });
+  toggleBedtimeCarryoverEmpty();
+}
+
+async function openBedtimePanel() {
+  bedtimePanel.classList.remove("hidden");
+  bedtimeBackdrop.classList.remove("hidden");
+  document.getElementById("bedtime-step1").classList.remove("hidden");
+  document.getElementById("bedtime-step2").classList.add("hidden");
+  document.getElementById("bedtime-add-title").value = "";
+  document.getElementById("bedtime-added-list").innerHTML = "";
+  await renderBedtimeCarryoverList();
+}
+
+document.getElementById("bedtime-step1-next").addEventListener("click", () => {
+  document.getElementById("bedtime-step1").classList.add("hidden");
+  document.getElementById("bedtime-step2").classList.remove("hidden");
+});
+
+document.getElementById("bedtime-add-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const titleInput = document.getElementById("bedtime-add-title");
+  const title = titleInput.value.trim();
+  if (!title) return;
+  await api("/api/todos", {
+    method: "POST",
+    body: JSON.stringify({ title, due_date: addDaysToDate(todayStr(), 1) }),
+  });
+  titleInput.value = "";
+  const li = document.createElement("li");
+  li.innerHTML = `<span class="log-info"><span>${escapeHtml(title)}</span></span>`;
+  document.getElementById("bedtime-added-list").appendChild(li);
+  loadTodos();
+  loadCalendar();
+});
+
+document.getElementById("bedtime-step2-done").addEventListener("click", closeBedtimePanel);
+
+document.getElementById("sleep-btn").addEventListener("click", async () => {
+  if (sleepActiveLog) {
+    await wakeUp();
+  } else {
+    await api("/api/sleep-logs", {
+      method: "POST",
+      body: JSON.stringify({ bedtime_at: nowLocalTimestamp() }),
+    });
+    await loadSleepActive();
+    loadSleepPanel();
+    openBedtimePanel();
+  }
+});
+
+document.getElementById("settings-sleep-wake-btn").addEventListener("click", wakeUp);
 
 // ---------- calendar (events) ----------
 
@@ -2736,6 +2958,7 @@ updatePushStatus();
   loadActivationStats();
   loadActivationPostReturnStats();
   loadActivationMoodReasons();
+  loadSleepActive();
   loadCalendar();
   restoreSession();
 })();

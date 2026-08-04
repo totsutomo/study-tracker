@@ -13,6 +13,12 @@
 <header>
   <button type="button" id="settings-btn" class="icon-btn" aria-label="設定">⚙️</button>
   <h1>study-tracker</h1>
+  <button type="button" id="sleep-btn" class="icon-btn sleep-btn" aria-label="就寝記録">
+    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor"
+         stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M20 14.5A8.5 8.5 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/>
+    </svg>
+  </button>
   <button type="button" id="activation-btn" class="icon-btn activation-btn" aria-label="発動ログ">🧭</button>
 </header>
 
@@ -285,6 +291,13 @@
       <button type="button" id="activation-copy-btn" class="quick-date-btn hidden">コピー</button>
     </div>
     <textarea id="activation-export-text" rows="6" class="hidden" readonly></textarea>
+
+    <h2>睡眠</h2>
+    <div class="stats-header">
+      <div class="stat-cell"><span class="stat-label">昨晩</span><span class="stat-value" id="sleep-stat-last-night"></span></div>
+      <div class="stat-cell"><span class="stat-label">直近30日平均</span><span class="stat-value" id="sleep-stat-avg"></span></div>
+    </div>
+    <ul id="sleep-log-list" class="list"></ul>
   </section>
 
   <section id="tab-goal" class="tab-panel">
@@ -497,6 +510,9 @@
   <h3>発動ログ</h3>
   <p class="meta" id="settings-activation-status">発動中ではありません</p>
   <button type="button" id="settings-activation-return-btn" class="hidden">復帰する</button>
+  <h3>睡眠記録</h3>
+  <p class="meta" id="settings-sleep-status">就寝中ではありません</p>
+  <button type="button" id="settings-sleep-wake-btn" class="hidden">起床する</button>
   <h3>カテゴリ管理</h3>
   <ul id="category-list" class="list"></ul>
   <form id="category-form" class="add-form">
@@ -532,6 +548,29 @@
     </div>
     <button type="submit">記録</button>
   </form>
+</div>
+
+<div id="bedtime-backdrop" class="backdrop hidden"></div>
+<div id="bedtime-panel" class="add-panel hidden">
+  <div class="panel-header">
+    <h3>おやすみ前に</h3>
+    <button type="button" id="bedtime-close" class="panel-close" aria-label="閉じる">×</button>
+  </div>
+  <div id="bedtime-step1">
+    <h4>今日期限の未完了タスク</h4>
+    <ul id="bedtime-carryover-list" class="list"></ul>
+    <p class="meta hidden" id="bedtime-carryover-empty">残っているタスクはありません</p>
+    <button type="button" id="bedtime-step1-next">次へ</button>
+  </div>
+  <div id="bedtime-step2" class="hidden">
+    <h4>明日やること</h4>
+    <form id="bedtime-add-form" class="add-form">
+      <input type="text" id="bedtime-add-title" placeholder="タイトル">
+      <button type="submit">+ 追加</button>
+    </form>
+    <ul id="bedtime-added-list" class="list"></ul>
+    <button type="button" id="bedtime-step2-done">完了</button>
+  </div>
 </div>
 
 <nav id="tabbar">
