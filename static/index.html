@@ -3,9 +3,10 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>study-tracker</title>
+<title>Compass</title>
 <link rel="manifest" href="/manifest.json">
 <meta name="theme-color" content="#0f1115">
+<meta name="apple-mobile-web-app-title" content="Compass">
 <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
@@ -14,7 +15,7 @@
 
 <div id="boot-loading" class="boot-loading">
   <div class="boot-goal">
-    <div class="boot-goal-label">英検準1級・CEFR C1まで</div>
+    <div class="boot-goal-label" id="boot-goal-label">目標まで</div>
     <div class="boot-goal-days">
       <span class="boot-goal-number" id="boot-goal-days">--</span>
       <span class="boot-goal-unit">日</span>
@@ -348,6 +349,12 @@
   <section id="tab-goal" class="tab-panel">
     <h2>目標達成度</h2>
     <div id="countdown"></div>
+    <button type="button" id="countdown-edit-toggle" class="quick-date-btn">大きな目標を編集</button>
+    <form id="countdown-edit-form" class="add-form hidden">
+      <input type="text" id="countdown-edit-label" placeholder="目標名(例: 英検準1級・C1 目標(留学終了))" required>
+      <input type="date" id="countdown-edit-date" required>
+      <button type="submit">保存</button>
+    </form>
     <ul id="goal-list" class="list"></ul>
     <form id="goal-form" class="add-form">
       <input type="text" id="goal-title" placeholder="達成したい項目(例: 単語1800語)" required>

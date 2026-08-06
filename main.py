@@ -82,6 +82,8 @@ class SettingsUpdate(BaseModel):
     weekly_goal_minutes: int | None = None
     monthly_goal_minutes: int | None = None
     daily_minimum_minutes: int | None = None
+    countdown_label: str | None = None
+    countdown_target_date: str | None = None  # "YYYY-MM-DD"
 
 
 class FocusSessionSync(BaseModel):
@@ -687,6 +689,25 @@ def update_settings(payload: SettingsUpdate):
             "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
             (str(payload.daily_minimum_minutes),),
         )
+    if payload.countdown_label is not None:
+        label = payload.countdown_label.strip()
+        if not label:
+            raise HTTPException(status_code=400, detail="countdown_label must not be empty")
+        conn.execute(
+            "INSERT INTO settings (key, value) VALUES ('countdown_label', ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (label,),
+        )
+    if payload.countdown_target_date is not None:
+        try:
+            date.fromisoformat(payload.countdown_target_date)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="countdown_target_date must be YYYY-MM-DD")
+        conn.execute(
+            "INSERT INTO settings (key, value) VALUES ('countdown_target_date', ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (payload.countdown_target_date,),
+        )
     conn.commit()
     result = _read_settings(conn)
     conn.close()
@@ -982,11 +1003,22 @@ def delete_goal(goal_id: int):
     return {"ok": True}
 
 
+DEFAULT_COUNTDOWN_LABEL = "英検準1級・C1 目標(留学終了)"
+DEFAULT_COUNTDOWN_TARGET_DATE = date(2026, 11, 30)
+
+
 @app.get("/api/goals/countdown")
 def goal_countdown():
-    target = date(2026, 11, 30)
+    conn = get_connection()
+    rows = conn.execute(
+        "SELECT key, value FROM settings WHERE key IN ('countdown_label', 'countdown_target_date')"
+    ).fetchall()
+    conn.close()
+    d = {row[0]: row[1] for row in rows}
+    label = d.get("countdown_label") or DEFAULT_COUNTDOWN_LABEL
+    target = date.fromisoformat(d["countdown_target_date"]) if d.get("countdown_target_date") else DEFAULT_COUNTDOWN_TARGET_DATE
     days_left = (target - date.today()).days
-    return {"target_date": target.isoformat(), "days_left": days_left}
+    return {"target_date": target.isoformat(), "days_left": days_left, "label": label}
 
 
 # ---------- events (calendar) ----------

@@ -1,6 +1,6 @@
 {
-  "name": "study-tracker",
-  "short_name": "study",
+  "name": "Compass",
+  "short_name": "Compass",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#0f1115",

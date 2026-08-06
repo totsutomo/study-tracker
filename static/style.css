@@ -436,6 +436,7 @@ input[type="checkbox"] {
 .add-form input[type="text"],
 .add-form input[type="number"],
 .add-form input[type="datetime-local"],
+.add-form input[type="date"],
 .add-form select {
   flex: 1;
   min-width: 120px;

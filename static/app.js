@@ -1848,14 +1848,41 @@ async function loadStudyLogList() {
 
 // ---------- goals ----------
 
+let lastCountdown = null;
+
 async function loadCountdown() {
   const c = await api("/api/goals/countdown");
+  lastCountdown = c;
   document.getElementById("countdown").innerHTML =
-    `英検準1級・C1 目標(留学終了)まで<br><span class="days">${c.days_left}日</span>`;
+    `${escapeHtml(c.label)}まで<br><span class="days">${c.days_left}日</span>`;
   // 起動画面の「あと◯◯日」にも同じ値を反映する(同じAPIを二重に叩かないよう共用)
   const bootDays = document.getElementById("boot-goal-days");
   if (bootDays) bootDays.textContent = c.days_left;
+  const bootLabel = document.getElementById("boot-goal-label");
+  if (bootLabel) bootLabel.textContent = `${c.label}まで`;
 }
+
+document.getElementById("countdown-edit-toggle").addEventListener("click", () => {
+  const form = document.getElementById("countdown-edit-form");
+  const opening = form.classList.contains("hidden");
+  form.classList.toggle("hidden");
+  if (opening && lastCountdown) {
+    document.getElementById("countdown-edit-label").value = lastCountdown.label;
+    document.getElementById("countdown-edit-date").value = lastCountdown.target_date;
+  }
+});
+
+guardedSubmit(document.getElementById("countdown-edit-form"), async (e) => {
+  const label = document.getElementById("countdown-edit-label").value.trim();
+  const targetDate = document.getElementById("countdown-edit-date").value;
+  if (!label || !targetDate) return;
+  await api("/api/settings", {
+    method: "PUT",
+    body: JSON.stringify({ countdown_label: label, countdown_target_date: targetDate }),
+  });
+  document.getElementById("countdown-edit-form").classList.add("hidden");
+  loadCountdown();
+});
 
 async function loadGoals() {
   const goals = await api("/api/goals");
