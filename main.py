@@ -5,10 +5,11 @@ import json
 import os
 import zipfile
 from datetime import date, datetime, timedelta
+from urllib.parse import quote
 
 from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from pydantic import BaseModel
 from pywebpush import WebPushException, webpush
 
@@ -1327,10 +1328,26 @@ def push_check(token: str | None = None):
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
+# デプロイのたびに変わるLAST_UPDATEDをapp.js/style.cssのURLに付与し、
+# ブラウザのキャッシュに古いJSが残ったままにならないようにする。
+_INDEX_HTML_CACHE: str | None = None
+
+
+def _render_index_html() -> str:
+    global _INDEX_HTML_CACHE
+    if _INDEX_HTML_CACHE is None:
+        with open("static/index.html", encoding="utf-8") as f:
+            html = f.read()
+        v = quote(LAST_UPDATED, safe="")
+        html = html.replace('href="/static/style.css"', f'href="/static/style.css?v={v}"')
+        html = html.replace('src="/static/app.js"', f'src="/static/app.js?v={v}"')
+        _INDEX_HTML_CACHE = html
+    return _INDEX_HTML_CACHE
+
 
 @app.get("/")
 def index():
-    return FileResponse("static/index.html")
+    return HTMLResponse(content=_render_index_html(), headers={"Cache-Control": "no-cache"})
 
 
 @app.get("/manifest.json")
@@ -1340,7 +1357,7 @@ def manifest():
 
 @app.get("/service-worker.js")
 def service_worker():
-    return FileResponse("static/service-worker.js")
+    return FileResponse("static/service-worker.js", headers={"Cache-Control": "no-cache"})
 
 
 @app.get("/api/build-info")
