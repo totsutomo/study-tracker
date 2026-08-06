@@ -80,8 +80,10 @@ header h1 {
   inset: 0;
   z-index: 100;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
+  gap: 32px;
   background: var(--bg);
 }
 
@@ -89,9 +91,36 @@ header h1 {
   display: none;
 }
 
+.boot-brand {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+}
+
+.boot-icon {
+  width: 76px;
+  height: 76px;
+  border-radius: 20px;
+  box-shadow: 0 10px 28px rgba(34, 211, 238, 0.18);
+  animation: boot-breathe 2.2s ease-in-out infinite;
+}
+
+.boot-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-muted);
+  letter-spacing: 0.04em;
+}
+
+@keyframes boot-breathe {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+
 .boot-spinner {
-  width: 30px;
-  height: 30px;
+  width: 26px;
+  height: 26px;
   border: 3px solid var(--border);
   border-top-color: var(--accent);
   border-radius: 50%;
@@ -106,6 +135,9 @@ header h1 {
   .top-progress-bar::before,
   .boot-spinner {
     animation-duration: 2.4s;
+  }
+  .boot-icon {
+    animation: none;
   }
 }
 
