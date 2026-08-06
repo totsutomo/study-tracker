@@ -83,42 +83,81 @@ header h1 {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 32px;
-  background: var(--bg);
+  gap: 36px;
+  overflow: hidden;
+  background:
+    radial-gradient(ellipse 140% 55% at 50% 100%, rgba(34, 211, 238, 0.24), transparent 70%),
+    linear-gradient(180deg, #090b0f 0%, #0f1115 60%, #0f1115 100%);
 }
 
 .boot-loading.hidden {
   display: none;
 }
 
-.boot-brand {
+/* 「夢を見る」余白としての星空。留学先ニュージーランドの夜空をイメージした
+   淡い瞬き。写真は使わず、CSSのみで雰囲気を出す。 */
+.boot-loading::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image:
+    radial-gradient(1.6px 1.6px at 18% 22%, rgba(255, 255, 255, 0.55), transparent),
+    radial-gradient(1.4px 1.4px at 76% 14%, rgba(255, 255, 255, 0.4), transparent),
+    radial-gradient(1.2px 1.2px at 42% 9%, rgba(255, 255, 255, 0.5), transparent),
+    radial-gradient(1.2px 1.2px at 87% 33%, rgba(255, 255, 255, 0.35), transparent),
+    radial-gradient(1.6px 1.6px at 61% 20%, rgba(255, 255, 255, 0.45), transparent),
+    radial-gradient(1.2px 1.2px at 11% 42%, rgba(255, 255, 255, 0.3), transparent),
+    radial-gradient(1.2px 1.2px at 93% 52%, rgba(255, 255, 255, 0.3), transparent),
+    radial-gradient(1.4px 1.4px at 30% 60%, rgba(255, 255, 255, 0.3), transparent);
+  animation: boot-twinkle 4s ease-in-out infinite;
+}
+
+@keyframes boot-twinkle {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 1; }
+}
+
+.boot-goal {
+  position: relative;
+  z-index: 1;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 16px;
+  gap: 12px;
+  padding: 0 32px;
+  text-align: center;
 }
 
-.boot-icon {
-  width: 76px;
-  height: 76px;
-  border-radius: 20px;
-  box-shadow: 0 10px 28px rgba(34, 211, 238, 0.18);
-  animation: boot-breathe 2.2s ease-in-out infinite;
-}
-
-.boot-title {
-  font-size: 14px;
-  font-weight: 600;
+.boot-goal-label {
+  font-size: 13px;
   color: var(--text-muted);
-  letter-spacing: 0.04em;
+  letter-spacing: 0.03em;
 }
 
-@keyframes boot-breathe {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.55; }
+.boot-goal-days {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-variant-numeric: tabular-nums;
+}
+
+.boot-goal-number {
+  font-size: 60px;
+  font-weight: 700;
+  color: var(--accent);
+  line-height: 1;
+  text-shadow: 0 0 40px rgba(34, 211, 238, 0.35);
+}
+
+.boot-goal-unit {
+  font-size: 20px;
+  color: var(--text-muted);
+  font-weight: 600;
 }
 
 .boot-spinner {
+  position: relative;
+  z-index: 1;
   width: 26px;
   height: 26px;
   border: 3px solid var(--border);
@@ -136,7 +175,7 @@ header h1 {
   .boot-spinner {
     animation-duration: 2.4s;
   }
-  .boot-icon {
+  .boot-loading::before {
     animation: none;
   }
 }

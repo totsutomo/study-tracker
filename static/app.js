@@ -1852,6 +1852,9 @@ async function loadCountdown() {
   const c = await api("/api/goals/countdown");
   document.getElementById("countdown").innerHTML =
     `英検準1級・C1 目標(留学終了)まで<br><span class="days">${c.days_left}日</span>`;
+  // 起動画面の「あと◯◯日」にも同じ値を反映する(同じAPIを二重に叩かないよう共用)
+  const bootDays = document.getElementById("boot-goal-days");
+  if (bootDays) bootDays.textContent = c.days_left;
 }
 
 async function loadGoals() {
@@ -3117,10 +3120,11 @@ document.getElementById("export-data-btn").addEventListener("click", () => {
   await loadCategories(); // study-buttons and the chart's subject list depend on categories being loaded first
   restoreSession();
 
-  // 起動画面は「最初に表示されるToDoタブに必要な分」だけ待って閉じる。残り13件は起動画面の
-  // 裏でバックグラウンド読み込みを続け、届き次第各セクションに反映される。以前は15件すべてが
-  // 揃うまで真っ暗な起動画面のままだったため、体感の読み込み時間が実際より長くなっていた。
-  const criticalResults = await Promise.allSettled([loadTodos(), loadTodoStats()]);
+  // 起動画面は「最初に表示されるToDoタブに必要な分」+「起動画面自体に出す目標カウントダウン」
+  // だけ待って閉じる。残り12件は起動画面の裏でバックグラウンド読み込みを続け、届き次第
+  // 各セクションに反映される。以前は15件すべてが揃うまで真っ暗な起動画面のままだったため、
+  // 体感の読み込み時間が実際より長くなっていた。
+  const criticalResults = await Promise.allSettled([loadTodos(), loadTodoStats(), loadCountdown()]);
   criticalResults.filter((r) => r.status === "rejected").forEach((r) => console.error("init load failed:", r.reason));
   document.getElementById("boot-loading")?.classList.add("hidden");
 
@@ -3129,7 +3133,6 @@ document.getElementById("export-data-btn").addEventListener("click", () => {
     loadStudyLogList(),
     loadStudyChart(),
     loadGoalProgress(),
-    loadCountdown(),
     loadGoals(),
     loadActivationActive(),
     loadActivationList(),
