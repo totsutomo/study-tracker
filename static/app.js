@@ -19,20 +19,83 @@ document.getElementById("daily-min-banner").addEventListener("click", () => swit
 
 // ---------- helpers ----------
 
-async function api(path, options = {}, retries = 3) {
-  for (let attempt = 0; ; attempt++) {
-    try {
-      const res = await fetch(path, {
-        headers: { "Content-Type": "application/json" },
-        ...options,
-      });
-      if (!res.ok) throw new Error(`API error: ${res.status}`);
-      return await res.json();
-    } catch (err) {
-      if (attempt >= retries) throw err;
-      await new Promise((r) => setTimeout(r, 700 * (attempt + 1)));
-    }
+// api()呼び出し中であることを画面上部の細いバーで示す。「押しても反応がわからない」対策。
+// 一瞬で終わるリクエストでチラつかないよう、表示は少し遅らせて出す。
+let apiInFlight = 0;
+let apiProgressShowTimer = null;
+
+function apiProgressStart() {
+  apiInFlight++;
+  if (apiInFlight === 1) {
+    clearTimeout(apiProgressShowTimer);
+    apiProgressShowTimer = setTimeout(() => {
+      document.getElementById("top-progress-bar")?.classList.remove("hidden");
+    }, 200);
   }
+}
+
+function apiProgressEnd() {
+  apiInFlight = Math.max(0, apiInFlight - 1);
+  if (apiInFlight === 0) {
+    clearTimeout(apiProgressShowTimer);
+    document.getElementById("top-progress-bar")?.classList.add("hidden");
+  }
+}
+
+async function api(path, options = {}, retries = 3) {
+  apiProgressStart();
+  try {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        const res = await fetch(path, {
+          headers: { "Content-Type": "application/json" },
+          ...options,
+        });
+        if (!res.ok) throw new Error(`API error: ${res.status}`);
+        return await res.json();
+      } catch (err) {
+        if (attempt >= retries) throw err;
+        await new Promise((r) => setTimeout(r, 700 * (attempt + 1)));
+      }
+    }
+  } finally {
+    apiProgressEnd();
+  }
+}
+
+// フォームの二重送信防止: 送信ボタンをリクエスト中は無効化し、
+// 「反応が無いように見えてもう一度押す」→2重に記録される、を防ぐ。
+function guardedSubmit(form, handler) {
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    if (form.dataset.submitting === "1") return;
+    form.dataset.submitting = "1";
+    const submitBtn = form.querySelector('button[type="submit"]');
+    if (submitBtn) submitBtn.disabled = true;
+    try {
+      await handler(e);
+    } finally {
+      form.dataset.submitting = "";
+      if (submitBtn) submitBtn.disabled = false;
+    }
+  });
+}
+
+// フォーム外のボタン(就寝/発動ログの開始・終了など)向けの同じ仕組み。
+// これらは処理中に押しても状態変数の更新がリクエスト完了後になるため、
+// ボタン無効化なしだと連打でレコードが二重に作成されうる。
+function guardedClick(el, handler) {
+  el.addEventListener("click", async (e) => {
+    if (el.dataset.busy === "1") return;
+    el.dataset.busy = "1";
+    el.disabled = true;
+    try {
+      await handler(e);
+    } finally {
+      el.dataset.busy = "";
+      el.disabled = false;
+    }
+  });
 }
 
 function formatLocalDate(d) {
@@ -66,14 +129,29 @@ function isOverdue(t) {
 const WEEKDAY_ORDER = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
 const WEEKDAY_LABEL = { mon: "月", tue: "火", wed: "水", thu: "木", fri: "金", sat: "土", sun: "日" };
 
+// テキストに混ぜ込む小アイコン。絵文字はOS/端末で見た目がバラつく上ダークモードで浮くため、
+// 他のアイコンボタンと同じstroke SVGに統一している(class="inline-icon"でstyle.css側の余白調整)。
+const ICONS = {
+  repeat:
+    '<svg class="inline-icon" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>',
+  calendar:
+    '<svg class="inline-icon" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>',
+  note:
+    '<svg class="inline-icon" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>',
+  check:
+    '<svg class="inline-icon" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>',
+  alert:
+    '<svg class="inline-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>',
+};
+
 function recurrenceLabel(recurrence) {
   if (!recurrence) return "";
   const days = recurrence.split(",");
-  if (days.length === 7) return " 🔁毎日";
+  if (days.length === 7) return ` ${ICONS.repeat}毎日`;
   const weekdaysOnly = ["mon", "tue", "wed", "thu", "fri"];
-  if (days.length === 5 && weekdaysOnly.every((d) => days.includes(d))) return " 🔁平日";
+  if (days.length === 5 && weekdaysOnly.every((d) => days.includes(d))) return ` ${ICONS.repeat}平日`;
   const sorted = WEEKDAY_ORDER.filter((d) => days.includes(d));
-  return " 🔁" + sorted.map((d) => WEEKDAY_LABEL[d]).join("");
+  return ` ${ICONS.repeat}` + sorted.map((d) => WEEKDAY_LABEL[d]).join("");
 }
 
 function computeReschedule(t, kind) {
@@ -97,10 +175,10 @@ function renderTodoItem(t, list) {
   if (overdue) li.classList.add("overdue");
   if (!t.done && t.due_date === todayStr() && !overdue) li.classList.add("due-today");
   if (t.priority === "high") li.classList.add("priority-high");
-  const dueLabel = t.due_date ? `📅 ${t.due_date}${t.due_time ? " " + t.due_time : ""}` : "";
+  const dueLabel = t.due_date ? `${ICONS.calendar} ${t.due_date}${t.due_time ? " " + t.due_time : ""}` : "";
   const recurLabel = recurrenceLabel(t.recurrence);
   const priorityLabel = t.priority && t.priority !== "medium" ? `[${PRIORITY_LABEL[t.priority] || t.priority}] ` : "";
-  const noteMark = t.note ? " 📝" : "";
+  const noteMark = t.note ? ` ${ICONS.note}` : "";
   const showReschedule = !t.done && t.due_date && (overdue || t.due_date === todayStr());
   li.innerHTML = `
     <div class="todo-item-row">
@@ -432,8 +510,7 @@ function renderCategoryItem(cat, list) {
   list.appendChild(li);
 }
 
-document.getElementById("category-form").addEventListener("submit", async (e) => {
-  e.preventDefault();
+guardedSubmit(document.getElementById("category-form"), async (e) => {
   const name = document.getElementById("category-name").value.trim();
   if (!name) return;
   await api("/api/categories", {
@@ -532,8 +609,7 @@ document.getElementById("todo-detail-time-toggle").addEventListener("click", () 
   }
 });
 
-document.getElementById("todo-form").addEventListener("submit", async (e) => {
-  e.preventDefault();
+guardedSubmit(document.getElementById("todo-form"), async (e) => {
   const title = document.getElementById("todo-title").value.trim();
   const category = document.getElementById("todo-category").value;
   const priority = document.getElementById("todo-priority").value;
@@ -604,8 +680,7 @@ function closeTodoDetail() {
 document.getElementById("todo-detail-close").addEventListener("click", closeTodoDetail);
 document.getElementById("todo-detail-backdrop").addEventListener("click", closeTodoDetail);
 
-document.getElementById("todo-detail-form").addEventListener("submit", async (e) => {
-  e.preventDefault();
+guardedSubmit(document.getElementById("todo-detail-form"), async (e) => {
   if (!currentDetailTodoId) return;
   const title = document.getElementById("todo-detail-title").value.trim();
   const category = document.getElementById("todo-detail-category").value || null;
@@ -679,8 +754,7 @@ document.getElementById("manual-log-toggle").addEventListener("click", () => {
   }
 });
 
-document.getElementById("manual-log-form").addEventListener("submit", async (e) => {
-  e.preventDefault();
+guardedSubmit(document.getElementById("manual-log-form"), async (e) => {
   const subject = document.getElementById("manual-log-subject").value;
   const minutes = parseInt(document.getElementById("manual-log-minutes").value, 10);
   const datetimeLocal = document.getElementById("manual-log-datetime").value; // "YYYY-MM-DDTHH:MM"
@@ -1331,15 +1405,17 @@ function renderStudyChart(buckets, byBucket, subjectNames, labelFns) {
   const chartW = 320;
   const chartH = 130;
   const padLeft = 26;
+  // 最大値の目盛りラベルがviewBoxの上端ぴったりに描かれて見切れていたため、上にも余白を確保する。
+  const padTop = 9;
   const padBottom = 14;
   const plotW = chartW - padLeft - 2;
-  const plotH = chartH - padBottom;
+  const plotH = chartH - padTop - padBottom;
   const barGap = 3;
   const barW = plotW / buckets.length - barGap;
 
   const gridLines = [0, 0.5, 1]
     .map((frac) => {
-      const y = plotH - plotH * frac;
+      const y = padTop + plotH - plotH * frac;
       const label = Math.round(((maxTotal * frac) / 60) * 10) / 10;
       return `
         <line x1="${padLeft}" y1="${y}" x2="${chartW}" y2="${y}" stroke="var(--border)" stroke-width="1" />
@@ -1351,7 +1427,7 @@ function renderStudyChart(buckets, byBucket, subjectNames, labelFns) {
   const bars = buckets
     .map((b, i) => {
       const x = padLeft + i * (barW + barGap);
-      let yCursor = plotH;
+      let yCursor = padTop + plotH;
       const segments = subjectNames.map((s) => {
         const minutes = byBucket[b][s] || 0;
         if (minutes <= 0) return "";
@@ -1361,7 +1437,7 @@ function renderStudyChart(buckets, byBucket, subjectNames, labelFns) {
         return `<rect x="${x}" y="${y}" width="${Math.max(barW, 0)}" height="${Math.max(h, 0)}" fill="${colorFor(s)}" rx="2" data-bucket="${b}" data-subject="${s}" data-minutes="${minutes}"></rect>`;
       }).join("");
       const axisLabel = labelFns.axisLabel(b);
-      return `${segments}<text x="${x + barW / 2}" y="${chartH}" font-size="8" fill="var(--text-muted)" text-anchor="middle">${axisLabel}</text>`;
+      return `${segments}<text x="${x + barW / 2}" y="${chartH - 1}" font-size="8" fill="var(--text-muted)" text-anchor="middle">${axisLabel}</text>`;
     })
     .join("");
 
@@ -1421,13 +1497,13 @@ async function loadGoalProgress() {
   const bannerFill = document.getElementById("daily-min-banner-fill");
   if (p.daily_minimum_minutes) {
     const reached = p.today_minutes >= p.daily_minimum_minutes;
-    const labelText = `${p.today_minutes} / ${p.daily_minimum_minutes}分${reached ? " ✓" : ""}`;
+    const labelText = `${p.today_minutes} / ${p.daily_minimum_minutes}分${reached ? ` ${ICONS.check}` : ""}`;
     const fillPct = `${Math.min(100, (p.today_minutes / p.daily_minimum_minutes) * 100)}%`;
-    dailyMinLabel.textContent = labelText;
+    dailyMinLabel.innerHTML = labelText;
     dailyMinFill.style.width = fillPct;
     banner.classList.remove("hidden");
     banner.classList.toggle("reached", reached);
-    bannerLabel.textContent = reached ? `今日の最低ライン ${labelText}` : `今日あと${p.daily_minimum_minutes - p.today_minutes}分`;
+    bannerLabel.innerHTML = reached ? `今日の最低ライン ${labelText}` : `今日あと${p.daily_minimum_minutes - p.today_minutes}分`;
     bannerFill.style.width = fillPct;
   } else {
     dailyMinLabel.textContent = "未設定";
@@ -1577,9 +1653,11 @@ function renderMoodChart(dates, scores, entriesByDate, minutesByDate) {
   const container = document.getElementById("mood-chart");
   const chartW = 320;
   const chartH = 70;
+  // スコア10(最高値)の点がviewBox上端ぴったりに来て半分クリップされていたため、上にも余白を確保する。
+  const padTop = 5;
   const padBottom = 12;
   const padX = 8;
-  const plotH = chartH - padBottom;
+  const plotH = chartH - padTop - padBottom;
   const plotW = chartW - padX * 2;
   const stepX = dates.length > 1 ? plotW / (dates.length - 1) : 0;
   const xs = dates.map((_, i) => padX + i * stepX);
@@ -1592,12 +1670,12 @@ function renderMoodChart(dates, scores, entriesByDate, minutesByDate) {
       const minutes = minutesValues[i];
       if (minutes <= 0) return "";
       const h = (minutes / maxMinutes) * plotH;
-      return `<rect x="${xs[i] - barW / 2}" y="${plotH - h}" width="${barW}" height="${h}" fill="var(--accent-dim)" rx="1"></rect>`;
+      return `<rect x="${xs[i] - barW / 2}" y="${padTop + plotH - h}" width="${barW}" height="${h}" fill="var(--accent-dim)" rx="1"></rect>`;
     })
     .join("");
 
   const axisLabels = dates
-    .map((d, i) => `<text x="${xs[i]}" y="${chartH}" font-size="7" fill="var(--text-muted)" text-anchor="middle">${d.slice(8, 10)}</text>`)
+    .map((d, i) => `<text x="${xs[i]}" y="${chartH - 1}" font-size="7" fill="var(--text-muted)" text-anchor="middle">${d.slice(8, 10)}</text>`)
     .join("");
 
   let pathD = "";
@@ -1609,7 +1687,7 @@ function renderMoodChart(dates, scores, entriesByDate, minutesByDate) {
       drawing = false;
       return;
     }
-    const y = plotH - ((score - 1) / 9) * plotH;
+    const y = padTop + plotH - ((score - 1) / 9) * plotH;
     pathD += `${drawing ? "L" : "M"}${xs[i]},${y} `;
     drawing = true;
     dots.push(`<circle cx="${xs[i]}" cy="${y}" r="4" fill="var(--accent)" data-date="${d}" data-score="${score}"></circle>`);
@@ -1667,8 +1745,7 @@ document.getElementById("mood-save-btn").addEventListener("click", async () => {
   loadMoodPanel();
 });
 
-document.getElementById("goal-minutes-form").addEventListener("submit", async (e) => {
-  e.preventDefault();
+guardedSubmit(document.getElementById("goal-minutes-form"), async (e) => {
   const dailyMinutes = parseInt(document.getElementById("daily-goal-input").value, 10);
   const weeklyHours = parseFloat(document.getElementById("weekly-goal-input").value);
   const monthlyHours = parseFloat(document.getElementById("monthly-goal-input").value);
@@ -1774,8 +1851,7 @@ async function loadGoals() {
     goals.length ? `達成率: ${doneCount}/${goals.length} (${pct}%)` : "";
 }
 
-document.getElementById("goal-form").addEventListener("submit", async (e) => {
-  e.preventDefault();
+guardedSubmit(document.getElementById("goal-form"), async (e) => {
   const title = document.getElementById("goal-title").value.trim();
   if (!title) return;
   await api("/api/goals", {
@@ -1800,7 +1876,7 @@ function updateActivationBanner() {
   }
   const triggered = new Date(activationActiveLog.triggered_at.replace(" ", "T"));
   const elapsedMin = Math.max(0, Math.floor((Date.now() - triggered.getTime()) / 60000));
-  label.textContent = `⚠️ 発動中・経過 ${formatLogDuration(elapsedMin)}`;
+  label.innerHTML = `${ICONS.alert} 発動中・経過 ${formatLogDuration(elapsedMin)}`;
   banner.classList.remove("hidden");
 }
 
@@ -1992,7 +2068,7 @@ function closeActivationPanel() {
 document.getElementById("activation-close").addEventListener("click", closeActivationPanel);
 activationBackdrop.addEventListener("click", closeActivationPanel);
 
-document.getElementById("activation-btn").addEventListener("click", async () => {
+guardedClick(document.getElementById("activation-btn"), async () => {
   if (activationActiveLog) {
     await returnActivation();
   } else {
@@ -2000,11 +2076,10 @@ document.getElementById("activation-btn").addEventListener("click", async () => 
   }
 });
 
-document.getElementById("settings-activation-return-btn").addEventListener("click", returnActivation);
+guardedClick(document.getElementById("settings-activation-return-btn"), returnActivation);
 document.getElementById("activation-banner").addEventListener("click", openSettingsPanel);
 
-document.getElementById("activation-form").addEventListener("submit", async (e) => {
-  e.preventDefault();
+guardedSubmit(document.getElementById("activation-form"), async (e) => {
   const note = document.getElementById("activation-note").value.trim() || null;
   await api("/api/activation-logs", {
     method: "POST",
@@ -2122,7 +2197,12 @@ function renderSleepLogList(logs) {
       <span class="log-info">
         <span>${formatLoggedAt(l.bedtime_at)} → ${l.wake_at ? formatLoggedAt(l.wake_at) : "..."}${durationLabel}</span>
       </span>
-      <button class="edit-btn icon-btn" title="編集">✎</button>
+      <button class="edit-btn icon-btn" title="編集">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
+             stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/>
+        </svg>
+      </button>
       <button class="delete-btn" title="削除">×</button>
       <div class="sleep-edit-row hidden">
         <input type="datetime-local" class="sleep-edit-bedtime" value="${toDatetimeLocalValue(l.bedtime_at)}">
@@ -2227,8 +2307,7 @@ document.getElementById("bedtime-step1-next").addEventListener("click", () => {
   document.getElementById("bedtime-step2").classList.remove("hidden");
 });
 
-document.getElementById("bedtime-add-form").addEventListener("submit", async (e) => {
-  e.preventDefault();
+guardedSubmit(document.getElementById("bedtime-add-form"), async (e) => {
   const titleInput = document.getElementById("bedtime-add-title");
   const title = titleInput.value.trim();
   if (!title) return;
@@ -2246,7 +2325,7 @@ document.getElementById("bedtime-add-form").addEventListener("submit", async (e)
 
 document.getElementById("bedtime-step2-done").addEventListener("click", closeBedtimePanel);
 
-document.getElementById("sleep-btn").addEventListener("click", async () => {
+guardedClick(document.getElementById("sleep-btn"), async () => {
   if (sleepActiveLog) {
     await wakeUp();
   } else {
@@ -2260,7 +2339,7 @@ document.getElementById("sleep-btn").addEventListener("click", async () => {
   }
 });
 
-document.getElementById("settings-sleep-wake-btn").addEventListener("click", wakeUp);
+guardedClick(document.getElementById("settings-sleep-wake-btn"), wakeUp);
 
 // ---------- calendar (events) ----------
 
@@ -2278,7 +2357,8 @@ function populateEventCategorySelect(cats) {
 let calYear, calMonth; // calMonth is 1-based
 let calViewMode = "month"; // "month" | "week"
 let calWeekStart = null; // ISO date (Monday), used when calViewMode === "week"
-let selectedCalDate = null;
+// カレンダーを開いた瞬間に「今日の予定」が見えるよう、常に今日をデフォルト選択にしておく。
+let selectedCalDate = todayStr();
 let calEventsCache = [];
 let calTodosCache = [];
 let calStudyDaysCache = new Set();
@@ -2313,6 +2393,14 @@ function mondayOf(dateStr) {
   const d = new Date(dateStr + "T00:00:00");
   const dow = (d.getDay() + 6) % 7; // 0 = Monday
   return addDaysToDate(dateStr, -dow);
+}
+
+const CAL_WEEKDAY_JA = ["日", "月", "火", "水", "木", "金", "土"];
+
+function formatCalDetailTitle(dateStr) {
+  const d = new Date(dateStr + "T00:00:00");
+  const label = `${d.getMonth() + 1}月${d.getDate()}日(${CAL_WEEKDAY_JA[d.getDay()]})`;
+  return dateStr === todayStr() ? `${label} ・ 今日` : label;
 }
 
 async function loadCalendar() {
@@ -2424,7 +2512,7 @@ function renderCalGrid() {
       const todoMark = dayTodos.length ? `<span class="cal-todo-dot"></span>` : "";
       const studyMark = calStudyDaysCache.has(c.date) ? `<span class="cal-log-dot"></span>` : "";
       const activationMark = calActivationDaysCache.has(c.date) ? `<span class="cal-activation-dot"></span>` : "";
-      const minAchievedMark = calMinAchievedDaysCache.has(c.date) ? `<span class="cal-min-mark">✓</span>` : "";
+      const minAchievedMark = calMinAchievedDaysCache.has(c.date) ? `<span class="cal-min-mark">${ICONS.check}</span>` : "";
       const classes = ["cal-day"];
       const weekdayCol = i % 7;
       if (weekdayCol === 5) classes.push("sat");
@@ -2577,7 +2665,7 @@ function renderCalDayDetail() {
     todoList.innerHTML = "";
     return;
   }
-  title.textContent = selectedCalDate;
+  title.textContent = formatCalDetailTitle(selectedCalDate);
 
   const dayEvents = calEventsCache
     .filter((e) => e.occurrence_date === selectedCalDate)
@@ -2588,12 +2676,12 @@ function renderCalDayDetail() {
   }
   dayEvents.forEach((ev) => {
     const li = document.createElement("li");
-    const noteMark = ev.note ? " 📝" : "";
+    const noteMark = ev.note ? ` ${ICONS.note}` : "";
     li.innerHTML = `
       <span class="log-icon" style="background:${colorFor(ev.category || "")}"></span>
       <span class="log-info">
         <span class="log-subject">${escapeHtml(ev.title)}${noteMark}</span>
-        <span class="log-time">${ev.start_time}〜${ev.end_time}${ev.recurrence ? " 🔁" : ""}</span>
+        <span class="log-time">${ev.start_time}〜${ev.end_time}${ev.recurrence ? ` ${ICONS.repeat}` : ""}</span>
       </span>
       <button class="delete-btn" title="削除">×</button>
     `;
@@ -2634,6 +2722,17 @@ function renderCalDayDetail() {
   });
 }
 
+// 月/週を移動した先に「今日」が含まれていればそれを選択、含まれなければ
+// 表示範囲の先頭日を選択する(前後に移動しても詳細欄が空にならないように)。
+function defaultCalSelection() {
+  const today = todayStr();
+  if (calViewMode === "week") {
+    const weekEnd = addDaysToDate(calWeekStart, 6);
+    return today >= calWeekStart && today <= weekEnd ? today : calWeekStart;
+  }
+  return today.startsWith(`${calYear}-${pad2(calMonth)}`) ? today : isoDate(calYear, calMonth, 1);
+}
+
 function calGoPrev() {
   if (calViewMode === "week") {
     calWeekStart = addDaysToDate(calWeekStart, -7);
@@ -2644,7 +2743,7 @@ function calGoPrev() {
       calYear -= 1;
     }
   }
-  selectedCalDate = null;
+  selectedCalDate = defaultCalSelection();
   loadCalendar();
 }
 
@@ -2658,7 +2757,7 @@ function calGoNext() {
       calYear += 1;
     }
   }
-  selectedCalDate = null;
+  selectedCalDate = defaultCalSelection();
   loadCalendar();
 }
 
@@ -2803,8 +2902,7 @@ document.querySelectorAll("#event-detail-form [data-recur-preset]").forEach((btn
   });
 });
 
-document.getElementById("event-form").addEventListener("submit", async (e) => {
-  e.preventDefault();
+guardedSubmit(document.getElementById("event-form"), async (e) => {
   const title = document.getElementById("event-title").value.trim();
   const category = document.getElementById("event-category").value || null;
   const evDate = document.getElementById("event-date").value;
@@ -2866,8 +2964,7 @@ function closeEventDetail() {
 document.getElementById("event-detail-close").addEventListener("click", closeEventDetail);
 document.getElementById("event-detail-backdrop").addEventListener("click", closeEventDetail);
 
-document.getElementById("event-detail-form").addEventListener("submit", async (e) => {
-  e.preventDefault();
+guardedSubmit(document.getElementById("event-detail-form"), async (e) => {
   if (!currentDetailEventId) return;
   const title = document.getElementById("event-detail-title").value.trim();
   const category = document.getElementById("event-detail-category").value || null;
@@ -2973,6 +3070,12 @@ document.getElementById("push-toggle-btn").addEventListener("click", async () =>
 
 updatePushStatus();
 
+// ---------- data export ----------
+
+document.getElementById("export-data-btn").addEventListener("click", () => {
+  window.location.href = "/api/export";
+});
+
 // ---------- init ----------
 
 (async function init() {
@@ -2981,22 +3084,29 @@ updatePushStatus();
   calMonth = now.getMonth() + 1;
 
   await loadCategories(); // study-buttons and the chart's subject list depend on categories being loaded first
-  loadTodos();
-  loadTodoStats();
-  loadStudySummary();
-  loadStudyLogList();
-  loadStudyChart();
-  loadGoalProgress();
-  loadCountdown();
-  loadGoals();
-  loadActivationActive();
-  loadActivationList();
-  loadActivationStats();
-  loadActivationPostReturnStats();
-  loadActivationMoodReasons();
-  loadSleepActive();
-  loadCalendar();
   restoreSession();
+
+  // 起動直後の並列読み込み。すべて完了(または失敗)するまで起動画面を出しておくことで、
+  // 「何も表示されないまま固まっているように見える」状態を防ぐ。
+  const results = await Promise.allSettled([
+    loadTodos(),
+    loadTodoStats(),
+    loadStudySummary(),
+    loadStudyLogList(),
+    loadStudyChart(),
+    loadGoalProgress(),
+    loadCountdown(),
+    loadGoals(),
+    loadActivationActive(),
+    loadActivationList(),
+    loadActivationStats(),
+    loadActivationPostReturnStats(),
+    loadActivationMoodReasons(),
+    loadSleepActive(),
+    loadCalendar(),
+  ]);
+  results.filter((r) => r.status === "rejected").forEach((r) => console.error("init load failed:", r.reason));
+  document.getElementById("boot-loading")?.classList.add("hidden");
 })();
 
 if ("serviceWorker" in navigator) {

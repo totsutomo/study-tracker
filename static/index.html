@@ -10,16 +10,37 @@
 </head>
 <body>
 
+<div id="top-progress-bar" class="top-progress-bar hidden"></div>
+
+<div id="boot-loading" class="boot-loading">
+  <div class="boot-spinner"></div>
+</div>
+
 <header>
-  <button type="button" id="settings-btn" class="icon-btn" aria-label="設定">⚙️</button>
+  <button type="button" id="settings-btn" class="icon-btn" aria-label="設定">
+    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor"
+         stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="12" cy="12" r="3"/>
+      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+    </svg>
+  </button>
   <h1>study-tracker</h1>
   <button type="button" id="sleep-btn" class="icon-btn sleep-btn" aria-label="就寝記録">
     <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor"
          stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-      <path d="M20 14.5A8.5 8.5 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/>
+      <path d="M2 18v3"/>
+      <path d="M2 8v7a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V11a2 2 0 0 0-2-2h-7V8a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v2"/>
+      <path d="M6 11v-1a1 1 0 0 1 1-1h3a1 1 0 0 1 1 1v1"/>
+      <path d="M22 18v3"/>
     </svg>
   </button>
-  <button type="button" id="activation-btn" class="icon-btn activation-btn" aria-label="発動ログ">🧭</button>
+  <button type="button" id="activation-btn" class="icon-btn activation-btn" aria-label="発動ログ">
+    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor"
+         stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="12" cy="12" r="10"/>
+      <polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/>
+    </svg>
+  </button>
 </header>
 
 <div id="activation-banner" class="activation-banner hidden">
@@ -37,7 +58,14 @@
     <h2>ToDo</h2>
 
     <div class="filter-bar">
-      <input type="text" id="todo-search" placeholder="🔍 検索">
+      <div class="search-input-wrap">
+        <svg class="search-input-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
+             stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="11" cy="11" r="7"/>
+          <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+        </svg>
+        <input type="text" id="todo-search" placeholder="検索">
+      </div>
       <select id="todo-filter-category">
         <option value="">カテゴリ: すべて</option>
         <option value="英語">英語</option>
@@ -317,6 +345,14 @@
 
   <section id="tab-calendar" class="tab-panel">
     <h2>予定</h2>
+
+    <div class="cal-day-detail">
+      <h3 id="cal-detail-title">日付を選んでください</h3>
+      <ul id="cal-event-list" class="list"></ul>
+      <h3>期限のタスク</h3>
+      <ul id="cal-todo-list" class="list"></ul>
+    </div>
+
     <div class="cal-board">
       <div class="cal-view-toggle" id="cal-view-toggle">
         <button type="button" class="cal-view-btn active" data-view="month">月</button>
@@ -342,11 +378,6 @@
         </div>
       </div>
     </div>
-
-    <h3 id="cal-detail-title">日付を選んでください</h3>
-    <ul id="cal-event-list" class="list"></ul>
-    <h3>期限のタスク</h3>
-    <ul id="cal-todo-list" class="list"></ul>
 
     <button type="button" id="event-fab" class="fab" aria-label="予定を追加">+</button>
 
@@ -471,7 +502,15 @@
   <span id="mini-timer-time" class="mini-timer-time">00:00</span>
   <span id="mini-timer-status" class="mini-timer-status"></span>
   <button type="button" id="mini-pause-btn" class="icon-btn" aria-label="一時停止/再開">⏸</button>
-  <button type="button" id="mini-discard-btn" class="icon-btn danger-text" aria-label="破棄">🗑</button>
+  <button type="button" id="mini-discard-btn" class="icon-btn danger-text" aria-label="破棄">
+    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor"
+         stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <polyline points="3 6 5 6 21 6"/>
+      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+      <line x1="10" y1="11" x2="10" y2="17"/>
+      <line x1="14" y1="11" x2="14" y2="17"/>
+    </svg>
+  </button>
   <button type="button" id="mini-stop-btn" class="icon-btn" aria-label="記録して停止">⏹</button>
 </div>
 
@@ -511,23 +550,44 @@
     <h3>設定</h3>
     <button type="button" id="settings-close" class="panel-close" aria-label="閉じる">×</button>
   </div>
-  <h3>発動ログ</h3>
-  <p class="meta" id="settings-activation-status">発動中ではありません</p>
-  <button type="button" id="settings-activation-return-btn" class="hidden">復帰する</button>
-  <h3>睡眠記録</h3>
-  <p class="meta" id="settings-sleep-status">就寝中ではありません</p>
-  <button type="button" id="settings-sleep-wake-btn" class="hidden">起床する</button>
-  <h3>カテゴリ管理</h3>
-  <ul id="category-list" class="list"></ul>
-  <form id="category-form" class="add-form">
-    <input type="text" id="category-name" placeholder="新しいカテゴリ名" required>
-    <button type="submit">+ 追加</button>
-  </form>
-  <h3>通知</h3>
-  <p class="meta" id="push-status">確認中...</p>
-  <button type="button" id="push-toggle-btn">通知を有効にする</button>
-  <h3>アプリ情報</h3>
-  <p class="meta" id="settings-last-updated">確認中...</p>
+
+  <div class="settings-group">
+    <h3>発動ログ</h3>
+    <p class="meta" id="settings-activation-status">発動中ではありません</p>
+    <button type="button" id="settings-activation-return-btn" class="hidden">復帰する</button>
+  </div>
+
+  <div class="settings-group">
+    <h3>睡眠記録</h3>
+    <p class="meta" id="settings-sleep-status">就寝中ではありません</p>
+    <button type="button" id="settings-sleep-wake-btn" class="hidden">起床する</button>
+  </div>
+
+  <div class="settings-group">
+    <h3>カテゴリ管理</h3>
+    <ul id="category-list" class="list"></ul>
+    <form id="category-form" class="add-form">
+      <input type="text" id="category-name" placeholder="新しいカテゴリ名" required>
+      <button type="submit">+ 追加</button>
+    </form>
+  </div>
+
+  <div class="settings-group">
+    <h3>通知</h3>
+    <p class="meta" id="push-status">確認中...</p>
+    <button type="button" id="push-toggle-btn">通知を有効にする</button>
+  </div>
+
+  <div class="settings-group">
+    <h3>データ</h3>
+    <p class="meta">ToDoと学習ログをCSVでエクスポートします(zip形式)</p>
+    <button type="button" id="export-data-btn" class="secondary">データをエクスポート</button>
+  </div>
+
+  <div class="settings-group">
+    <h3>アプリ情報</h3>
+    <p class="meta" id="settings-last-updated">確認中...</p>
+  </div>
 </div>
 
 <div id="activation-backdrop" class="backdrop hidden"></div>

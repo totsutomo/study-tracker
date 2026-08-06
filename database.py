@@ -1,4 +1,5 @@
 import os
+import threading
 from pathlib import Path
 
 import libsql
@@ -102,10 +103,62 @@ CREATE TABLE IF NOT EXISTS sleep_logs (
 DEFAULT_CATEGORIES = ("英語", "数学", "世界史", "その他")
 
 
-def get_connection():
+# リクエストのたびに(特にTursoのようなリモートDBへ)新規接続を張ると、往復のたびに接続
+# 確立のコストがかかり、起動直後の一斉読み込みが遅くなる原因になっていた。
+# FastAPIの同期routeはスレッドプールで実行されるため、スレッドごとに1本だけ接続を作って
+# 使い回す(スレッド間で同じ接続を共有しない=libsqlクライアントのスレッド安全性を気にしなくてよい)。
+_local = threading.local()
+
+
+def _open_connection():
     if TURSO_DATABASE_URL:
         return libsql.connect(database=TURSO_DATABASE_URL, auth_token=TURSO_AUTH_TOKEN)
     return libsql.connect(str(DB_PATH))
+
+
+class _PooledConnection:
+    """生のlibsql接続をラップし、close()を無視して接続をスレッドローカルに使い回すためのプロキシ。
+    main.py側は今まで通り get_connection() → 使う → close() という書き方のままでよい。"""
+
+    def __init__(self, conn):
+        self._conn = conn
+
+    def close(self):
+        # 実際には閉じない。次のリクエスト(同じスレッド)でも同じ接続を使い回す。
+        pass
+
+    def _invalidate(self):
+        try:
+            self._conn.close()
+        except Exception:
+            pass
+        if getattr(_local, "conn", None) is self:
+            _local.conn = None
+
+    def __getattr__(self, name):
+        attr = getattr(self._conn, name)
+        if not callable(attr):
+            return attr
+
+        def wrapper(*args, **kwargs):
+            try:
+                return attr(*args, **kwargs)
+            except Exception:
+                # 接続そのものが壊れている可能性があるためキャッシュを破棄し、
+                # 次回のリクエストでは新しい接続を張り直す。今回のエラーはそのまま呼び出し元に返す。
+                self._invalidate()
+                raise
+
+        return wrapper
+
+
+def get_connection():
+    cached = getattr(_local, "conn", None)
+    if cached is not None:
+        return cached
+    proxy = _PooledConnection(_open_connection())
+    _local.conn = proxy
+    return proxy
 
 
 def rows_to_dicts(cursor):

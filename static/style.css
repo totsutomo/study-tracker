@@ -40,6 +40,75 @@ header h1 {
   flex: 1;
 }
 
+/* ---------- loading indicators ---------- */
+/* 「押しても反応があるか分からない」「起動後しばらく何も表示されない」対策 */
+
+.top-progress-bar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 3px;
+  overflow: hidden;
+  z-index: 60;
+  pointer-events: none;
+}
+
+.top-progress-bar::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  width: 40%;
+  background: var(--accent);
+  border-radius: 0 3px 3px 0;
+  animation: top-progress-sweep 1.1s ease-in-out infinite;
+}
+
+.top-progress-bar.hidden {
+  display: none;
+}
+
+@keyframes top-progress-sweep {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(350%); }
+}
+
+.boot-loading {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg);
+}
+
+.boot-loading.hidden {
+  display: none;
+}
+
+.boot-spinner {
+  width: 30px;
+  height: 30px;
+  border: 3px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: boot-spin 0.7s linear infinite;
+}
+
+@keyframes boot-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .top-progress-bar::before,
+  .boot-spinner {
+    animation-duration: 2.4s;
+  }
+}
+
 .activation-btn.active {
   color: var(--danger);
   animation: activation-pulse 2s ease-in-out infinite;
@@ -138,6 +207,16 @@ header h1 {
   line-height: 1;
   padding: 4px;
   cursor: pointer;
+}
+
+.icon-btn svg {
+  display: block;
+}
+
+/* テキスト中に混ぜる小さなアイコン(繰り返し・期限日・メモありなど)の共通スタイル */
+.inline-icon {
+  vertical-align: -2px;
+  flex-shrink: 0;
 }
 
 main {
@@ -419,6 +498,24 @@ button.secondary {
   padding: 0 6px;
 }
 
+/* 設定画面: 項目数が少なくても見出しが並ぶだけで雑然として見えていたため、
+   グループごとにカード化して区切る */
+.settings-group {
+  background: var(--card-hover);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 4px 16px 16px;
+  margin-bottom: 12px;
+}
+
+.settings-group:last-child {
+  margin-bottom: 0;
+}
+
+.settings-group h3:first-child {
+  margin-top: 14px;
+}
+
 .due-row {
   display: flex;
   gap: 6px;
@@ -527,9 +624,24 @@ h3.collapsible {
   margin-bottom: 12px;
 }
 
-.filter-bar input[type="text"] {
+.search-input-wrap {
+  position: relative;
   flex: 1;
   min-width: 100px;
+  display: flex;
+  align-items: center;
+}
+
+.search-input-wrap .search-input-icon {
+  position: absolute;
+  left: 13px;
+  color: var(--text-muted);
+  pointer-events: none;
+}
+
+.search-input-wrap input[type="text"] {
+  width: 100%;
+  padding-left: 36px;
 }
 
 .study-buttons {
@@ -1045,6 +1157,11 @@ body.focus-open #tabbar {
 
 /* ---------- calendar (events) ---------- */
 
+/* 開いてすぐ「今日の予定」が見えるよう、月表示グリッドより上に配置している */
+.cal-day-detail h3:first-child {
+  margin-top: 4px;
+}
+
 .cal-board {
   background: var(--card);
   border: 1px solid var(--border);
@@ -1234,6 +1351,12 @@ body.focus-open #tabbar {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+}
+
+.cal-min-mark .inline-icon {
+  width: 7px;
+  height: 7px;
+  vertical-align: middle;
 }
 
 #activation-export-text {

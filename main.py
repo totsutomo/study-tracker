@@ -1,11 +1,14 @@
 import calendar
+import csv
+import io
 import json
 import os
+import zipfile
 from datetime import date, datetime, timedelta
 
 from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 from pywebpush import WebPushException, webpush
 
@@ -1343,3 +1346,43 @@ def service_worker():
 @app.get("/api/build-info")
 def build_info():
     return {"lastUpdated": LAST_UPDATED}
+
+
+def _rows_to_csv_bytes(rows: list[dict]) -> bytes:
+    buf = io.StringIO()
+    if rows:
+        writer = csv.DictWriter(buf, fieldnames=list(rows[0].keys()))
+        writer.writeheader()
+        writer.writerows(rows)
+    # Excelでそのまま開いても文字化けしないようUTF-8 BOM付きにする
+    return buf.getvalue().encode("utf-8-sig")
+
+
+@app.get("/api/export")
+def export_data():
+    conn = get_connection()
+    todos = rows_to_dicts(
+        conn.execute(
+            "SELECT id, title, category, priority, done, created_at, completed_at, "
+            "due_date, due_time, recurrence, note FROM todos ORDER BY id"
+        )
+    )
+    study_logs = rows_to_dicts(
+        conn.execute(
+            "SELECT id, subject, minutes, note, logged_at, start_trigger FROM study_logs ORDER BY id"
+        )
+    )
+    conn.close()
+
+    zip_buf = io.BytesIO()
+    with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("todos.csv", _rows_to_csv_bytes(todos))
+        zf.writestr("study_logs.csv", _rows_to_csv_bytes(study_logs))
+    zip_buf.seek(0)
+
+    filename = f"study-tracker-export-{datetime.now().strftime('%Y%m%d')}.zip"
+    return StreamingResponse(
+        zip_buf,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
