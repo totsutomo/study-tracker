@@ -461,6 +461,7 @@ async function loadCategories() {
   });
 
   renderStudyButtons(cats);
+  renderStudyFabMenu(cats);
   populateManualLogSubjects(cats);
   populateEventCategorySelect(cats);
 
@@ -725,6 +726,36 @@ function renderStudyButtons(cats) {
     btn.addEventListener("click", () => openStartPanel(btn.dataset.subject, null));
   });
 }
+
+// 画面上部の科目ボタンまで指を伸ばさなくても記録を開始できるよう、下部(親指が届く位置)にも
+// 同じ科目一覧をFAB経由のミニメニューとして複製表示する。中身は上部のボタンと完全に同じ動作。
+function renderStudyFabMenu(cats) {
+  const menu = document.getElementById("study-fab-menu");
+  menu.innerHTML = cats
+    .map(
+      (c) =>
+        `<button type="button" class="subject-btn" data-subject="${escapeHtml(c.name)}" style="--subject-color:${colorFor(c.name)}">${escapeHtml(c.name)}</button>`
+    )
+    .join("");
+  menu.querySelectorAll(".subject-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      menu.classList.add("hidden");
+      openStartPanel(btn.dataset.subject, null);
+    });
+  });
+}
+
+document.getElementById("study-fab").addEventListener("click", () => {
+  document.getElementById("study-fab-menu").classList.toggle("hidden");
+});
+
+document.addEventListener("click", (e) => {
+  const menu = document.getElementById("study-fab-menu");
+  const fab = document.getElementById("study-fab");
+  if (!menu.classList.contains("hidden") && !menu.contains(e.target) && e.target !== fab) {
+    menu.classList.add("hidden");
+  }
+});
 
 function populateManualLogSubjects(cats) {
   const select = document.getElementById("manual-log-subject");
@@ -3086,11 +3117,14 @@ document.getElementById("export-data-btn").addEventListener("click", () => {
   await loadCategories(); // study-buttons and the chart's subject list depend on categories being loaded first
   restoreSession();
 
-  // 起動直後の並列読み込み。すべて完了(または失敗)するまで起動画面を出しておくことで、
-  // 「何も表示されないまま固まっているように見える」状態を防ぐ。
-  const results = await Promise.allSettled([
-    loadTodos(),
-    loadTodoStats(),
+  // 起動画面は「最初に表示されるToDoタブに必要な分」だけ待って閉じる。残り13件は起動画面の
+  // 裏でバックグラウンド読み込みを続け、届き次第各セクションに反映される。以前は15件すべてが
+  // 揃うまで真っ暗な起動画面のままだったため、体感の読み込み時間が実際より長くなっていた。
+  const criticalResults = await Promise.allSettled([loadTodos(), loadTodoStats()]);
+  criticalResults.filter((r) => r.status === "rejected").forEach((r) => console.error("init load failed:", r.reason));
+  document.getElementById("boot-loading")?.classList.add("hidden");
+
+  const backgroundResults = await Promise.allSettled([
     loadStudySummary(),
     loadStudyLogList(),
     loadStudyChart(),
@@ -3105,8 +3139,7 @@ document.getElementById("export-data-btn").addEventListener("click", () => {
     loadSleepActive(),
     loadCalendar(),
   ]);
-  results.filter((r) => r.status === "rejected").forEach((r) => console.error("init load failed:", r.reason));
-  document.getElementById("boot-loading")?.classList.add("hidden");
+  backgroundResults.filter((r) => r.status === "rejected").forEach((r) => console.error("init load failed:", r.reason));
 })();
 
 if ("serviceWorker" in navigator) {

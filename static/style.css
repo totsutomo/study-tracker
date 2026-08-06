@@ -466,6 +466,25 @@ button.secondary {
   z-index: 29;
 }
 
+.study-fab-menu {
+  position: fixed;
+  right: 20px;
+  bottom: 164px;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.study-fab-menu.hidden {
+  display: none;
+}
+
+.study-fab-menu .subject-btn {
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+}
+
 .add-panel {
   position: fixed;
   left: 0;
