@@ -1315,7 +1315,7 @@ async function notifyLocal(title, body) {
 
 function notifySessionEnd(subject) {
   if (navigator.vibrate) navigator.vibrate(SESSION_END_VIBRATE_PATTERN);
-  notifyLocal("study-tracker", `${subject}: 設定した時間が終了しました(停止するまで記録は続きます)`);
+  notifyLocal("Compass", `${subject}: 設定した時間が終了しました(停止するまで記録は続きます)`);
   alert(`${subject}: 設定した時間が終了しました\n停止するまでそのまま記録が続きます`);
 }
 

@@ -15,7 +15,7 @@ from pywebpush import WebPushException, webpush
 
 from database import get_connection, init_db, row_to_dict, rows_to_dicts
 
-app = FastAPI(title="study-tracker")
+app = FastAPI(title="Compass")
 
 init_db()
 
@@ -1303,7 +1303,7 @@ def push_check(token: str | None = None):
 
             if notably_fewer or notably_later:
                 sent_count += _send_push_to_all(conn, {
-                    "title": "study-tracker",
+                    "title": "Compass",
                     "body": "今日は少し記録が静かだね。無理のない範囲で大丈夫だよ",
                     "tag": "activation-encouragement",
                 })
@@ -1342,7 +1342,7 @@ def push_check(token: str | None = None):
     if focus_end_at and focus_rows.get("focus_target_notified") != "1":
         if datetime.fromisoformat(focus_end_at) <= now:
             sent_count += _send_push_to_all(conn, {
-                "title": "study-tracker",
+                "title": "Compass",
                 "body": f"{focus_rows.get('focus_target_subject') or '学習'}: 設定した時間が終了しました",
                 "tag": "focus-session",
             })
@@ -1429,7 +1429,7 @@ def export_data():
         zf.writestr("study_logs.csv", _rows_to_csv_bytes(study_logs))
     zip_buf.seek(0)
 
-    filename = f"study-tracker-export-{datetime.now().strftime('%Y%m%d')}.zip"
+    filename = f"compass-export-{datetime.now().strftime('%Y%m%d')}.zip"
     return StreamingResponse(
         zip_buf,
         media_type="application/zip",

@@ -14,7 +14,7 @@ self.addEventListener("fetch", (event) => {
 });
 
 self.addEventListener("push", (event) => {
-  let payload = { title: "study-tracker", body: "" };
+  let payload = { title: "Compass", body: "" };
   if (event.data) {
     try {
       payload = event.data.json();
@@ -23,7 +23,7 @@ self.addEventListener("push", (event) => {
     }
   }
   event.waitUntil(
-    self.registration.showNotification(payload.title || "study-tracker", {
+    self.registration.showNotification(payload.title || "Compass", {
       body: payload.body || "",
       tag: payload.tag,
       icon: "/static/icon-192.png",
