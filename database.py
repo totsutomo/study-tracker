@@ -99,22 +99,6 @@ CREATE TABLE IF NOT EXISTS sleep_logs (
     logged_at TEXT DEFAULT (datetime('now'))
 );
 
-CREATE TABLE IF NOT EXISTS pet_generations (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    generation_number INTEGER NOT NULL,
-    name TEXT,
-    born_at TEXT NOT NULL,
-    died_at TEXT,
-    created_at TEXT DEFAULT (datetime('now'))
-);
-
-CREATE TABLE IF NOT EXISTS pet_feedings (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    generation_id INTEGER NOT NULL,
-    fed_date TEXT NOT NULL,
-    fed_at TEXT NOT NULL,
-    UNIQUE(generation_id, fed_date)
-);
 """
 
 DEFAULT_CATEGORIES = ("英語", "数学", "世界史", "その他")
@@ -268,6 +252,15 @@ def _migrate(conn):
     study_log_cols = [row[1] for row in conn.execute("PRAGMA table_info(study_logs)").fetchall()]
     if "start_trigger" not in study_log_cols:
         conn.execute("ALTER TABLE study_logs ADD COLUMN start_trigger TEXT")
+
+    # 犬育成機能を廃止したため、既存環境(ローカルdata.db・本番Turso)に残っているテーブル・設定を掃除する
+    conn.execute("DROP TABLE IF EXISTS pet_feedings")
+    conn.execute("DROP TABLE IF EXISTS pet_generations")
+    conn.execute(
+        "DELETE FROM settings WHERE key IN "
+        "('pet_last_client_date', 'pet_hunger_notified_date', 'pet_critical_notified_date')"
+    )
+
     conn.commit()
 
 
