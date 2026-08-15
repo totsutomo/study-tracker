@@ -1,22 +1,22 @@
 * { box-sizing: border-box; }
 
 :root {
-  /* 暖色系(テラコッタ/バーニーズマウンテンドッグの配色)にリニューアル。
-     ダーク基調自体は維持しつつ寒色(旧#22d3ee)を暖色に転換。--danger/--neutral-flagの
-     意味(警告/責めない中立色)は変更しない(検討17-Dの方針を継続)。 */
-  --bg: #1a1512;
-  --card: #241d18;
-  --card-hover: #2c231c;
-  --border: #3a2f28;
-  --text: #f0e8e0;
-  --text-muted: #a89a8c;
-  --accent: #c17a4a;
-  --accent-dim: rgba(193, 122, 74, 0.18);
-  --accent-secondary: #4a6350;
-  --on-accent: #2a1608;
-  --danger: #f87171;
-  --success: #34d399;
-  --neutral-flag: #94a3b8;
+  /* 「真面目・信頼感」路線にリニューアル(2026-08-16)。暖色テラコッタ案は落ち着かない/
+     アプリの目的(学習管理)と雰囲気が合わないという判断で撤回し、深いネイビー+確信のある
+     ブルー1色に転換。--danger/--neutral-flagの意味(警告/責めない中立色)は変更しない。 */
+  --bg: #12151c;
+  --card: #1b1f28;
+  --card-hover: #232833;
+  --border: #333a48;
+  --text: #eef1f6;
+  --text-muted: #8892a3;
+  --accent: #4f7cdb;
+  --accent-dim: rgba(79, 124, 219, 0.18);
+  --accent-secondary: #4a9c72;
+  --on-accent: #f5f8fc;
+  --danger: #e5555c;
+  --success: #33b06f;
+  --neutral-flag: #7b869c;
 
   /* UI全体の「ぐちゃぐちゃ」対策(2026-08-15リニューアル): 角丸・影をこの3段階に統一する。
      旧実装は8/9/10/12/14/16/20pxが無秩序に混在していたため、意図的にここへ集約する。 */
@@ -100,8 +100,8 @@ header h1 {
   gap: 36px;
   overflow: hidden;
   background:
-    radial-gradient(ellipse 140% 55% at 50% 100%, rgba(193, 122, 74, 0.24), transparent 70%),
-    linear-gradient(180deg, #100c09 0%, #1a1512 60%, #1a1512 100%);
+    radial-gradient(ellipse 140% 55% at 50% 100%, rgba(79, 124, 219, 0.24), transparent 70%),
+    linear-gradient(180deg, #0a0c11 0%, var(--bg) 60%, var(--bg) 100%);
 }
 
 .boot-loading.hidden {
@@ -161,7 +161,7 @@ header h1 {
   letter-spacing: -0.02em;
   color: var(--accent);
   line-height: 1;
-  text-shadow: 0 0 40px rgba(193, 122, 74, 0.35);
+  text-shadow: 0 0 40px rgba(79, 124, 219, 0.35);
 }
 
 .boot-goal-unit {
@@ -332,10 +332,13 @@ header h1 {
   display: block;
 }
 
-/* テキスト中に混ぜる小さなアイコン(繰り返し・期限日・メモありなど)の共通スタイル */
+/* テキスト中に混ぜる小さなアイコン(繰り返し・期限日・メモありなど)の共通スタイル。
+   既定色はtext-mutedにaccentを少し混ぜ、背景から浮かない/安っぽく見えないようにする
+   (バナー等、より具体的なcolor指定を持つ祖先の内側では詳細度の差でそちらが優先される)。 */
 .inline-icon {
   vertical-align: -2px;
   flex-shrink: 0;
+  color: color-mix(in srgb, var(--accent) 20%, var(--text-muted));
 }
 
 main {
@@ -931,7 +934,7 @@ h3.collapsible {
 .focus-overlay {
   position: fixed;
   inset: 0;
-  background: radial-gradient(circle at 50% 42%, #2b2118, var(--bg) 65%);
+  background: radial-gradient(circle at 50% 42%, #242a38, var(--bg) 65%);
   z-index: 50;
   display: flex;
   flex-direction: column;
@@ -1016,7 +1019,7 @@ body.focus-open #tabbar {
   letter-spacing: -0.02em;
   font-variant-numeric: tabular-nums;
   color: var(--accent);
-  text-shadow: 0 0 22px var(--accent-dim), 0 0 8px rgba(193, 122, 74, 0.35);
+  text-shadow: 0 0 22px var(--accent-dim), 0 0 8px rgba(79, 124, 219, 0.35);
 }
 
 .focus-controls {
