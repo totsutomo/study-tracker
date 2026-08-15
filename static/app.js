@@ -2633,6 +2633,38 @@ function formatCalDetailTitle(dateStr) {
   return dateStr === todayStr() ? `${label} ・ 今日` : label;
 }
 
+// 予定タブは起動時にアクティブでないため後回しにされがちで、実際に開いたときに
+// 空のグリッドがしばらく表示されてから埋まる、という遅さの原因になっていた。
+// 月表示(起動直後の既定値)に限って、ToDoタブと同じくキャッシュから先に描画しておく。
+async function hydrateCalendarFromCache() {
+  if (calViewMode === "week") return false;
+  const [events, todos, studyDays, activationDays, minAchievedDays] = await Promise.all([
+    cacheGet(`/api/events?year=${calYear}&month=${calMonth}`),
+    cacheGet("/api/todos"),
+    cacheGet(`/api/study-logs/days?year=${calYear}&month=${calMonth}`),
+    cacheGet(`/api/activation-logs/days?year=${calYear}&month=${calMonth}`),
+    cacheGet(`/api/study-logs/minimum-achieved-days?year=${calYear}&month=${calMonth}`),
+  ]);
+  if (!events && !todos) return false;
+  try {
+    document.getElementById("cal-month-label").textContent = `${calYear}年${calMonth}月`;
+    calEventsCache = events || [];
+    calTodosCache = (todos || []).filter((t) => t.due_date);
+    calStudyDaysCache = new Set(studyDays || []);
+    calActivationDaysCache = new Set(activationDays || []);
+    calMinAchievedDaysCache = new Set(minAchievedDays || []);
+    document.getElementById("cal-weekday-row").classList.remove("hidden");
+    document.getElementById("cal-grid").classList.remove("hidden");
+    document.getElementById("cal-week-view").classList.add("hidden");
+    renderCalGrid();
+    renderCalDayDetail();
+    return true;
+  } catch (err) {
+    console.error("hydrate calendar failed:", err);
+    return false;
+  }
+}
+
 async function loadCalendar() {
   if (calViewMode === "week") {
     const weekEnd = addDaysToDate(calWeekStart, 6);
@@ -3338,6 +3370,7 @@ async function hydrateFromCache() {
   if (await hydrateFromCache()) {
     document.getElementById("boot-loading")?.classList.add("hidden");
   }
+  hydrateCalendarFromCache(); // 予定タブを開いた瞬間に空グリッドが見えないよう先読み。critical groupは待たない
 
   await loadCategories(); // study-buttons and the chart's subject list depend on categories being loaded first
   restoreSession();
