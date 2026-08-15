@@ -71,6 +71,58 @@ function apiProgressEnd() {
   }
 }
 
+// ---------- 起動時キャッシュ(体感速度改善) ----------
+// サーバー(Turso)が正のデータ置き場であることは変えない。直前に取得した内容だけを
+// 端末のIndexedDBに保存しておき、起動直後はまずそれを描画→裏で本物のfetchが終わったら
+// 上書きする(stale-while-revalidate)。オフライン対応が目的ではないので、
+// キャッシュの読み書きが失敗しても本来のfetchには一切影響させない(全部try/catchで握りつぶす)。
+const CACHE_DB_NAME = "compass-cache";
+const CACHE_STORE_NAME = "api-cache";
+let cacheDbPromise = null;
+
+function openCacheDb() {
+  if (!cacheDbPromise) {
+    cacheDbPromise = new Promise((resolve, reject) => {
+      if (!("indexedDB" in window)) { reject(new Error("no indexedDB")); return; }
+      const req = indexedDB.open(CACHE_DB_NAME, 1);
+      req.onupgradeneeded = () => {
+        req.result.createObjectStore(CACHE_STORE_NAME, { keyPath: "path" });
+      };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+  }
+  return cacheDbPromise;
+}
+
+async function cacheGet(path) {
+  try {
+    const db = await openCacheDb();
+    return await new Promise((resolve, reject) => {
+      const tx = db.transaction(CACHE_STORE_NAME, "readonly");
+      const req = tx.objectStore(CACHE_STORE_NAME).get(path);
+      req.onsuccess = () => resolve(req.result ? req.result.data : undefined);
+      req.onerror = () => reject(req.error);
+    });
+  } catch (err) {
+    return undefined;
+  }
+}
+
+async function cacheSet(path, data) {
+  try {
+    const db = await openCacheDb();
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction(CACHE_STORE_NAME, "readwrite");
+      tx.objectStore(CACHE_STORE_NAME).put({ path, data });
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch (err) {
+    // キャッシュ書き込みの失敗は無視してよい(次回起動時に恩恵がないだけ)
+  }
+}
+
 async function api(path, options = {}, retries = 3) {
   apiProgressStart();
   try {
@@ -81,7 +133,11 @@ async function api(path, options = {}, retries = 3) {
           ...options,
         });
         if (!res.ok) throw new Error(`API error: ${res.status}`);
-        return await res.json();
+        const data = await res.json();
+        if (!options.method || options.method.toUpperCase() === "GET") {
+          cacheSet(path, data); // 起動高速化用キャッシュへの書き込み。失敗してもawaitしない
+        }
+        return data;
       } catch (err) {
         if (attempt >= retries) throw err;
         await new Promise((r) => setTimeout(r, 700 * (attempt + 1)));
@@ -426,8 +482,7 @@ async function loadTodos() {
   document.getElementById(id).addEventListener("input", renderTodos);
 });
 
-async function loadTodoStats() {
-  const stats = await api("/api/todos/stats");
+function renderTodoStats(stats) {
   const el = document.getElementById("todo-stats");
   const maxDaily = Math.max(1, ...stats.daily.map((d) => d.c));
   const barsHtml = stats.daily
@@ -443,6 +498,11 @@ async function loadTodoStats() {
     <p>累計達成: ${stats.done}/${stats.total}件(達成率 ${stats.rate}%)</p>
     ${stats.daily.length ? `<p class="meta">直近7日の完了数</p>${barsHtml}` : ""}
   `;
+}
+
+async function loadTodoStats() {
+  const stats = await api("/api/todos/stats");
+  renderTodoStats(stats);
 }
 
 const todoAddPanel = document.getElementById("todo-add-panel");
@@ -1952,8 +2012,7 @@ async function loadStudyLogList() {
 
 let lastCountdown = null;
 
-async function loadCountdown() {
-  const c = await api("/api/goals/countdown");
+function renderCountdown(c) {
   lastCountdown = c;
   document.getElementById("countdown").innerHTML =
     `${escapeHtml(c.label)}まで<br><span class="days">${c.days_left}日</span>`;
@@ -1962,6 +2021,11 @@ async function loadCountdown() {
   if (bootDays) bootDays.textContent = c.days_left;
   const bootLabel = document.getElementById("boot-goal-label");
   if (bootLabel) bootLabel.textContent = `${c.label}まで`;
+}
+
+async function loadCountdown() {
+  const c = await api("/api/goals/countdown");
+  renderCountdown(c);
 }
 
 document.getElementById("countdown-edit-toggle").addEventListener("click", () => {
@@ -3242,6 +3306,28 @@ document.getElementById("export-data-btn").addEventListener("click", () => {
   window.location.href = "/api/export";
 });
 
+// 起動直後に見えるToDoタブ(一覧・統計・カウントダウン)だけ、前回取得したキャッシュを
+// 即座に描画する。本物の読み込み(critical group)はこの後も従来通り必ず走るので、
+// ここで描けなくても・描いた内容が古くても実害はない(すぐ上書きされる)。
+async function hydrateFromCache() {
+  const [todos, stats, countdown] = await Promise.all([
+    cacheGet("/api/todos"),
+    cacheGet("/api/todos/stats"),
+    cacheGet("/api/goals/countdown"),
+  ]);
+  let hydrated = false;
+  try {
+    if (todos) { allTodos = todos; renderTodos(); hydrated = true; }
+  } catch (err) { console.error("hydrate todos failed:", err); }
+  try {
+    if (stats) { renderTodoStats(stats); hydrated = true; }
+  } catch (err) { console.error("hydrate todo stats failed:", err); }
+  try {
+    if (countdown) { renderCountdown(countdown); hydrated = true; }
+  } catch (err) { console.error("hydrate countdown failed:", err); }
+  return hydrated;
+}
+
 // ---------- init ----------
 
 (async function init() {
@@ -3249,13 +3335,18 @@ document.getElementById("export-data-btn").addEventListener("click", () => {
   calYear = now.getFullYear();
   calMonth = now.getMonth() + 1;
 
+  if (await hydrateFromCache()) {
+    document.getElementById("boot-loading")?.classList.add("hidden");
+  }
+
   await loadCategories(); // study-buttons and the chart's subject list depend on categories being loaded first
   restoreSession();
 
   // 起動画面は「最初に表示されるToDoタブに必要な分」+「起動画面自体に出す目標カウントダウン」
   // だけ待って閉じる。残り12件は起動画面の裏でバックグラウンド読み込みを続け、届き次第
   // 各セクションに反映される。以前は15件すべてが揃うまで真っ暗な起動画面のままだったため、
-  // 体感の読み込み時間が実際より長くなっていた。
+  // 体感の読み込み時間が実際より長くなっていた。キャッシュがあれば上でスピナーは既に
+  // 消えているが、ここで最新データに必ず上書きするので正しさは変わらない。
   const criticalResults = await Promise.allSettled([loadTodos(), loadTodoStats(), loadCountdown()]);
   criticalResults.filter((r) => r.status === "rejected").forEach((r) => console.error("init load failed:", r.reason));
   document.getElementById("boot-loading")?.classList.add("hidden");
