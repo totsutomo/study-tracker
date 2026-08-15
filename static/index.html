@@ -266,7 +266,7 @@
     <h3>直近7日間の合計</h3>
     <ul id="study-summary" class="list"></ul>
 
-    <h3>ログ履歴</h3>
+    <h3 id="study-log-header">ログ履歴</h3>
     <ul id="study-log-list" class="list"></ul>
   </section>
 
@@ -327,10 +327,15 @@
 
     <h2>発動ログ</h2>
     <p class="meta" id="activation-current-status"></p>
-    <p class="meta" id="activation-stats"></p>
+    <div class="stats-header">
+      <div class="stat-cell"><span class="stat-label">今週</span><span class="stat-value" id="activation-stat-week"></span></div>
+      <div class="stat-cell"><span class="stat-label">今月</span><span class="stat-value" id="activation-stat-month"></span></div>
+      <div class="stat-cell"><span class="stat-label">累計</span><span class="stat-value" id="activation-stat-total"></span></div>
+    </div>
     <p class="meta" id="activation-post-return-stats"></p>
     <ul id="activation-mood-reasons" class="mood-reason-list hidden"></ul>
     <ul id="study-trigger-stats" class="mood-reason-list hidden"></ul>
+    <h3 id="activation-list-header">履歴</h3>
     <ul id="activation-list" class="list"></ul>
     <div class="due-row">
       <button type="button" id="activation-export-btn" class="quick-date-btn">直近7日分をエクスポート</button>
@@ -343,6 +348,7 @@
       <div class="stat-cell"><span class="stat-label">昨晩</span><span class="stat-value" id="sleep-stat-last-night"></span></div>
       <div class="stat-cell"><span class="stat-label">直近30日平均</span><span class="stat-value" id="sleep-stat-avg"></span></div>
     </div>
+    <h3 id="sleep-log-header">履歴</h3>
     <ul id="sleep-log-list" class="list"></ul>
   </section>
 
@@ -500,7 +506,14 @@
   <div class="focus-subject">
     <span class="rec-dot"></span>
     <span id="focus-subject-name"></span>
-    <span id="focus-clockonly-badge" class="clockonly-badge hidden">🔒 時計だけモード</span>
+    <span id="focus-clockonly-badge" class="clockonly-badge hidden">
+      <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor"
+           stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="4" y="11" width="16" height="10" rx="2"/>
+        <path d="M8 11V7a4 4 0 0 1 8 0v4"/>
+      </svg>
+      時計だけモード
+    </span>
   </div>
   <div class="focus-ring-wrap">
     <svg class="focus-ring" viewBox="0 0 120 120">
@@ -658,11 +671,42 @@
 </div>
 
 <nav id="tabbar">
-  <button class="tab-btn active" data-tab="tab-todo">ToDo</button>
-  <button class="tab-btn" data-tab="tab-calendar">予定</button>
-  <button class="tab-btn" data-tab="tab-study">学習ログ</button>
-  <button class="tab-btn" data-tab="tab-mood">気持ち</button>
-  <button class="tab-btn" data-tab="tab-goal">目標</button>
+  <button class="tab-btn active" data-tab="tab-todo">
+    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor"
+         stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <line x1="9" y1="6" x2="20" y2="6"/><line x1="9" y1="12" x2="20" y2="12"/><line x1="9" y1="18" x2="20" y2="18"/>
+      <polyline points="3 6 4.2 7.2 6.5 4.8"/><polyline points="3 12 4.2 13.2 6.5 10.8"/><polyline points="3 18 4.2 19.2 6.5 16.8"/>
+    </svg>
+    <span>ToDo</span>
+  </button>
+  <button class="tab-btn" data-tab="tab-calendar">
+    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor"
+         stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>
+    </svg>
+    <span>予定</span>
+  </button>
+  <button class="tab-btn" data-tab="tab-study">
+    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor"
+         stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15.5 14"/>
+    </svg>
+    <span>学習ログ</span>
+  </button>
+  <button class="tab-btn" data-tab="tab-mood">
+    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor"
+         stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="12" cy="12" r="9"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/>
+    </svg>
+    <span>気持ち</span>
+  </button>
+  <button class="tab-btn" data-tab="tab-goal">
+    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor"
+         stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1"/>
+    </svg>
+    <span>目標</span>
+  </button>
 </nav>
 
 <script src="/static/app.js"></script>

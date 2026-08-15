@@ -17,6 +17,35 @@ tabButtons.forEach((btn) => {
 
 document.getElementById("daily-min-banner").addEventListener("click", () => switchTab("tab-study"));
 
+// ---------- collapsible history sections ----------
+// 生ログの一覧(学習ログ履歴・発動ログ履歴・睡眠履歴)は普段あまり見ない情報でスクロールを
+// 稼ぐだけだったため、既存の「完了済みToDo」の折りたたみと同じ見た目・挙動でデフォルト非表示にする。
+// 戻り値は「件数を渡して見出し文言だけ更新する」関数(呼ぶ側は開閉状態を意識しなくてよい)。
+function initCollapsibleSection(headerId, listId, label, defaultExpanded = false) {
+  let expanded = defaultExpanded;
+  let count = 0;
+  const header = document.getElementById(headerId);
+  const list = document.getElementById(listId);
+  header.classList.add("collapsible");
+  function render() {
+    header.textContent = `${expanded ? "▼" : "▶"} ${label}(${count}件)`;
+    list.style.display = expanded ? "" : "none";
+  }
+  header.addEventListener("click", () => {
+    expanded = !expanded;
+    render();
+  });
+  render();
+  return (newCount) => {
+    count = newCount;
+    render();
+  };
+}
+
+const updateStudyLogHeader = initCollapsibleSection("study-log-header", "study-log-list", "ログ履歴");
+const updateActivationListHeader = initCollapsibleSection("activation-list-header", "activation-list", "履歴");
+const updateSleepLogHeader = initCollapsibleSection("sleep-log-header", "sleep-log-list", "履歴");
+
 // ---------- helpers ----------
 
 // api()呼び出し中であることを画面上部の細いバーで示す。「押しても反応がわからない」対策。
@@ -169,6 +198,68 @@ function computeReschedule(t, kind) {
   return { due_date: formatLocalDate(base), due_time: String(base.getHours()).padStart(2, "0") + ":" + String(base.getMinutes()).padStart(2, "0") };
 }
 
+async function toggleTodoDone(t) {
+  await api(`/api/todos/${t.id}/toggle`, { method: "POST" });
+  loadTodos();
+  loadTodoStats();
+}
+
+// スワイプで完了/未完了を切り替えるジェスチャー。ボタン・チェックボックスの上から
+// 始まった操作はドラッグとして扱わない(タップの邪魔をしない)。
+// しきい値を超えたら完了処理を呼び、そうでなければ元の位置へ戻す。
+// 一定以上ドラッグした場合は、指を離した直後に発火するclickイベント(詳細パネルを開く処理)を
+// 1回だけ握りつぶす。そうしないとスワイプ操作のたびに詳細パネルも一緒に開いてしまう。
+function attachSwipeToComplete(li, content, t, onTap) {
+  const threshold = 0.32;
+  const dragMinDistance = 6;
+  let dragging = false;
+  let startX = 0;
+  let dx = 0;
+  let width = 0;
+  let suppressNextClick = false;
+
+  function onDown(e) {
+    if (e.target.closest("button, input, a")) return;
+    dragging = true;
+    startX = e.clientX;
+    dx = 0;
+    width = li.offsetWidth;
+    content.style.transition = "none";
+  }
+  function onMove(e) {
+    if (!dragging) return;
+    dx = Math.max(0, e.clientX - startX); // 右方向のスワイプのみ受け付ける
+    content.style.transform = `translateX(${dx}px)`;
+  }
+  function onUp() {
+    if (!dragging) return;
+    dragging = false;
+    content.style.transition = "transform 0.2s ease";
+    if (dx > dragMinDistance) suppressNextClick = true;
+    if (dx > width * threshold) {
+      content.style.transform = `translateX(${width}px)`;
+      setTimeout(() => toggleTodoDone(t), 140);
+    } else {
+      content.style.transform = "translateX(0)";
+    }
+    dx = 0;
+  }
+
+  content.style.touchAction = "pan-y";
+  content.addEventListener("pointerdown", onDown);
+  content.addEventListener("pointermove", onMove);
+  content.addEventListener("pointerup", onUp);
+  content.addEventListener("pointercancel", onUp);
+
+  li.addEventListener("click", () => {
+    if (suppressNextClick) {
+      suppressNextClick = false;
+      return;
+    }
+    onTap();
+  });
+}
+
 function renderTodoItem(t, list) {
   const li = document.createElement("li");
   if (t.done) li.classList.add("done");
@@ -181,27 +272,36 @@ function renderTodoItem(t, list) {
   const priorityLabel = t.priority && t.priority !== "medium" ? `[${PRIORITY_LABEL[t.priority] || t.priority}] ` : "";
   const noteMark = t.note ? ` ${ICONS.note}` : "";
   const showReschedule = !t.done && t.due_date && (overdue || t.due_date === todayStr());
+  const dotColor = t.category ? colorFor(t.category) : "var(--border)";
   li.innerHTML = `
-    <div class="todo-item-row">
-      <input type="checkbox" ${t.done ? "checked" : ""}>
-      <span>${priorityLabel}${escapeHtml(t.title)}${noteMark}</span>
-      <span class="meta">${t.category || ""} ${dueLabel}${recurLabel}</span>
-      ${!t.done && t.category ? `<button class="play-btn" title="記録開始">▶</button>` : ""}
-      <button class="delete-btn" title="削除">×</button>
+    <div class="todo-swipe-bg ${t.done ? "undo" : "complete"}">
+      ${t.done ? `${ICONS.repeat} 未完了に戻す` : `${ICONS.check} 完了にする`}
     </div>
-    ${showReschedule ? `
-      <div class="reschedule-row">
-        <button type="button" class="reschedule-btn" data-kind="+30">+30分</button>
-        <button type="button" class="reschedule-btn" data-kind="+60">+1時間</button>
-        <button type="button" class="reschedule-btn" data-kind="tomorrow">明日</button>
+    <div class="todo-swipe-content">
+      <div class="todo-card-top">
+        <input type="checkbox" ${t.done ? "checked" : ""}>
+        <span class="todo-card-dot" style="background:${dotColor}"></span>
+        <div class="todo-card-main">
+          <span class="todo-card-title">${priorityLabel}${escapeHtml(t.title)}${noteMark}</span>
+          <span class="todo-card-meta">${t.category || ""} ${dueLabel}${recurLabel}</span>
+        </div>
+        <div class="todo-card-actions">
+          ${!t.done && t.category ? `<button class="play-btn" title="記録開始">▶</button>` : ""}
+          <button class="delete-btn" title="削除">×</button>
+        </div>
       </div>
-    ` : ""}
+      ${showReschedule ? `
+        <div class="reschedule-row">
+          <button type="button" class="reschedule-btn" data-kind="+30">+30分</button>
+          <button type="button" class="reschedule-btn" data-kind="+60">+1時間</button>
+          <button type="button" class="reschedule-btn" data-kind="tomorrow">明日</button>
+        </div>
+      ` : ""}
+    </div>
   `;
-  li.querySelector("input").addEventListener("click", async (e) => {
+  li.querySelector("input").addEventListener("click", (e) => {
     e.stopPropagation();
-    await api(`/api/todos/${t.id}/toggle`, { method: "POST" });
-    loadTodos();
-    loadTodoStats();
+    toggleTodoDone(t);
   });
   const playBtn = li.querySelector(".play-btn");
   if (playBtn) {
@@ -224,8 +324,8 @@ function renderTodoItem(t, list) {
       loadCalendar();
     });
   });
+  attachSwipeToComplete(li, li.querySelector(".todo-swipe-content"), t, () => openTodoDetail(t));
   li.classList.add("clickable");
-  li.addEventListener("click", () => openTodoDetail(t));
   list.appendChild(li);
 }
 
@@ -1825,6 +1925,7 @@ async function loadStudyLogList() {
   const logs = await api("/api/study-logs");
   const list = document.getElementById("study-log-list");
   list.innerHTML = "";
+  updateStudyLogHeader(logs.length);
   logs.slice(0, 20).forEach((l) => {
     const li = document.createElement("li");
     li.innerHTML = `
@@ -1984,8 +2085,9 @@ async function returnActivation() {
 
 async function loadActivationStats() {
   const s = await api("/api/activation-logs/stats");
-  document.getElementById("activation-stats").textContent =
-    `今週 ${s.week_count}件 / 今月 ${s.month_count}件 / 累計 ${s.total_count}件`;
+  document.getElementById("activation-stat-week").textContent = `${s.week_count}件`;
+  document.getElementById("activation-stat-month").textContent = `${s.month_count}件`;
+  document.getElementById("activation-stat-total").textContent = `${s.total_count}件`;
 }
 
 async function loadActivationPostReturnStats() {
@@ -2034,6 +2136,7 @@ async function loadActivationList() {
   const logs = await api("/api/activation-logs?limit=30");
   const list = document.getElementById("activation-list");
   list.innerHTML = "";
+  updateActivationListHeader(logs.length);
   if (logs.length === 0) {
     list.innerHTML = "<li>記録がありません</li>";
     return;
@@ -2247,6 +2350,7 @@ function renderSleepStats(logs, stats) {
 function renderSleepLogList(logs) {
   const list = document.getElementById("sleep-log-list");
   list.innerHTML = "";
+  updateSleepLogHeader(logs.length);
   if (logs.length === 0) {
     list.innerHTML = "<li>記録がありません</li>";
     return;
