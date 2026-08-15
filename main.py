@@ -1134,6 +1134,7 @@ def pet_history(limit: int = 20):
             "generation_id": gen["id"], "generation_number": gen["generation_number"],
             "name": gen["name"], "born_at": gen["born_at"], "died_at": gen["died_at"],
             "xp_minutes": xp_minutes,
+            **_pet_stage_info(xp_minutes),
         })
     conn.close()
     return result

@@ -145,81 +145,120 @@ const ICONS = {
 };
 
 // バーニーズマウンテンドッグの自作SVG3体(子犬/若犬/成犬)。塗り絵風の平面イラストで、黒/白/ラスト茶の
-// 三色配色を再現。耳(.pet-ears)・尻尾(.pet-tail)はグループ化してあり、健康状態に応じたCSSの
-// transform/filter(style.css参照)で「しょんぼりする」演出をかける。デフォルメしすぎたキャラクター調は
-// 「子供っぽくない」というテーマ方針と矛盾するため避け、実在の犬種のプロポーションに寄せている。
+// 三色配色を再現。耳(.pet-ears)・尻尾(.pet-tail)・目(.pet-eyes)はグループ化してあり、健康状態や
+// 常時アイドルアニメーション・エサやり/なでる反応(style.css参照)がここにかかる。
+// 耳は頭の円より後に描画し(SVGは後勝ち)、頭と同系色に埋もれないようクリーム色の縁取り(stroke)を
+// 付けて確実にシルエットが見えるようにしている(以前のバージョンは耳が頭の下に隠れて消えていた)。
+// 子犬ほど頭身比・目を大きく、成犬ほど華奢でマズルが長くなるよう段階ごとに描き分けている。
 const PET_ART = {
-  puppy:
-    '<svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">' +
-    '<g class="pet-tail"><ellipse cx="155" cy="172" rx="10" ry="14" fill="#141110" transform="rotate(-20 155 172)"/></g>' +
-    '<ellipse cx="66" cy="193" rx="20" ry="11" fill="#141110"/><ellipse cx="134" cy="193" rx="20" ry="11" fill="#141110"/>' +
-    '<path d="M52 198 Q44 145 100 136 Q156 145 148 198 Z" fill="#141110"/>' +
-    '<path d="M100 148 Q120 156 118 184 Q100 198 82 184 Q80 156 100 148 Z" fill="#f5efe8"/>' +
-    '<rect x="78" y="170" width="15" height="30" rx="7" fill="#141110"/><rect x="107" y="170" width="15" height="30" rx="7" fill="#141110"/>' +
-    '<ellipse cx="85.5" cy="199" rx="10" ry="7" fill="#f5efe8"/><ellipse cx="114.5" cy="199" rx="10" ry="7" fill="#f5efe8"/>' +
-    '<g class="pet-ears">' +
-    '<path d="M50 48 Q32 66 40 94 Q52 102 58 86 Q54 66 60 52 Z" fill="#141110"/>' +
-    '<path d="M150 48 Q168 66 160 94 Q148 102 142 86 Q146 66 140 52 Z" fill="#141110"/>' +
-    "</g>" +
-    '<circle cx="100" cy="72" r="58" fill="#141110"/>' +
-    '<ellipse cx="63" cy="88" rx="13" ry="16" fill="#a8623a"/><ellipse cx="137" cy="88" rx="13" ry="16" fill="#a8623a"/>' +
-    '<ellipse cx="100" cy="96" rx="26" ry="20" fill="#a8623a"/>' +
-    '<ellipse cx="100" cy="103" rx="18" ry="12" fill="#f5efe8"/>' +
-    '<ellipse cx="100" cy="94" rx="9" ry="6" fill="#141110"/>' +
-    '<ellipse cx="75" cy="52" rx="7" ry="5" fill="#a8623a"/><ellipse cx="125" cy="52" rx="7" ry="5" fill="#a8623a"/>' +
-    '<circle cx="77" cy="68" r="7" fill="#1a1512"/><circle cx="123" cy="68" r="7" fill="#1a1512"/>' +
-    '<circle cx="79.5" cy="66" r="2.5" fill="#f5efe8"/><circle cx="125.5" cy="66" r="2.5" fill="#f5efe8"/>' +
-    "</svg>",
-  adolescent:
-    '<svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">' +
-    '<g class="pet-tail">' +
-    '<path d="M156 170 Q176 156 172 128 Q170 118 161 122 Q164 141 150 162 Z" fill="#141110"/>' +
-    '<path d="M163 126 Q168 119 161 122 Q163 130 156 137 Z" fill="#f5efe8"/>' +
-    "</g>" +
-    '<ellipse cx="62" cy="191" rx="24" ry="13" fill="#141110"/><ellipse cx="138" cy="191" rx="24" ry="13" fill="#141110"/>' +
-    '<path d="M47 198 Q38 128 100 118 Q162 128 153 198 Z" fill="#141110"/>' +
-    '<path d="M100 133 Q123 142 120 179 Q100 198 80 179 Q77 142 100 133 Z" fill="#f5efe8"/>' +
-    '<rect x="74" y="158" width="17" height="39" rx="8" fill="#141110"/><rect x="109" y="158" width="17" height="39" rx="8" fill="#141110"/>' +
-    '<rect x="74" y="174" width="17" height="10" fill="#a8623a"/><rect x="109" y="174" width="17" height="10" fill="#a8623a"/>' +
-    '<ellipse cx="82.5" cy="198" rx="12" ry="8" fill="#f5efe8"/><ellipse cx="117.5" cy="198" rx="12" ry="8" fill="#f5efe8"/>' +
-    '<g class="pet-ears">' +
-    '<path d="M52 51 Q32 71 41 102 Q53 111 60 93 Q56 71 63 55 Z" fill="#141110"/>' +
-    '<path d="M148 51 Q168 71 159 102 Q147 111 140 93 Q144 71 137 55 Z" fill="#141110"/>' +
-    "</g>" +
-    '<circle cx="100" cy="75" r="54" fill="#141110"/>' +
-    '<ellipse cx="65" cy="90" rx="14" ry="17" fill="#a8623a"/><ellipse cx="135" cy="90" rx="14" ry="17" fill="#a8623a"/>' +
-    '<ellipse cx="100" cy="98" rx="27" ry="21" fill="#a8623a"/>' +
-    '<ellipse cx="100" cy="105" rx="19" ry="13" fill="#f5efe8"/>' +
-    '<ellipse cx="100" cy="96" rx="9.5" ry="6.5" fill="#141110"/>' +
-    '<ellipse cx="75.5" cy="55" rx="7" ry="5" fill="#a8623a"/><ellipse cx="124.5" cy="55" rx="7" ry="5" fill="#a8623a"/>' +
-    '<circle cx="77.5" cy="71" r="6.5" fill="#1a1512"/><circle cx="122.5" cy="71" r="6.5" fill="#1a1512"/>' +
-    '<circle cx="80" cy="69" r="2.2" fill="#f5efe8"/><circle cx="125" cy="69" r="2.2" fill="#f5efe8"/>' +
-    "</svg>",
-  adult:
-    '<svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">' +
-    '<g class="pet-tail">' +
-    '<path d="M158 168 Q182 152 177 118 Q174 106 164 111 Q168 134 152 160 Z" fill="#141110"/>' +
-    '<path d="M166 116 Q172 107 164 111 Q167 121 158 130 Z" fill="#f5efe8"/>' +
-    "</g>" +
-    '<ellipse cx="60" cy="190" rx="27" ry="15" fill="#141110"/><ellipse cx="140" cy="190" rx="27" ry="15" fill="#141110"/>' +
-    '<path d="M44 197 Q33 118 100 106 Q167 118 156 197 Z" fill="#141110"/>' +
-    '<path d="M100 122 Q126 132 123 176 Q100 197 77 176 Q74 132 100 122 Z" fill="#f5efe8"/>' +
-    '<rect x="71" y="150" width="19" height="46" rx="9" fill="#141110"/><rect x="110" y="150" width="19" height="46" rx="9" fill="#141110"/>' +
-    '<rect x="71" y="167" width="19" height="11" fill="#a8623a"/><rect x="110" y="167" width="19" height="11" fill="#a8623a"/>' +
-    '<ellipse cx="80.5" cy="197" rx="13" ry="9" fill="#f5efe8"/><ellipse cx="119.5" cy="197" rx="13" ry="9" fill="#f5efe8"/>' +
-    '<g class="pet-ears">' +
-    '<path d="M54 54 Q33 75 41 109 Q54 119 62 100 Q57 77 65 59 Z" fill="#141110"/>' +
-    '<path d="M146 54 Q167 75 159 109 Q146 119 138 100 Q143 77 135 59 Z" fill="#141110"/>' +
-    "</g>" +
-    '<circle cx="100" cy="77" r="50" fill="#141110"/>' +
-    '<ellipse cx="67" cy="91" rx="14" ry="18" fill="#a8623a"/><ellipse cx="133" cy="91" rx="14" ry="18" fill="#a8623a"/>' +
-    '<ellipse cx="100" cy="99" rx="28" ry="22" fill="#a8623a"/>' +
-    '<ellipse cx="100" cy="107" rx="20" ry="14" fill="#f5efe8"/>' +
-    '<ellipse cx="100" cy="97" rx="10" ry="7" fill="#141110"/>' +
-    '<ellipse cx="76" cy="57" rx="7" ry="5" fill="#a8623a"/><ellipse cx="124" cy="57" rx="7" ry="5" fill="#a8623a"/>' +
-    '<circle cx="78" cy="73" r="6" fill="#1a1512"/><circle cx="122" cy="73" r="6" fill="#1a1512"/>' +
-    '<circle cx="80" cy="71" r="2" fill="#f5efe8"/><circle cx="124" cy="71" r="2" fill="#f5efe8"/>' +
-    "</svg>",
+  puppy: `<svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+    <g class="pet-tail" stroke="#f0e8e0" stroke-width="3" stroke-linejoin="round" stroke-linecap="round">
+      <path d="M152 168 Q184 172 186 138 Q186 118 172 122 Q176 146 156 158 Z" fill="#141110"/>
+      <path d="M176 132 Q182 148 168 158" fill="none" stroke="#f5efe8" stroke-width="6"/>
+    </g>
+    <g stroke="#f0e8e0" stroke-width="3" stroke-linejoin="round" stroke-linecap="round">
+      <path d="M45 196 Q34 130 100 122 Q166 130 155 196 Z" fill="#141110"/>
+      <ellipse cx="72" cy="188" rx="17" ry="14" fill="#141110"/>
+      <ellipse cx="128" cy="188" rx="17" ry="14" fill="#141110"/>
+    </g>
+    <path d="M100 138 Q124 148 120 182 Q100 196 80 182 Q76 148 100 138 Z" fill="#f5efe8"/>
+    <ellipse cx="72" cy="193" rx="12" ry="8" fill="#f5efe8"/>
+    <ellipse cx="128" cy="193" rx="12" ry="8" fill="#f5efe8"/>
+    <g stroke="#f0e8e0" stroke-width="3" stroke-linejoin="round" stroke-linecap="round">
+      <circle cx="100" cy="80" r="62" fill="#141110"/>
+    </g>
+    <g class="pet-ears" stroke="#f0e8e0" stroke-width="3" stroke-linejoin="round" stroke-linecap="round">
+      <path d="M46 58 Q14 78 22 128 Q28 152 46 146 Q54 118 50 90 Q52 70 60 62 Z" fill="#141110"/>
+      <path d="M154 58 Q186 78 178 128 Q172 152 154 146 Q146 118 150 90 Q148 70 140 62 Z" fill="#141110"/>
+    </g>
+    <path d="M36 108 Q34 132 44 144" fill="none" stroke="#a8623a" stroke-width="6" stroke-linecap="round" opacity="0.55"/>
+    <path d="M164 108 Q166 132 156 144" fill="none" stroke="#a8623a" stroke-width="6" stroke-linecap="round" opacity="0.55"/>
+    <ellipse cx="70" cy="56" rx="10" ry="7" fill="#a8623a"/>
+    <ellipse cx="130" cy="56" rx="10" ry="7" fill="#a8623a"/>
+    <ellipse cx="58" cy="92" rx="17" ry="20" fill="#a8623a"/>
+    <ellipse cx="142" cy="92" rx="17" ry="20" fill="#a8623a"/>
+    <ellipse cx="100" cy="100" rx="30" ry="23" fill="#a8623a"/>
+    <ellipse cx="100" cy="108" rx="21" ry="15" fill="#f5efe8"/>
+    <ellipse cx="100" cy="97" rx="11" ry="7.5" fill="#141110"/>
+    <g class="pet-eyes">
+      <circle cx="72" cy="76" r="12" fill="#1f1712"/>
+      <circle cx="128" cy="76" r="12" fill="#1f1712"/>
+      <circle cx="76" cy="72" r="4" fill="#f5efe8"/>
+      <circle cx="132" cy="72" r="4" fill="#f5efe8"/>
+    </g>
+  </svg>`,
+  adolescent: `<svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+    <g class="pet-tail" stroke="#f0e8e0" stroke-width="3" stroke-linejoin="round" stroke-linecap="round">
+      <path d="M148 162 Q186 168 190 126 Q191 102 175 106 Q180 136 158 152 Z" fill="#141110"/>
+      <path d="M180 116 Q188 136 172 150" fill="none" stroke="#f5efe8" stroke-width="6"/>
+    </g>
+    <g stroke="#f0e8e0" stroke-width="3" stroke-linejoin="round" stroke-linecap="round">
+      <path d="M42 197 Q30 116 100 106 Q170 116 158 197 Z" fill="#141110"/>
+      <ellipse cx="70" cy="186" rx="16" ry="15" fill="#141110"/>
+      <ellipse cx="130" cy="186" rx="16" ry="15" fill="#141110"/>
+    </g>
+    <path d="M100 124 Q126 135 122 180 Q100 197 78 180 Q74 135 100 124 Z" fill="#f5efe8"/>
+    <ellipse cx="70" cy="192" rx="11.5" ry="8" fill="#f5efe8"/>
+    <ellipse cx="130" cy="192" rx="11.5" ry="8" fill="#f5efe8"/>
+    <g stroke="#f0e8e0" stroke-width="3" stroke-linejoin="round" stroke-linecap="round">
+      <circle cx="100" cy="70" r="54" fill="#141110"/>
+    </g>
+    <g class="pet-ears" stroke="#f0e8e0" stroke-width="3" stroke-linejoin="round" stroke-linecap="round">
+      <path d="M52 40 Q20 62 26 118 Q31 146 50 138 Q54 108 49 78 Q49 56 58 44 Z" fill="#141110"/>
+      <path d="M148 40 Q180 62 174 118 Q169 146 150 138 Q146 108 151 78 Q151 56 142 44 Z" fill="#141110"/>
+    </g>
+    <path d="M40 96 Q38 122 49 136" fill="none" stroke="#a8623a" stroke-width="5" stroke-linecap="round" opacity="0.55"/>
+    <path d="M160 96 Q162 122 151 136" fill="none" stroke="#a8623a" stroke-width="5" stroke-linecap="round" opacity="0.55"/>
+    <ellipse cx="72" cy="46" rx="9" ry="6" fill="#a8623a"/>
+    <ellipse cx="128" cy="46" rx="9" ry="6" fill="#a8623a"/>
+    <ellipse cx="61" cy="80" rx="15" ry="18" fill="#a8623a"/>
+    <ellipse cx="139" cy="80" rx="15" ry="18" fill="#a8623a"/>
+    <ellipse cx="100" cy="90" rx="27" ry="20" fill="#a8623a"/>
+    <ellipse cx="100" cy="98" rx="19" ry="13" fill="#f5efe8"/>
+    <ellipse cx="100" cy="86" rx="10" ry="6.5" fill="#141110"/>
+    <g class="pet-eyes">
+      <circle cx="74" cy="66" r="10" fill="#1f1712"/>
+      <circle cx="126" cy="66" r="10" fill="#1f1712"/>
+      <circle cx="77.5" cy="62.5" r="3.3" fill="#f5efe8"/>
+      <circle cx="129.5" cy="62.5" r="3.3" fill="#f5efe8"/>
+    </g>
+  </svg>`,
+  adult: `<svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+    <g class="pet-tail" stroke="#f0e8e0" stroke-width="3" stroke-linejoin="round" stroke-linecap="round">
+      <path d="M144 158 Q188 164 195 112 Q197 84 178 89 Q184 124 158 146 Z" fill="#141110"/>
+      <path d="M186 100 Q195 122 176 142" fill="none" stroke="#f5efe8" stroke-width="6.5"/>
+    </g>
+    <g stroke="#f0e8e0" stroke-width="3" stroke-linejoin="round" stroke-linecap="round">
+      <path d="M39 198 Q26 100 100 90 Q174 100 161 198 Z" fill="#141110"/>
+      <ellipse cx="68" cy="184" rx="15.5" ry="16" fill="#141110"/>
+      <ellipse cx="132" cy="184" rx="15.5" ry="16" fill="#141110"/>
+    </g>
+    <path d="M100 110 Q128 122 124 178 Q100 198 76 178 Q72 122 100 110 Z" fill="#f5efe8"/>
+    <ellipse cx="68" cy="190" rx="11" ry="7.5" fill="#f5efe8"/>
+    <ellipse cx="132" cy="190" rx="11" ry="7.5" fill="#f5efe8"/>
+    <g stroke="#f0e8e0" stroke-width="3" stroke-linejoin="round" stroke-linecap="round">
+      <circle cx="100" cy="60" r="48" fill="#141110"/>
+    </g>
+    <g class="pet-ears" stroke="#f0e8e0" stroke-width="3" stroke-linejoin="round" stroke-linecap="round">
+      <path d="M56 26 Q24 48 28 106 Q32 134 50 128 Q53 100 49 70 Q49 48 60 32 Z" fill="#141110"/>
+      <path d="M144 26 Q176 48 172 106 Q168 134 150 128 Q147 100 151 70 Q151 48 140 32 Z" fill="#141110"/>
+    </g>
+    <path d="M43 82 Q41 108 51 122" fill="none" stroke="#a8623a" stroke-width="5" stroke-linecap="round" opacity="0.55"/>
+    <path d="M157 82 Q159 108 149 122" fill="none" stroke="#a8623a" stroke-width="5" stroke-linecap="round" opacity="0.55"/>
+    <ellipse cx="74" cy="34" rx="8" ry="5.5" fill="#a8623a"/>
+    <ellipse cx="126" cy="34" rx="8" ry="5.5" fill="#a8623a"/>
+    <ellipse cx="64" cy="68" rx="14" ry="16.5" fill="#a8623a"/>
+    <ellipse cx="136" cy="68" rx="14" ry="16.5" fill="#a8623a"/>
+    <ellipse cx="100" cy="78" rx="24" ry="18" fill="#a8623a"/>
+    <ellipse cx="100" cy="85" rx="17" ry="12" fill="#f5efe8"/>
+    <ellipse cx="100" cy="73" rx="9" ry="6" fill="#141110"/>
+    <g class="pet-eyes">
+      <circle cx="76" cy="55" r="8.5" fill="#1f1712"/>
+      <circle cx="124" cy="55" r="8.5" fill="#1f1712"/>
+      <circle cx="79" cy="52" r="2.8" fill="#f5efe8"/>
+      <circle cx="127" cy="52" r="2.8" fill="#f5efe8"/>
+    </g>
+  </svg>`,
 };
 
 const PET_STAGE_LABELS = ["子犬(赤ちゃん)", "子犬", "若犬", "成犬手前", "成犬", "成犬(MAX)"];
@@ -230,6 +269,21 @@ function petArtKeyForStage(stageIndex) {
   if (stageIndex <= 3) return "adolescent";
   return "adult";
 }
+
+// なでたときに出す一言。実利益は無く、愛着を作るためだけの演出。
+const PET_PAT_LINES = [
+  (n) => `${n}がしっぽを振っている`,
+  (n) => `${n}が甘えてきた`,
+  (n) => `${n}はあなたに懐いている`,
+  (n) => `${n}が嬉しそうに見上げてくる`,
+  (n) => `${n}がすり寄ってきた`,
+  (n) => `なでなで、${n}は気持ちよさそう`,
+];
+const PET_PAT_LINES_NEEDY = [
+  (n) => `${n}のお腹が鳴った…`,
+  (n) => `${n}が心配そうにこっちを見ている`,
+  (n) => `なでても${n}はどこか元気がない`,
+];
 
 function recurrenceLabel(recurrence) {
   if (!recurrence) return "";
@@ -2515,6 +2569,17 @@ function markPetNamePrompted(state) {
   localStorage.setItem(PET_NAME_PROMPT_KEY, String(state.generation_id));
 }
 
+// エサやり/なでる、共通の「一瞬だけ演出クラスを付けて外す」ヘルパー。二重発火防止のため、
+// 要素ごとにタイマーIDを持たせて前回分をクリアしてから付け直す(class名は再フローのため一旦外す)。
+function triggerPetBurst(el, className, durationMs) {
+  el.classList.remove(className);
+  void el.offsetWidth;
+  el.classList.add(className);
+  clearTimeout(el._petBurstTimers?.[className]);
+  el._petBurstTimers = el._petBurstTimers || {};
+  el._petBurstTimers[className] = setTimeout(() => el.classList.remove(className), durationMs);
+}
+
 function renderPetState(state) {
   petState = state;
   const artKey = petArtKeyForStage(state.stage_index);
@@ -2571,12 +2636,15 @@ async function loadPetHistory() {
   }
   rows.forEach((g) => {
     const li = document.createElement("li");
+    li.className = "pet-history-item";
     const start = formatLocalDateShort(g.born_at.slice(0, 10));
     const period = g.died_at ? `${start} 〜 ${formatLocalDateShort(g.died_at)}` : `${start} 〜 現在`;
+    const stageLabel = PET_STAGE_LABELS[g.stage_index] || "";
     li.innerHTML = `
+      <span class="pet-history-thumb">${PET_ART[petArtKeyForStage(g.stage_index)]}</span>
       <span class="log-info">
-        <span>${escapeHtml(g.name || `${g.generation_number}代目`)}</span>
-        <span class="meta">${period} ・ 累計${g.xp_minutes}分</span>
+        <span>${escapeHtml(g.name || `${g.generation_number}代目`)}${g.died_at ? "" : "(現役)"}</span>
+        <span class="meta">${period} ・ ${stageLabel}まで成長 ・ 累計${g.xp_minutes}分</span>
       </span>
     `;
     list.appendChild(li);
@@ -2617,11 +2685,39 @@ async function feedPet() {
   });
   renderPetState(state);
   loadPetHistory();
+  document.querySelectorAll(".pet-visual").forEach((el) => triggerPetBurst(el, "feed-burst", 700));
   if (shouldPromptPetName(state)) openPetNamePanel(false);
 }
 
 guardedClick(document.getElementById("pet-feed-btn"), feedPet);
 guardedClick(document.getElementById("pet-feed-btn-tab"), feedPet);
+
+// なでる: サーバー通信なしの純粋な演出(愛着づけ目的)。連打防止に簡易クールダウンだけ挟む。
+let lastPetPatAt = 0;
+function patPet(visualEl, bubbleEl) {
+  if (!petState || !petState.alive) return;
+  const now = Date.now();
+  if (now - lastPetPatAt < 900) return;
+  lastPetPatAt = now;
+
+  const needy = petState.status === "hungry" || petState.status === "starving";
+  const pool = needy && Math.random() < 0.45 ? PET_PAT_LINES_NEEDY : PET_PAT_LINES;
+  const line = pool[Math.floor(Math.random() * pool.length)](petDisplayName(petState));
+
+  bubbleEl.textContent = line;
+  bubbleEl.classList.add("visible");
+  clearTimeout(bubbleEl._petBubbleTimer);
+  bubbleEl._petBubbleTimer = setTimeout(() => bubbleEl.classList.remove("visible"), 2000);
+
+  triggerPetBurst(visualEl, "pat-burst", 700);
+}
+
+document.getElementById("pet-visual").addEventListener("click", () =>
+  patPet(document.getElementById("pet-visual"), document.getElementById("pet-speech-bubble"))
+);
+document.getElementById("pet-visual-tab").addEventListener("click", () =>
+  patPet(document.getElementById("pet-visual-tab"), document.getElementById("pet-speech-bubble-tab"))
+);
 
 const petNamePanel = document.getElementById("pet-name-panel");
 const petNameBackdrop = document.getElementById("pet-name-backdrop");

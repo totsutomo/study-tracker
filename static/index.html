@@ -377,7 +377,10 @@
   <section id="tab-pet" class="tab-panel">
     <h2 id="pet-tab-heading">ペット</h2>
     <div class="goal-progress-card pet-hero-card">
-      <div class="pet-visual pet-visual-large" id="pet-visual-tab"></div>
+      <div class="pet-visual-wrap">
+        <div class="pet-visual pet-visual-large" id="pet-visual-tab"></div>
+        <div class="pet-speech-bubble" id="pet-speech-bubble-tab"></div>
+      </div>
       <p class="pet-status-label" id="pet-status-label-tab"></p>
       <div class="stat-bar-track"><div class="stat-bar-fill pet-xp-fill" id="pet-xp-fill-tab"></div></div>
       <p class="meta pet-xp-label" id="pet-xp-label-tab"></p>
@@ -696,7 +699,10 @@
     <h3 id="pet-panel-name">ペット</h3>
     <button type="button" id="pet-close" class="panel-close" aria-label="閉じる">×</button>
   </div>
-  <div class="pet-visual" id="pet-visual"></div>
+  <div class="pet-visual-wrap">
+    <div class="pet-visual" id="pet-visual"></div>
+    <div class="pet-speech-bubble" id="pet-speech-bubble"></div>
+  </div>
   <p class="pet-status-label" id="pet-status-label"></p>
   <div class="stat-bar-track"><div class="stat-bar-fill pet-xp-fill" id="pet-xp-fill"></div></div>
   <p class="meta pet-xp-label" id="pet-xp-label"></p>
