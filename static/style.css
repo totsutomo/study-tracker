@@ -202,6 +202,39 @@ header h1 {
 
 .sleep-btn.active {
   color: var(--accent);
+  animation: sleep-pulse 3s ease-in-out infinite;
+}
+
+@keyframes sleep-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+
+.sleep-banner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 10px 16px;
+  background: var(--accent);
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  animation: sleep-banner-pulse 3s ease-in-out infinite;
+}
+
+.sleep-banner.hidden {
+  display: none;
+}
+
+.sleep-banner span {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--on-accent);
+  white-space: nowrap;
+}
+
+@keyframes sleep-banner-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.85; }
 }
 
 #settings-sleep-status {

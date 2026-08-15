@@ -227,6 +227,8 @@ const ICONS = {
     '<svg class="inline-icon" viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>',
   alert:
     '<svg class="inline-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>',
+  moon:
+    '<svg class="inline-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>',
 };
 
 
@@ -2348,6 +2350,23 @@ document.getElementById("activation-copy-btn").addEventListener("click", async (
 // ---------- sleep logs ----------
 
 let sleepActiveLog = null;
+let sleepTickInterval = null;
+
+// サボりモード(発動ログ)のバナー・アイコン点滅と同じ「今この状態だとひと目でわかる」表現を、
+// 睡眠モードにも用意する。ただし睡眠は焦らせる状態ではないので、色はdangerではなくaccent、
+// 点滅もゆっくりめ(呼吸のように)にして、サボりモードとトーンを分ける。
+function updateSleepBanner() {
+  const banner = document.getElementById("sleep-banner");
+  const label = document.getElementById("sleep-banner-label");
+  if (!sleepActiveLog) {
+    banner.classList.add("hidden");
+    return;
+  }
+  const bedtime = new Date(sleepActiveLog.bedtime_at.replace(" ", "T"));
+  const elapsedMin = Math.max(0, Math.floor((Date.now() - bedtime.getTime()) / 60000));
+  label.innerHTML = `${ICONS.moon} 就寝中・経過 ${formatLogDuration(elapsedMin)}`;
+  banner.classList.remove("hidden");
+}
 
 function toDatetimeLocalValue(s) {
   return s ? s.replace(" ", "T").slice(0, 16) : "";
@@ -2374,13 +2393,23 @@ async function loadSleepActive() {
     btn.title = "タップで起床を記録";
     settingsStatusEl.textContent = `就寝中: ${formatLoggedAt(sleepActiveLog.bedtime_at)}〜`;
     settingsWakeBtn.classList.remove("hidden");
+    if (!sleepTickInterval) {
+      sleepTickInterval = setInterval(updateSleepBanner, 30000);
+    }
   } else {
     btn.classList.remove("active");
     btn.title = "";
     settingsStatusEl.textContent = "就寝中ではありません";
     settingsWakeBtn.classList.add("hidden");
+    if (sleepTickInterval) {
+      clearInterval(sleepTickInterval);
+      sleepTickInterval = null;
+    }
   }
+  updateSleepBanner();
 }
+
+document.getElementById("sleep-banner").addEventListener("click", openSettingsPanel);
 
 async function wakeUp() {
   if (!sleepActiveLog) return;
