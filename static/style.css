@@ -1,14 +1,19 @@
 * { box-sizing: border-box; }
 
 :root {
-  --bg: #0f1115;
-  --card: #1c1f26;
-  --card-hover: #23272f;
-  --border: #2a2e37;
-  --text: #e5e7eb;
-  --text-muted: #8b93a1;
-  --accent: #22d3ee;
-  --accent-dim: rgba(34, 211, 238, 0.15);
+  /* 暖色系(テラコッタ/バーニーズマウンテンドッグの配色)にリニューアル。
+     ダーク基調自体は維持しつつ寒色(旧#22d3ee)を暖色に転換。--danger/--neutral-flagの
+     意味(警告/責めない中立色)は変更しない(検討17-Dの方針を継続)。 */
+  --bg: #1a1512;
+  --card: #241d18;
+  --card-hover: #2c231c;
+  --border: #3a2f28;
+  --text: #f0e8e0;
+  --text-muted: #a89a8c;
+  --accent: #c17a4a;
+  --accent-dim: rgba(193, 122, 74, 0.18);
+  --accent-secondary: #4a6350;
+  --on-accent: #2a1608;
   --danger: #f87171;
   --success: #34d399;
   --neutral-flag: #94a3b8;
@@ -86,8 +91,8 @@ header h1 {
   gap: 36px;
   overflow: hidden;
   background:
-    radial-gradient(ellipse 140% 55% at 50% 100%, rgba(34, 211, 238, 0.24), transparent 70%),
-    linear-gradient(180deg, #090b0f 0%, #0f1115 60%, #0f1115 100%);
+    radial-gradient(ellipse 140% 55% at 50% 100%, rgba(193, 122, 74, 0.24), transparent 70%),
+    linear-gradient(180deg, #100c09 0%, #1a1512 60%, #1a1512 100%);
 }
 
 .boot-loading.hidden {
@@ -146,7 +151,7 @@ header h1 {
   font-weight: 700;
   color: var(--accent);
   line-height: 1;
-  text-shadow: 0 0 40px rgba(34, 211, 238, 0.35);
+  text-shadow: 0 0 40px rgba(193, 122, 74, 0.35);
 }
 
 .boot-goal-unit {
@@ -187,6 +192,71 @@ header h1 {
 
 .sleep-btn.active {
   color: var(--accent);
+}
+
+.pet-btn.status-hungry {
+  color: var(--accent);
+}
+
+.pet-btn.status-starving,
+.pet-btn.status-dead {
+  color: var(--danger);
+  animation: activation-pulse 2s ease-in-out infinite;
+}
+
+/* ---------- pet ---------- */
+
+.pet-visual {
+  width: 96px;
+  height: 96px;
+  margin: 4px auto 8px;
+  transition: filter 0.3s ease, opacity 0.3s ease;
+}
+
+.pet-visual-large {
+  width: 168px;
+  height: 168px;
+}
+
+.pet-visual svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.pet-visual .pet-ears,
+.pet-visual .pet-tail {
+  transform-box: fill-box;
+  transform-origin: top center;
+  transition: transform 0.3s ease;
+}
+
+.pet-visual.status-healthy { filter: none; opacity: 1; }
+
+.pet-visual.status-hungry { filter: saturate(0.75); opacity: 1; }
+.pet-visual.status-hungry .pet-ears { transform: rotate(6deg); }
+.pet-visual.status-hungry .pet-tail { transform: rotate(-4deg) scale(0.95); }
+
+.pet-visual.status-starving { filter: grayscale(0.6) saturate(0.5); opacity: 0.9; }
+.pet-visual.status-starving .pet-ears { transform: rotate(14deg); }
+.pet-visual.status-starving .pet-tail { transform: rotate(-10deg) scale(0.85); }
+
+.pet-visual.status-dead { filter: grayscale(1); opacity: 0.55; }
+.pet-visual.status-dead .pet-ears { transform: rotate(20deg); }
+.pet-visual.status-dead .pet-tail { transform: rotate(-16deg) scale(0.7); }
+
+.pet-status-label {
+  text-align: center;
+  font-weight: 600;
+  margin: 0 0 8px;
+}
+
+.pet-hero-card {
+  text-align: center;
+}
+
+.pet-hero-card .due-row {
+  justify-content: center;
 }
 
 #settings-sleep-status {
@@ -485,7 +555,7 @@ input:focus, select:focus, textarea:focus {
 
 button {
   background: var(--accent);
-  color: #06141a;
+  color: var(--on-accent);
   border: none;
   border-radius: 9px;
   padding: 11px 16px;
@@ -520,7 +590,7 @@ button.secondary {
   height: 64px;
   border-radius: 50%;
   background: var(--accent);
-  color: #06141a;
+  color: var(--on-accent);
   font-size: 32px;
   line-height: 1;
   display: flex;
@@ -634,7 +704,7 @@ button.secondary {
 
 .weekday-btn.active {
   background: var(--accent);
-  color: #06141a;
+  color: var(--on-accent);
   border-color: var(--accent);
 }
 
@@ -662,7 +732,7 @@ button.secondary {
 .mood-btn.active,
 .reason-btn.active {
   background: var(--accent);
-  color: #06141a;
+  color: var(--on-accent);
   border-color: var(--accent);
 }
 
@@ -753,7 +823,7 @@ h3.collapsible {
 .focus-overlay {
   position: fixed;
   inset: 0;
-  background: radial-gradient(circle at 50% 42%, #112126, var(--bg) 65%);
+  background: radial-gradient(circle at 50% 42%, #2b2118, var(--bg) 65%);
   z-index: 50;
   display: flex;
   flex-direction: column;
@@ -837,7 +907,7 @@ body.focus-open #tabbar {
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   color: var(--accent);
-  text-shadow: 0 0 22px var(--accent-dim), 0 0 8px rgba(34, 211, 238, 0.35);
+  text-shadow: 0 0 22px var(--accent-dim), 0 0 8px rgba(193, 122, 74, 0.35);
 }
 
 .focus-controls {
@@ -1037,7 +1107,7 @@ body.focus-open #tabbar {
 
 .period-btn.active {
   background: var(--accent);
-  color: #06141a;
+  color: var(--on-accent);
   border-color: var(--accent);
 }
 
@@ -1088,7 +1158,7 @@ body.focus-open #tabbar {
 .mood-scale-btn.active {
   background: var(--accent);
   border-color: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
 }
 
 .mood-scale-labels {
@@ -1387,7 +1457,7 @@ body.focus-open #tabbar {
 
 .cal-day.today .cal-day-num {
   background: var(--accent);
-  color: #04222a;
+  color: var(--on-accent);
   font-weight: 800;
 }
 
@@ -1435,7 +1505,7 @@ body.focus-open #tabbar {
   height: 10px;
   border-radius: 50%;
   background: var(--accent);
-  color: #04222a;
+  color: var(--on-accent);
   font-size: 7px;
   font-weight: 800;
   line-height: 1;
@@ -1525,7 +1595,7 @@ body.focus-open #tabbar {
 
 .cal-week-daycol.today .cal-week-day-num {
   background: var(--accent);
-  color: #04222a;
+  color: var(--on-accent);
   font-weight: 800;
 }
 

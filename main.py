@@ -160,6 +160,14 @@ class SleepLogUpdate(BaseModel):
     wake_at: str | None = None
 
 
+class PetFeedCreate(BaseModel):
+    now: str  # "YYYY-MM-DD HH:MM:SS", client local time
+
+
+class PetNameUpdate(BaseModel):
+    name: str | None = None  # None/empty clears to the default display name
+
+
 WEEKDAY_CODES = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]  # index matches date.weekday()
 
 
@@ -959,6 +967,178 @@ def delete_sleep_log(log_id: int):
     return {"ok": True}
 
 
+# ---------- pet ----------
+# xp/stage/statusはDBに持たず、study_logsとpet_feedingsから毎回計算する(検討30系のtrendチャートと
+# 同じ「読み取り時に計算」方針)。日付はすべてクライアントのローカル時刻文字列を受け取って比較する
+# だけで、date('now')等のSQLite UTC関数は使わない(検討10・検討28のUTC境界バグを再発させないため)。
+
+PET_STAGE_THRESHOLDS = [0, 300, 900, 2000, 4000, 7000]  # 累計勉強分数(1分=1XP)
+
+
+def _pet_stage_info(xp_minutes: int) -> dict:
+    stage_index = 0
+    for i, threshold in enumerate(PET_STAGE_THRESHOLDS):
+        if xp_minutes >= threshold:
+            stage_index = i
+    xp_into_stage = xp_minutes - PET_STAGE_THRESHOLDS[stage_index]
+    if stage_index + 1 < len(PET_STAGE_THRESHOLDS):
+        xp_for_next_stage = PET_STAGE_THRESHOLDS[stage_index + 1] - PET_STAGE_THRESHOLDS[stage_index]
+    else:
+        xp_for_next_stage = None  # 最終段階
+    return {"stage_index": stage_index, "xp_into_stage": xp_into_stage, "xp_for_next_stage": xp_for_next_stage}
+
+
+def _pet_get_current_generation(conn):
+    cur = conn.execute("SELECT * FROM pet_generations ORDER BY id DESC LIMIT 1")
+    return row_to_dict(cur, cur.fetchone())
+
+
+def _pet_xp_minutes(conn, born_at: str, until: str | None = None) -> int:
+    if until:
+        row = conn.execute(
+            "SELECT COALESCE(SUM(minutes), 0) FROM study_logs WHERE logged_at >= ? AND logged_at <= ?",
+            (born_at, until),
+        ).fetchone()
+    else:
+        row = conn.execute(
+            "SELECT COALESCE(SUM(minutes), 0) FROM study_logs WHERE logged_at >= ?", (born_at,)
+        ).fetchone()
+    return row[0]
+
+
+def _resolve_pet_state(conn, now: str) -> dict:
+    """現在の世代を解決する(初回生成・死亡確定・翌日リスポーンを含む)。GET /api/petと
+    POST /api/pet/feedの両方から呼ぶ。/api/push/check(無人cron)からは絶対に呼ばない —
+    死亡確定・リスポーンが本人の見ていないところで進むのを避けるため(プラン参照)。"""
+    today = now[:10]
+    gen = _pet_get_current_generation(conn)
+    respawned = False
+
+    if gen is None:
+        conn.execute("INSERT INTO pet_generations (generation_number, born_at) VALUES (1, ?)", (now,))
+        conn.commit()
+        gen = _pet_get_current_generation(conn)
+    elif gen["died_at"] is not None and today > gen["died_at"]:
+        conn.execute(
+            "INSERT INTO pet_generations (generation_number, born_at) VALUES (?, ?)",
+            (gen["generation_number"] + 1, now),
+        )
+        conn.commit()
+        gen = _pet_get_current_generation(conn)
+        respawned = True
+
+    if gen["died_at"] is not None:
+        xp_minutes = _pet_xp_minutes(conn, gen["born_at"], gen["died_at"] + " 23:59:59")
+        return {
+            "generation_id": gen["id"], "generation_number": gen["generation_number"],
+            "name": gen["name"], "born_at": gen["born_at"], "died_at": gen["died_at"],
+            "alive": False, "status": "dead",
+            "days_since_fed": None, "fed_today": False, "last_fed_date": None,
+            "xp_minutes": xp_minutes, "respawned": respawned,
+            **_pet_stage_info(xp_minutes),
+        }
+
+    last_fed_date = conn.execute(
+        "SELECT MAX(fed_date) FROM pet_feedings WHERE generation_id = ?", (gen["id"],)
+    ).fetchone()[0]
+    reference_date = last_fed_date or gen["born_at"][:10]
+    gap = (date.fromisoformat(today) - date.fromisoformat(reference_date)).days
+
+    if gap <= 0:
+        status = "healthy"
+    elif gap == 1:
+        status = "hungry"
+    elif gap == 2:
+        status = "starving"
+    else:
+        status = "dead"
+        death_date = (date.fromisoformat(reference_date) + timedelta(days=3)).isoformat()
+        conn.execute(
+            "UPDATE pet_generations SET died_at = ? WHERE id = ? AND died_at IS NULL",
+            (death_date, gen["id"]),
+        )
+        conn.commit()
+        gen = dict(gen)
+        gen["died_at"] = death_date
+
+    xp_minutes = _pet_xp_minutes(conn, gen["born_at"])
+    return {
+        "generation_id": gen["id"], "generation_number": gen["generation_number"],
+        "name": gen["name"], "born_at": gen["born_at"], "died_at": gen["died_at"],
+        "alive": status != "dead", "status": status,
+        "days_since_fed": gap, "fed_today": last_fed_date == today,
+        "last_fed_date": last_fed_date, "xp_minutes": xp_minutes, "respawned": respawned,
+        **_pet_stage_info(xp_minutes),
+    }
+
+
+@app.get("/api/pet")
+def get_pet(now: str):
+    conn = get_connection()
+    result = _resolve_pet_state(conn, now)
+    conn.execute(
+        "INSERT INTO settings (key, value) VALUES ('pet_last_client_date', ?) "
+        "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        (now[:10],),
+    )
+    conn.commit()
+    conn.close()
+    return result
+
+
+@app.post("/api/pet/feed")
+def feed_pet(payload: PetFeedCreate):
+    conn = get_connection()
+    state = _resolve_pet_state(conn, payload.now)
+    if state["alive"] and not state["fed_today"]:
+        conn.execute(
+            "INSERT INTO pet_feedings (generation_id, fed_date, fed_at) VALUES (?, ?, ?) "
+            "ON CONFLICT(generation_id, fed_date) DO NOTHING",
+            (state["generation_id"], payload.now[:10], payload.now),
+        )
+        conn.commit()
+        state = _resolve_pet_state(conn, payload.now)
+    conn.execute(
+        "INSERT INTO settings (key, value) VALUES ('pet_last_client_date', ?) "
+        "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        (payload.now[:10],),
+    )
+    conn.commit()
+    conn.close()
+    return state
+
+
+@app.put("/api/pet/name")
+def rename_pet(payload: PetNameUpdate):
+    conn = get_connection()
+    gen = _pet_get_current_generation(conn)
+    if gen is None or gen["died_at"] is not None:
+        conn.close()
+        raise HTTPException(status_code=404, detail="no living pet")
+    name = payload.name.strip() if payload.name else None
+    conn.execute("UPDATE pet_generations SET name = ? WHERE id = ?", (name, gen["id"]))
+    conn.commit()
+    conn.close()
+    return {"ok": True, "name": name}
+
+
+@app.get("/api/pet/history")
+def pet_history(limit: int = 20):
+    conn = get_connection()
+    gens = rows_to_dicts(conn.execute("SELECT * FROM pet_generations ORDER BY id DESC LIMIT ?", (limit,)))
+    result = []
+    for gen in gens:
+        until = f"{gen['died_at']} 23:59:59" if gen["died_at"] else None
+        xp_minutes = _pet_xp_minutes(conn, gen["born_at"], until)
+        result.append({
+            "generation_id": gen["id"], "generation_number": gen["generation_number"],
+            "name": gen["name"], "born_at": gen["born_at"], "died_at": gen["died_at"],
+            "xp_minutes": xp_minutes,
+        })
+    conn.close()
+    return result
+
+
 # ---------- goals ----------
 
 @app.get("/api/goals")
@@ -1350,6 +1530,39 @@ def push_check(token: str | None = None):
                 "INSERT INTO settings (key, value) VALUES ('focus_target_notified', '1') "
                 "ON CONFLICT(key) DO UPDATE SET value = excluded.value"
             )
+
+    # ペットの空腹警告。無人cronにはクライアントのローカル日付が無いため、GET /api/pet・
+    # POST /api/pet/feedが書き込む'pet_last_client_date'を「今日」の推定値として読み取る。
+    # 死亡確定・リスポーンを行う_resolve_pet_stateはここから絶対に呼ばない(読み取り専用)。
+    pet_last_date_row = conn.execute(
+        "SELECT value FROM settings WHERE key = 'pet_last_client_date'"
+    ).fetchone()
+    pet_today = pet_last_date_row[0] if pet_last_date_row else now.date().isoformat()
+    pet_gen = _pet_get_current_generation(conn)
+    if pet_gen is not None and pet_gen["died_at"] is None:
+        last_fed_date = conn.execute(
+            "SELECT MAX(fed_date) FROM pet_feedings WHERE generation_id = ?", (pet_gen["id"],)
+        ).fetchone()[0]
+        reference_date = last_fed_date or pet_gen["born_at"][:10]
+        pet_gap = (date.fromisoformat(pet_today) - date.fromisoformat(reference_date)).days
+        pet_name = pet_gen["name"] or "こいぬ"
+        pet_notify_key = None
+        pet_notify_body = None
+        if pet_gap == 1:
+            pet_notify_key, pet_notify_body = "pet_hunger_notified_date", f"{pet_name}にごはんをまだあげてないみたい"
+        elif pet_gap == 2:
+            pet_notify_key, pet_notify_body = "pet_critical_notified_date", f"{pet_name}が弱ってきてる。このままだと危ないかも"
+        if pet_notify_key:
+            last_notified_row = conn.execute(
+                "SELECT value FROM settings WHERE key = ?", (pet_notify_key,)
+            ).fetchone()
+            if not last_notified_row or last_notified_row[0] != pet_today:
+                sent_count += _send_push_to_all(conn, {"title": "Compass", "body": pet_notify_body, "tag": pet_notify_key})
+                conn.execute(
+                    "INSERT INTO settings (key, value) VALUES (?, ?) "
+                    "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                    (pet_notify_key, pet_today),
+                )
 
     conn.commit()
     conn.close()

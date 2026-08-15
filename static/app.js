@@ -144,6 +144,93 @@ const ICONS = {
     '<svg class="inline-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>',
 };
 
+// バーニーズマウンテンドッグの自作SVG3体(子犬/若犬/成犬)。塗り絵風の平面イラストで、黒/白/ラスト茶の
+// 三色配色を再現。耳(.pet-ears)・尻尾(.pet-tail)はグループ化してあり、健康状態に応じたCSSの
+// transform/filter(style.css参照)で「しょんぼりする」演出をかける。デフォルメしすぎたキャラクター調は
+// 「子供っぽくない」というテーマ方針と矛盾するため避け、実在の犬種のプロポーションに寄せている。
+const PET_ART = {
+  puppy:
+    '<svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">' +
+    '<g class="pet-tail"><ellipse cx="155" cy="172" rx="10" ry="14" fill="#141110" transform="rotate(-20 155 172)"/></g>' +
+    '<ellipse cx="66" cy="193" rx="20" ry="11" fill="#141110"/><ellipse cx="134" cy="193" rx="20" ry="11" fill="#141110"/>' +
+    '<path d="M52 198 Q44 145 100 136 Q156 145 148 198 Z" fill="#141110"/>' +
+    '<path d="M100 148 Q120 156 118 184 Q100 198 82 184 Q80 156 100 148 Z" fill="#f5efe8"/>' +
+    '<rect x="78" y="170" width="15" height="30" rx="7" fill="#141110"/><rect x="107" y="170" width="15" height="30" rx="7" fill="#141110"/>' +
+    '<ellipse cx="85.5" cy="199" rx="10" ry="7" fill="#f5efe8"/><ellipse cx="114.5" cy="199" rx="10" ry="7" fill="#f5efe8"/>' +
+    '<g class="pet-ears">' +
+    '<path d="M50 48 Q32 66 40 94 Q52 102 58 86 Q54 66 60 52 Z" fill="#141110"/>' +
+    '<path d="M150 48 Q168 66 160 94 Q148 102 142 86 Q146 66 140 52 Z" fill="#141110"/>' +
+    "</g>" +
+    '<circle cx="100" cy="72" r="58" fill="#141110"/>' +
+    '<ellipse cx="63" cy="88" rx="13" ry="16" fill="#a8623a"/><ellipse cx="137" cy="88" rx="13" ry="16" fill="#a8623a"/>' +
+    '<ellipse cx="100" cy="96" rx="26" ry="20" fill="#a8623a"/>' +
+    '<ellipse cx="100" cy="103" rx="18" ry="12" fill="#f5efe8"/>' +
+    '<ellipse cx="100" cy="94" rx="9" ry="6" fill="#141110"/>' +
+    '<ellipse cx="75" cy="52" rx="7" ry="5" fill="#a8623a"/><ellipse cx="125" cy="52" rx="7" ry="5" fill="#a8623a"/>' +
+    '<circle cx="77" cy="68" r="7" fill="#1a1512"/><circle cx="123" cy="68" r="7" fill="#1a1512"/>' +
+    '<circle cx="79.5" cy="66" r="2.5" fill="#f5efe8"/><circle cx="125.5" cy="66" r="2.5" fill="#f5efe8"/>' +
+    "</svg>",
+  adolescent:
+    '<svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">' +
+    '<g class="pet-tail">' +
+    '<path d="M156 170 Q176 156 172 128 Q170 118 161 122 Q164 141 150 162 Z" fill="#141110"/>' +
+    '<path d="M163 126 Q168 119 161 122 Q163 130 156 137 Z" fill="#f5efe8"/>' +
+    "</g>" +
+    '<ellipse cx="62" cy="191" rx="24" ry="13" fill="#141110"/><ellipse cx="138" cy="191" rx="24" ry="13" fill="#141110"/>' +
+    '<path d="M47 198 Q38 128 100 118 Q162 128 153 198 Z" fill="#141110"/>' +
+    '<path d="M100 133 Q123 142 120 179 Q100 198 80 179 Q77 142 100 133 Z" fill="#f5efe8"/>' +
+    '<rect x="74" y="158" width="17" height="39" rx="8" fill="#141110"/><rect x="109" y="158" width="17" height="39" rx="8" fill="#141110"/>' +
+    '<rect x="74" y="174" width="17" height="10" fill="#a8623a"/><rect x="109" y="174" width="17" height="10" fill="#a8623a"/>' +
+    '<ellipse cx="82.5" cy="198" rx="12" ry="8" fill="#f5efe8"/><ellipse cx="117.5" cy="198" rx="12" ry="8" fill="#f5efe8"/>' +
+    '<g class="pet-ears">' +
+    '<path d="M52 51 Q32 71 41 102 Q53 111 60 93 Q56 71 63 55 Z" fill="#141110"/>' +
+    '<path d="M148 51 Q168 71 159 102 Q147 111 140 93 Q144 71 137 55 Z" fill="#141110"/>' +
+    "</g>" +
+    '<circle cx="100" cy="75" r="54" fill="#141110"/>' +
+    '<ellipse cx="65" cy="90" rx="14" ry="17" fill="#a8623a"/><ellipse cx="135" cy="90" rx="14" ry="17" fill="#a8623a"/>' +
+    '<ellipse cx="100" cy="98" rx="27" ry="21" fill="#a8623a"/>' +
+    '<ellipse cx="100" cy="105" rx="19" ry="13" fill="#f5efe8"/>' +
+    '<ellipse cx="100" cy="96" rx="9.5" ry="6.5" fill="#141110"/>' +
+    '<ellipse cx="75.5" cy="55" rx="7" ry="5" fill="#a8623a"/><ellipse cx="124.5" cy="55" rx="7" ry="5" fill="#a8623a"/>' +
+    '<circle cx="77.5" cy="71" r="6.5" fill="#1a1512"/><circle cx="122.5" cy="71" r="6.5" fill="#1a1512"/>' +
+    '<circle cx="80" cy="69" r="2.2" fill="#f5efe8"/><circle cx="125" cy="69" r="2.2" fill="#f5efe8"/>' +
+    "</svg>",
+  adult:
+    '<svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">' +
+    '<g class="pet-tail">' +
+    '<path d="M158 168 Q182 152 177 118 Q174 106 164 111 Q168 134 152 160 Z" fill="#141110"/>' +
+    '<path d="M166 116 Q172 107 164 111 Q167 121 158 130 Z" fill="#f5efe8"/>' +
+    "</g>" +
+    '<ellipse cx="60" cy="190" rx="27" ry="15" fill="#141110"/><ellipse cx="140" cy="190" rx="27" ry="15" fill="#141110"/>' +
+    '<path d="M44 197 Q33 118 100 106 Q167 118 156 197 Z" fill="#141110"/>' +
+    '<path d="M100 122 Q126 132 123 176 Q100 197 77 176 Q74 132 100 122 Z" fill="#f5efe8"/>' +
+    '<rect x="71" y="150" width="19" height="46" rx="9" fill="#141110"/><rect x="110" y="150" width="19" height="46" rx="9" fill="#141110"/>' +
+    '<rect x="71" y="167" width="19" height="11" fill="#a8623a"/><rect x="110" y="167" width="19" height="11" fill="#a8623a"/>' +
+    '<ellipse cx="80.5" cy="197" rx="13" ry="9" fill="#f5efe8"/><ellipse cx="119.5" cy="197" rx="13" ry="9" fill="#f5efe8"/>' +
+    '<g class="pet-ears">' +
+    '<path d="M54 54 Q33 75 41 109 Q54 119 62 100 Q57 77 65 59 Z" fill="#141110"/>' +
+    '<path d="M146 54 Q167 75 159 109 Q146 119 138 100 Q143 77 135 59 Z" fill="#141110"/>' +
+    "</g>" +
+    '<circle cx="100" cy="77" r="50" fill="#141110"/>' +
+    '<ellipse cx="67" cy="91" rx="14" ry="18" fill="#a8623a"/><ellipse cx="133" cy="91" rx="14" ry="18" fill="#a8623a"/>' +
+    '<ellipse cx="100" cy="99" rx="28" ry="22" fill="#a8623a"/>' +
+    '<ellipse cx="100" cy="107" rx="20" ry="14" fill="#f5efe8"/>' +
+    '<ellipse cx="100" cy="97" rx="10" ry="7" fill="#141110"/>' +
+    '<ellipse cx="76" cy="57" rx="7" ry="5" fill="#a8623a"/><ellipse cx="124" cy="57" rx="7" ry="5" fill="#a8623a"/>' +
+    '<circle cx="78" cy="73" r="6" fill="#1a1512"/><circle cx="122" cy="73" r="6" fill="#1a1512"/>' +
+    '<circle cx="80" cy="71" r="2" fill="#f5efe8"/><circle cx="124" cy="71" r="2" fill="#f5efe8"/>' +
+    "</svg>",
+};
+
+const PET_STAGE_LABELS = ["子犬(赤ちゃん)", "子犬", "若犬", "成犬手前", "成犬", "成犬(MAX)"];
+const PET_STATUS_LABELS = { healthy: "元気いっぱい", hungry: "お腹を空かせている", starving: "弱っている…", dead: "天国へ旅立った" };
+
+function petArtKeyForStage(stageIndex) {
+  if (stageIndex <= 1) return "puppy";
+  if (stageIndex <= 3) return "adolescent";
+  return "adult";
+}
+
 function recurrenceLabel(recurrence) {
   if (!recurrence) return "";
   const days = recurrence.split(",");
@@ -2402,6 +2489,181 @@ guardedClick(document.getElementById("sleep-btn"), async () => {
 
 guardedClick(document.getElementById("settings-sleep-wake-btn"), wakeUp);
 
+// ---------- pet ----------
+
+let petState = null;
+
+function formatLocalDateShort(dateStr) {
+  const [, mo, da] = dateStr.split("-");
+  return `${parseInt(mo, 10)}/${parseInt(da, 10)}`;
+}
+
+function petDisplayName(state) {
+  return state.name || "こいぬ";
+}
+
+// 「同じ世代にはもう一度ポップアップを出さない」ためのマーカー。初回生成・死亡後のリスポーンは
+// どちらもgeneration_idが変わるので、このキーだけで両方のケースを自然にカバーできる。
+const PET_NAME_PROMPT_KEY = "petNamePromptShownFor";
+
+function shouldPromptPetName(state) {
+  if (state.name || !state.alive) return false;
+  return localStorage.getItem(PET_NAME_PROMPT_KEY) !== String(state.generation_id);
+}
+
+function markPetNamePrompted(state) {
+  localStorage.setItem(PET_NAME_PROMPT_KEY, String(state.generation_id));
+}
+
+function renderPetState(state) {
+  petState = state;
+  const artKey = petArtKeyForStage(state.stage_index);
+  const statusText = `${petDisplayName(state)}: ${PET_STATUS_LABELS[state.status]}`;
+  const xpText =
+    state.xp_for_next_stage != null
+      ? `${PET_STAGE_LABELS[state.stage_index]}(次まであと${state.xp_for_next_stage - state.xp_into_stage}分)`
+      : `${PET_STAGE_LABELS[state.stage_index]}(MAX)`;
+  const pct = state.xp_for_next_stage
+    ? Math.min(100, Math.round((state.xp_into_stage / state.xp_for_next_stage) * 100))
+    : 100;
+
+  document.querySelectorAll(".pet-visual").forEach((el) => {
+    el.innerHTML = PET_ART[artKey];
+    el.classList.remove("status-healthy", "status-hungry", "status-starving", "status-dead");
+    el.classList.add(`status-${state.status}`);
+  });
+  document.querySelectorAll(".pet-status-label").forEach((el) => { el.textContent = statusText; });
+  document.querySelectorAll(".pet-xp-fill").forEach((el) => { el.style.width = `${pct}%`; });
+  document.querySelectorAll(".pet-xp-label").forEach((el) => { el.textContent = xpText; });
+
+  const headerBtn = document.getElementById("pet-btn");
+  headerBtn.classList.remove("status-hungry", "status-starving", "status-dead");
+  if (state.status !== "healthy") headerBtn.classList.add(`status-${state.status}`);
+  headerBtn.title = statusText;
+
+  document.getElementById("pet-panel-name").textContent = petDisplayName(state);
+  document.getElementById("pet-tab-heading").textContent = state.name ? `ペット: ${state.name}` : "ペット";
+
+  ["pet-feed-btn", "pet-feed-btn-tab"].forEach((id) => {
+    const btn = document.getElementById(id);
+    btn.disabled = !state.alive || state.fed_today;
+    btn.textContent = !state.alive ? "-" : state.fed_today ? "今日はあげた" : "ごはんをあげる";
+  });
+
+  document.getElementById("pet-stat-last-fed").textContent = state.last_fed_date ? formatLocalDateShort(state.last_fed_date) : "-";
+  document.getElementById("pet-stat-born").textContent = formatLocalDateShort(state.born_at.slice(0, 10));
+}
+
+async function loadPetState() {
+  const state = await api(`/api/pet?now=${encodeURIComponent(nowLocalTimestamp())}`);
+  renderPetState(state);
+  if (shouldPromptPetName(state)) openPetNamePanel(false);
+  return state;
+}
+
+async function loadPetHistory() {
+  const rows = await api("/api/pet/history?limit=20");
+  const list = document.getElementById("pet-history-list");
+  list.innerHTML = "";
+  if (rows.length === 0) {
+    list.innerHTML = "<li>まだ記録がありません</li>";
+    return;
+  }
+  rows.forEach((g) => {
+    const li = document.createElement("li");
+    const start = formatLocalDateShort(g.born_at.slice(0, 10));
+    const period = g.died_at ? `${start} 〜 ${formatLocalDateShort(g.died_at)}` : `${start} 〜 現在`;
+    li.innerHTML = `
+      <span class="log-info">
+        <span>${escapeHtml(g.name || `${g.generation_number}代目`)}</span>
+        <span class="meta">${period} ・ 累計${g.xp_minutes}分</span>
+      </span>
+    `;
+    list.appendChild(li);
+  });
+}
+
+async function refreshPet() {
+  const state = await loadPetState();
+  await loadPetHistory();
+  return state;
+}
+
+const petPanel = document.getElementById("pet-panel");
+const petBackdrop = document.getElementById("pet-backdrop");
+
+function openPetPanel() {
+  petPanel.classList.remove("hidden");
+  petBackdrop.classList.remove("hidden");
+}
+
+function closePetPanel() {
+  petPanel.classList.add("hidden");
+  petBackdrop.classList.add("hidden");
+}
+
+document.getElementById("pet-close").addEventListener("click", closePetPanel);
+petBackdrop.addEventListener("click", closePetPanel);
+
+guardedClick(document.getElementById("pet-btn"), async () => {
+  await loadPetState();
+  openPetPanel();
+});
+
+async function feedPet() {
+  const state = await api("/api/pet/feed", {
+    method: "POST",
+    body: JSON.stringify({ now: nowLocalTimestamp() }),
+  });
+  renderPetState(state);
+  loadPetHistory();
+  if (shouldPromptPetName(state)) openPetNamePanel(false);
+}
+
+guardedClick(document.getElementById("pet-feed-btn"), feedPet);
+guardedClick(document.getElementById("pet-feed-btn-tab"), feedPet);
+
+const petNamePanel = document.getElementById("pet-name-panel");
+const petNameBackdrop = document.getElementById("pet-name-backdrop");
+
+function openPetNamePanel(isRename) {
+  document.getElementById("pet-name-panel-title").textContent = isRename ? "名前を変える" : "名前をつけてあげよう";
+  document.getElementById("pet-name-skip").classList.toggle("hidden", isRename);
+  document.getElementById("pet-name-input").value = isRename && petState ? petState.name || "" : "";
+  petNamePanel.classList.remove("hidden");
+  petNameBackdrop.classList.remove("hidden");
+  document.getElementById("pet-name-input").focus();
+}
+
+function closePetNamePanel() {
+  petNamePanel.classList.add("hidden");
+  petNameBackdrop.classList.add("hidden");
+}
+
+document.getElementById("pet-name-close").addEventListener("click", closePetNamePanel);
+petNameBackdrop.addEventListener("click", closePetNamePanel);
+
+document.getElementById("pet-name-skip").addEventListener("click", () => {
+  if (petState) markPetNamePrompted(petState);
+  closePetNamePanel();
+});
+
+guardedSubmit(document.getElementById("pet-name-form"), async (e) => {
+  const name = document.getElementById("pet-name-input").value.trim() || null;
+  const result = await api("/api/pet/name", { method: "PUT", body: JSON.stringify({ name }) });
+  if (petState) {
+    petState.name = result.name;
+    markPetNamePrompted(petState);
+    renderPetState(petState);
+    loadPetHistory();
+  }
+  closePetNamePanel();
+});
+
+guardedClick(document.getElementById("pet-rename-btn"), async () => {
+  openPetNamePanel(true);
+});
+
 // ---------- calendar (events) ----------
 
 function populateEventCategorySelect(cats) {
@@ -3168,6 +3430,7 @@ document.getElementById("export-data-btn").addEventListener("click", () => {
     loadActivationMoodReasons(),
     loadSleepActive(),
     loadCalendar(),
+    refreshPet(),
   ]);
   backgroundResults.filter((r) => r.status === "rejected").forEach((r) => console.error("init load failed:", r.reason));
 })();
