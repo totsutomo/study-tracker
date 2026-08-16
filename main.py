@@ -1273,6 +1273,14 @@ def focus_session_active(payload: SessionActiveSync):
     return {"ok": True}
 
 
+# クライアント側のactive:false送信(discard/finish時)が何らかの理由でサーバーに届かないと
+# (PWAを閉じるタイミングと重なる等)、session_activeが1のまま永久に残り、JpBlocker側の
+# マナーモード解除・アプリブロック解除が二度と発火しなくなる(discardSession()にkeepalive:true
+# を足して主要因は塞いだが、それでも防げない失敗経路の保険としてここでも自己修復する)。
+# 通常の勉強セッションがこれを超えることはまず無いはずの余裕を持った上限。
+FOCUS_SESSION_MAX_AGE_HOURS = 4
+
+
 @app.get("/api/focus-session/status")
 def focus_session_status(token: str | None = None):
     if not DEVICE_TOKEN or token != DEVICE_TOKEN:
@@ -1282,14 +1290,33 @@ def focus_session_status(token: str | None = None):
         "SELECT key, value FROM settings WHERE key IN "
         "('session_active', 'session_subject', 'session_started_at')"
     ).fetchall()
-    conn.close()
     values = dict(rows)
     if values.get("session_active") != "1":
+        conn.close()
         return {"active": False}
+
+    started_at = values.get("session_started_at")
+    stale = False
+    if started_at:
+        try:
+            age = datetime.now() - datetime.fromisoformat(started_at)
+            stale = age > timedelta(hours=FOCUS_SESSION_MAX_AGE_HOURS)
+        except ValueError:
+            pass
+    if stale:
+        conn.execute(
+            "DELETE FROM settings WHERE key IN "
+            "('session_active', 'session_subject', 'session_started_at')"
+        )
+        conn.commit()
+        conn.close()
+        return {"active": False}
+
+    conn.close()
     return {
         "active": True,
         "subject": values.get("session_subject") or None,
-        "started_at": values.get("session_started_at"),
+        "started_at": started_at,
     }
 
 

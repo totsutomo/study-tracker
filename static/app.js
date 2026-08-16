@@ -1114,10 +1114,17 @@ function syncFocusSessionServer(remainingSeconds, subject) {
 // JpBlocker(Android側のアプリブロック連携)向けに「今セッション中か」を反映する。上の
 // syncFocusSessionServerとは別物(あちらはカウントダウンのみ・push通知の保険用途)。こちらは
 // カウントアップ/カウントダウン問わず開始〜終了を送る。一時停止中は呼ばない(ブロック維持のため)。
+//
+// active:false(セッション終了・破棄)はkeepalive:trueで送る: 破棄ボタン押下直後にPWAを
+// 閉じる/タブを切り替えるとページが即破棄され、通常のfetchは送信途中で打ち切られうる。
+// その場合サーバー側はsession_activeが1のまま残り、JpBlocker側のマナーモード解除・
+// ブロック解除が永久に発火しなくなる(実際に約14時間このバグでスタックした実績あり)。
+// keepalive:trueならページが閉じてもブラウザがリクエスト送信を引き継いで完了させる。
 function syncSessionActiveFlag(active, subject) {
   api("/api/focus-session/active", {
     method: "POST",
     body: JSON.stringify({ active, subject: subject || null }),
+    keepalive: true,
   }).catch(() => {});
 }
 
