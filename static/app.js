@@ -1001,6 +1001,7 @@ function openStartPanel(subject, todoId) {
   setStartMode("countup");
   document.getElementById("start-duration-input").value = 25;
   document.getElementById("start-clockonly").checked = false;
+  document.getElementById("start-keep-awake").checked = false;
   startTrigger = null;
   document.querySelectorAll("#start-trigger-picker .reason-btn").forEach((b) => {
     b.classList.remove("active");
@@ -1050,6 +1051,7 @@ document.getElementById("start-begin-btn").addEventListener("click", () => {
   if (!pendingStart) return;
   const { subject, todoId } = pendingStart;
   const clockOnly = document.getElementById("start-clockonly").checked;
+  const keepAwake = document.getElementById("start-keep-awake").checked;
   let targetMs = null;
   if (startMode === "countdown") {
     const minutes = parseInt(document.getElementById("start-duration-input").value, 10);
@@ -1067,7 +1069,7 @@ document.getElementById("start-begin-btn").addEventListener("click", () => {
   }
   const trigger = startTrigger;
   closeStartPanel();
-  beginSession(subject, todoId, startMode, targetMs, clockOnly, trigger);
+  beginSession(subject, todoId, startMode, targetMs, clockOnly, trigger, keepAwake);
 });
 
 // ---------- focus timer (start / pause / resume / stop / minimize) ----------
@@ -1081,6 +1083,7 @@ let isPaused = false;
 let sessionMode = "countup"; // "countup" | "countdown"
 let sessionTargetMs = null;
 let sessionClockOnly = false;
+let sessionKeepAwake = false; // user-selected "don't let the screen sleep" option, independent of clock-only
 let sessionCompleted = false;
 let overlayMinimized = false;
 let sessionStartTrigger = null;
@@ -1137,6 +1140,7 @@ function persistSession() {
       sessionMode,
       sessionTargetMs,
       sessionClockOnly,
+      sessionKeepAwake,
       sessionCompleted,
       overlayMinimized,
       sessionStartTrigger,
@@ -1167,6 +1171,7 @@ function restoreSession() {
   sessionMode = saved.sessionMode;
   sessionTargetMs = saved.sessionTargetMs;
   sessionClockOnly = saved.sessionClockOnly;
+  sessionKeepAwake = !!saved.sessionKeepAwake;
   sessionCompleted = !!saved.sessionCompleted;
   overlayMinimized = saved.overlayMinimized;
   sessionStartTrigger = saved.sessionStartTrigger || null;
@@ -1180,11 +1185,11 @@ function restoreSession() {
   updatePauseUI();
   if (!isPaused) {
     startTimerTick();
-    if (sessionClockOnly) requestWakeLock();
+    if (sessionClockOnly || sessionKeepAwake) requestWakeLock();
   }
 }
 
-function beginSession(subject, todoId, mode, targetMs, clockOnly, trigger) {
+function beginSession(subject, todoId, mode, targetMs, clockOnly, trigger, keepAwake) {
   timerSubject = subject;
   activeTodoId = todoId;
   accumulatedMs = 0;
@@ -1193,13 +1198,14 @@ function beginSession(subject, todoId, mode, targetMs, clockOnly, trigger) {
   sessionMode = mode;
   sessionTargetMs = targetMs;
   sessionClockOnly = clockOnly;
+  sessionKeepAwake = !!keepAwake;
   sessionCompleted = false;
   overlayMinimized = false;
   sessionStartTrigger = trigger || null;
   openFocusOverlay();
   startTimerTick();
   persistSession();
-  if (clockOnly) {
+  if (clockOnly || keepAwake) {
     requestWakeLock();
   }
   if (mode === "countdown") {
@@ -1266,6 +1272,7 @@ function openFocusOverlay() {
   document.getElementById("focus-ring-fill").style.stroke = color;
   document.getElementById("focus-pause-btn").textContent = "一時停止";
   document.getElementById("focus-clockonly-badge").classList.toggle("hidden", !sessionClockOnly);
+  document.getElementById("focus-keepawake-badge").classList.toggle("hidden", !sessionKeepAwake);
   const overlay = document.getElementById("focus-overlay");
   overlay.classList.remove("hidden", "paused");
   overlay.classList.toggle("clock-only", sessionClockOnly);
@@ -1362,7 +1369,7 @@ function resumeSession() {
   startTimerTick();
   updatePauseUI();
   persistSession();
-  if (sessionClockOnly) {
+  if (sessionClockOnly || sessionKeepAwake) {
     requestWakeLock();
   }
   if (sessionMode === "countdown" && !sessionCompleted) {
@@ -1394,12 +1401,15 @@ document.getElementById("mini-timer-bar").addEventListener("click", (e) => {
   expandFocusOverlay();
 });
 
-// ---------- screen wake lock (clock-only mode) ----------
-// clock-only sessions are meant to pause when you actually leave (switch app, lock the
-// phone), but the phone's own screen-timeout blanks the display the same way and was
-// silently triggering that same pause. Holding a wake lock stops the OS from timing the
-// screen out on its own; a real app-switch or manual lock-button press still fires
-// visibilitychange and pauses as before.
+// ---------- screen wake lock (clock-only mode / keep-awake option) ----------
+// two independent reasons a session might want to hold a wake lock:
+// - clock-only sessions are meant to pause when you actually leave (switch app, lock the
+//   phone), but the phone's own screen-timeout blanks the display the same way and was
+//   silently triggering that same pause. Holding a wake lock stops the OS from timing the
+//   screen out on its own; a real app-switch or manual lock-button press still fires
+//   visibilitychange and pauses as before.
+// - "画面をスリープさせない" (start-keep-awake) is a plain opt-in for any mode: keep the
+//   screen on for the duration of the session, no auto-pause behavior attached to it.
 let wakeLock = null;
 
 async function requestWakeLock() {
@@ -1421,15 +1431,16 @@ function releaseWakeLock() {
   }
 }
 
-// visibility change (screen lock / switch to another app): clock-only sessions auto-pause.
-// The OS also force-releases any wake lock whenever the tab goes hidden, so re-acquire it
-// once a still-running clock-only session becomes visible again.
+// visibility change (screen lock / switch to another app): only clock-only sessions auto-pause
+// (keep-awake alone doesn't imply "must be looking at the screen"). The OS also force-releases
+// any wake lock whenever the tab goes hidden, so re-acquire it once a still-running
+// clock-only or keep-awake session becomes visible again.
 document.addEventListener("visibilitychange", () => {
   if (document.hidden) {
     if (timerSubject && sessionClockOnly && !isPaused) {
       pauseSession();
     }
-  } else if (timerSubject && sessionClockOnly && !isPaused) {
+  } else if (timerSubject && (sessionClockOnly || sessionKeepAwake) && !isPaused) {
     requestWakeLock();
   }
 });
@@ -1446,6 +1457,7 @@ function resetSessionState() {
   sessionMode = "countup";
   sessionTargetMs = null;
   sessionClockOnly = false;
+  sessionKeepAwake = false;
   sessionCompleted = false;
   overlayMinimized = false;
   sessionStartTrigger = null;

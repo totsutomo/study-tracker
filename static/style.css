@@ -984,6 +984,8 @@ body.focus-open #tabbar {
   letter-spacing: 0.05em;
   display: flex;
   align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
   gap: 8px;
 }
 
