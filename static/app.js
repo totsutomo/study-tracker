@@ -229,6 +229,10 @@ const ICONS = {
     '<svg class="inline-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>',
   moon:
     '<svg class="inline-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>',
+  // 再生/削除ボタン用。.inline-iconの既定色(muted寄り)は使わず、ボタン自身のcolorをそのまま継承させる
+  play: '<svg viewBox="0 0 24 24" fill="currentColor"><polygon points="7 4 20 12 7 20 7 4"/></svg>',
+  trash:
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16"/><path d="M9 7V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2"/><path d="M18 7l-.9 12.1a2 2 0 0 1-2 1.9H8.9a2 2 0 0 1-2-1.9L6 7"/></svg>',
 };
 
 
@@ -344,8 +348,8 @@ function renderTodoItem(t, list) {
           <span class="todo-card-meta">${t.category || ""} ${dueLabel}${recurLabel}</span>
         </div>
         <div class="todo-card-actions">
-          ${!t.done && t.category ? `<button class="play-btn" title="記録開始">▶</button>` : ""}
-          <button class="delete-btn" title="削除">×</button>
+          ${!t.done && t.category ? `<button class="play-btn" title="記録開始">${ICONS.play}</button>` : ""}
+          <button class="delete-btn" title="削除">${ICONS.trash}</button>
         </div>
       </div>
       ${showReschedule ? `
@@ -2623,6 +2627,9 @@ let calTodosCache = [];
 let calStudyDaysCache = new Set();
 let calActivationDaysCache = new Set();
 let calMinAchievedDaysCache = new Set();
+// 上記キャッシュが現時点でどの月("YYYY-M")のデータを含んでいるかの記録。月⇔週の切り替えのたびに
+// 同じ月を再フェッチしていた無駄をなくすため(2026-08-16)。
+let calCachedMonthKeys = new Set();
 const CAL_HOUR_HEIGHT = 52; // px per hour in the week time grid
 
 function timeToMinutes(t) {
@@ -2694,7 +2701,22 @@ async function hydrateCalendarFromCache() {
   }
 }
 
-async function loadCalendar() {
+// calViewMode/calYear/calMonth/calWeekStartが指す期間を表示するために必要な月キー("YYYY-M")の集合。
+// 週表示は月をまたぐと2つになる。
+function neededCalMonthKeys() {
+  if (calViewMode === "week") {
+    const weekEnd = addDaysToDate(calWeekStart, 6);
+    const startD = new Date(calWeekStart + "T00:00:00");
+    const endD = new Date(weekEnd + "T00:00:00");
+    return new Set([
+      `${startD.getFullYear()}-${startD.getMonth() + 1}`,
+      `${endD.getFullYear()}-${endD.getMonth() + 1}`,
+    ]);
+  }
+  return new Set([`${calYear}-${calMonth}`]);
+}
+
+function updateCalMonthLabel() {
   if (calViewMode === "week") {
     const weekEnd = addDaysToDate(calWeekStart, 6);
     const startD = new Date(calWeekStart + "T00:00:00");
@@ -2703,10 +2725,31 @@ async function loadCalendar() {
       startD.getMonth() === endD.getMonth()
         ? `${startD.getFullYear()}年${startD.getMonth() + 1}月${startD.getDate()}日〜${endD.getDate()}日`
         : `${startD.getFullYear()}年${startD.getMonth() + 1}月${startD.getDate()}日〜${endD.getMonth() + 1}月${endD.getDate()}日`;
-    const monthKeys = new Set([
-      `${startD.getFullYear()}-${startD.getMonth() + 1}`,
-      `${endD.getFullYear()}-${endD.getMonth() + 1}`,
-    ]);
+  } else {
+    document.getElementById("cal-month-label").textContent = `${calYear}年${calMonth}月`;
+  }
+}
+
+// グリッド/週タイムグリッドの描画+表示切り替えだけを行う(データ取得はしない)。
+// 既にcalXxxCacheが必要な月をカバーしている場合はloadCalendar()を経由せずこれだけ呼べばいい。
+function renderCalendarView() {
+  const isWeek = calViewMode === "week";
+  document.getElementById("cal-weekday-row").classList.toggle("hidden", isWeek);
+  document.getElementById("cal-grid").classList.toggle("hidden", isWeek);
+  document.getElementById("cal-week-view").classList.toggle("hidden", !isWeek);
+
+  if (isWeek) {
+    renderWeekTimeGrid();
+  } else {
+    renderCalGrid();
+  }
+  renderCalDayDetail();
+}
+
+async function loadCalendar() {
+  const monthKeys = neededCalMonthKeys();
+  updateCalMonthLabel();
+  if (calViewMode === "week") {
     const [eventLists, todos, studyDayLists, activationDayLists, minAchievedDayLists] = await Promise.all([
       Promise.all(
         [...monthKeys].map((key) => {
@@ -2740,7 +2783,6 @@ async function loadCalendar() {
     calActivationDaysCache = new Set(activationDayLists.flat());
     calMinAchievedDaysCache = new Set(minAchievedDayLists.flat());
   } else {
-    document.getElementById("cal-month-label").textContent = `${calYear}年${calMonth}月`;
     const [events, todos, studyDays, activationDays, minAchievedDays] = await Promise.all([
       api(`/api/events?year=${calYear}&month=${calMonth}`),
       api("/api/todos"),
@@ -2755,17 +2797,8 @@ async function loadCalendar() {
     calMinAchievedDaysCache = new Set(minAchievedDays);
   }
 
-  const isWeek = calViewMode === "week";
-  document.getElementById("cal-weekday-row").classList.toggle("hidden", isWeek);
-  document.getElementById("cal-grid").classList.toggle("hidden", isWeek);
-  document.getElementById("cal-week-view").classList.toggle("hidden", !isWeek);
-
-  if (isWeek) {
-    renderWeekTimeGrid();
-  } else {
-    renderCalGrid();
-  }
-  renderCalDayDetail();
+  calCachedMonthKeys = monthKeys;
+  renderCalendarView();
 }
 
 function renderCalGrid() {
@@ -2796,10 +2829,20 @@ function renderCalGrid() {
       }
       const dayEvents = calEventsCache.filter((e) => e.occurrence_date === c.date);
       const dayTodos = calTodosCache.filter((t) => t.due_date === c.date);
-      const dots = dayEvents
-        .slice(0, 4)
-        .map((e) => `<span class="cal-dot" style="background:${colorFor(e.category || "")}"></span>`)
-        .join("");
+      // 予定(events)は「何日に何があるか」がドットだと分からないという指摘を受け、
+      // 名前をそのまま短縮テキストで表示する。ToDoの期限は件数が多く/カレンダー上では
+      // ToDo画面ほど重要でないため、従来通りドットのまま(2026-08-16)。
+      let eventMark = "";
+      if (dayEvents.length === 1) {
+        const e = dayEvents[0];
+        eventMark = `<span class="cal-event-label" style="color:${colorFor(e.category || "")}">${escapeHtml(e.title)}</span>`;
+      } else if (dayEvents.length > 1) {
+        const e = dayEvents[0];
+        eventMark = `
+          <span class="cal-event-label" style="color:${colorFor(e.category || "")}">${escapeHtml(e.title)}</span>
+          <span class="cal-event-more">+${dayEvents.length - 1}件</span>
+        `;
+      }
       const todoMark = dayTodos.length ? `<span class="cal-todo-dot"></span>` : "";
       const studyMark = calStudyDaysCache.has(c.date) ? `<span class="cal-log-dot"></span>` : "";
       const activationMark = calActivationDaysCache.has(c.date) ? `<span class="cal-activation-dot"></span>` : "";
@@ -2813,7 +2856,8 @@ function renderCalGrid() {
       return `
         <div class="${classes.join(" ")}" data-date="${c.date}">
           <span class="cal-day-num">${c.day}</span>
-          <div class="cal-day-marks">${dots}${todoMark}${studyMark}${activationMark}${minAchievedMark}</div>
+          ${eventMark}
+          <div class="cal-day-marks">${todoMark}${studyMark}${activationMark}${minAchievedMark}</div>
         </div>
       `;
     })
@@ -3106,7 +3150,16 @@ document.querySelectorAll("#cal-view-toggle .cal-view-btn").forEach((btn) => {
       calYear = anchor.getFullYear();
       calMonth = anchor.getMonth() + 1;
     }
-    loadCalendar();
+    // 月⇔週の切り替え先が既にキャッシュ済みの月なら、APIを叩き直さず描画だけやり直す
+    // (切り替えるたびに毎回全件再取得していたのが「切り替えが遅い」の原因だった、2026-08-16)。
+    const needed = neededCalMonthKeys();
+    const alreadyCached = [...needed].every((k) => calCachedMonthKeys.has(k));
+    updateCalMonthLabel();
+    if (alreadyCached) {
+      renderCalendarView();
+    } else {
+      loadCalendar();
+    }
   });
 });
 

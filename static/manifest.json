@@ -3,8 +3,8 @@
   "short_name": "Compass",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#1a1512",
-  "theme_color": "#1a1512",
+  "background_color": "#12151c",
+  "theme_color": "#12151c",
   "icons": [
     {
       "src": "/static/icon-192.png",
