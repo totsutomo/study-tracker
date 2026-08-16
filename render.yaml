@@ -17,3 +17,5 @@ services:
         sync: false
       - key: CRON_SECRET
         sync: false
+      - key: DEVICE_TOKEN
+        sync: false

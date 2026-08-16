@@ -99,6 +99,13 @@ CREATE TABLE IF NOT EXISTS sleep_logs (
     logged_at TEXT DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS screen_time_logs (
+    date TEXT PRIMARY KEY,
+    total_minutes INTEGER NOT NULL,
+    by_app TEXT,
+    updated_at TEXT DEFAULT (datetime('now'))
+);
+
 """
 
 DEFAULT_CATEGORIES = ("英語", "数学", "世界史", "その他")

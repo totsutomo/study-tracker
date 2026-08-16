@@ -23,6 +23,9 @@ VAPID_PUBLIC_KEY = os.environ.get("VAPID_PUBLIC_KEY")
 VAPID_PRIVATE_KEY = os.environ.get("VAPID_PRIVATE_KEY")
 VAPID_CLAIMS_EMAIL = os.environ.get("VAPID_CLAIMS_EMAIL", "example@example.com")
 CRON_SECRET = os.environ.get("CRON_SECRET")
+# JpBlocker(Androidネイティブの連携アプリ)からの通信を認証するための共有トークン。
+# CRON_SECRETとは用途が別(外部cronサービス vs 自分のAndroid端末)なので分けている。
+DEVICE_TOKEN = os.environ.get("DEVICE_TOKEN")
 
 
 def _load_last_updated() -> str:
@@ -88,6 +91,11 @@ class SettingsUpdate(BaseModel):
 
 class FocusSessionSync(BaseModel):
     remaining_seconds: int | None = None  # None = no active countdown (paused/stopped)
+    subject: str | None = None
+
+
+class SessionActiveSync(BaseModel):
+    active: bool  # true = session running (started, not yet finished/discarded)
     subject: str | None = None
 
 
@@ -158,6 +166,12 @@ class SleepLogCreate(BaseModel):
 class SleepLogUpdate(BaseModel):
     bedtime_at: str | None = None  # "YYYY-MM-DD HH:MM:SS"; omitted fields are left unchanged
     wake_at: str | None = None
+
+
+class ScreenTimeUpsert(BaseModel):
+    date: str  # "YYYY-MM-DD", client(JpBlocker)local date
+    total_minutes: int
+    by_app: str | None = None  # optional JSON文字列(アプリ別内訳、パッケージ名→分)
 
 
 WEEKDAY_CODES = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]  # index matches date.weekday()
@@ -959,6 +973,77 @@ def delete_sleep_log(log_id: int):
     return {"ok": True}
 
 
+# ---------- screen time (JpBlocker連携、Part B) ----------
+
+@app.put("/api/screen-time")
+def upsert_screen_time(payload: ScreenTimeUpsert, token: str | None = None):
+    if not DEVICE_TOKEN or token != DEVICE_TOKEN:
+        raise HTTPException(status_code=403, detail="invalid token")
+    conn = get_connection()
+    conn.execute(
+        "INSERT INTO screen_time_logs (date, total_minutes, by_app, updated_at) "
+        "VALUES (?, ?, ?, datetime('now')) "
+        "ON CONFLICT(date) DO UPDATE SET total_minutes = excluded.total_minutes, "
+        "by_app = excluded.by_app, updated_at = excluded.updated_at",
+        (payload.date, payload.total_minutes, payload.by_app),
+    )
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+@app.get("/api/screen-time/daily")
+def screen_time_daily(days: int = 14):
+    # mood-logsチャートの重ね合わせ表示用。study-logs/dailyと同じ「範囲内は気分記録の有無を問わず返す」流儀
+    conn = get_connection()
+    cur = conn.execute(
+        "SELECT date, total_minutes FROM screen_time_logs WHERE date >= date('now', ?) ORDER BY date",
+        (f"-{days - 1} days",),
+    )
+    result = rows_to_dicts(cur)
+    conn.close()
+    return result
+
+
+@app.get("/api/screen-time/mood-correlation")
+def screen_time_mood_correlation(days: int = 30):
+    # スクリーンタイムが多い日と少ない日で気分平均に差があるかを見る(中央値で2群に分ける簡易分析)。
+    conn = get_connection()
+    screen_rows = conn.execute(
+        "SELECT date, total_minutes FROM screen_time_logs WHERE date >= date('now', ?)",
+        (f"-{days} days",),
+    ).fetchall()
+    mood_rows = conn.execute(
+        "SELECT date, score FROM mood_logs WHERE date >= date('now', ?)",
+        (f"-{days} days",),
+    ).fetchall()
+    conn.close()
+
+    scores_by_date: dict[str, list[int]] = {}
+    for d, score in mood_rows:
+        scores_by_date.setdefault(d, []).append(score)
+
+    paired = [
+        (minutes, sum(scores_by_date[d]) / len(scores_by_date[d]))
+        for d, minutes in screen_rows
+        if d in scores_by_date
+    ]
+    if len(paired) < 4:
+        return {"status": "insufficient_data", "paired_days": len(paired)}
+
+    paired.sort(key=lambda p: p[0])
+    mid = len(paired) // 2
+    low_half, high_half = paired[:mid], paired[-mid:]
+    return {
+        "status": "ok",
+        "paired_days": len(paired),
+        "low_screen_time_avg_minutes": round(sum(m for m, _ in low_half) / len(low_half)),
+        "low_screen_time_avg_mood": round(sum(s for _, s in low_half) / len(low_half), 1),
+        "high_screen_time_avg_minutes": round(sum(m for m, _ in high_half) / len(high_half)),
+        "high_screen_time_avg_mood": round(sum(s for _, s in high_half) / len(high_half), 1),
+    }
+
+
 # ---------- goals ----------
 
 @app.get("/api/goals")
@@ -1158,6 +1243,54 @@ def focus_session_sync(payload: FocusSessionSync):
     conn.commit()
     conn.close()
     return {"ok": True}
+
+
+# JpBlocker(Android)側で「今study-trackerのセッションが動いているか」を判定するための状態。
+# 上のfocus_session_sync()とは別管理(あちらはカウントダウンのみ・push通知の保険用途)。
+# こちらはカウントアップ/カウントダウン問わず、セッション開始〜終了(一時停止中は維持)を反映する。
+@app.post("/api/focus-session/active")
+def focus_session_active(payload: SessionActiveSync):
+    conn = get_connection()
+    if payload.active:
+        started_at = datetime.now().isoformat(sep=" ", timespec="seconds")
+        for key, value in (
+            ("session_active", "1"),
+            ("session_subject", payload.subject or ""),
+            ("session_started_at", started_at),
+        ):
+            conn.execute(
+                "INSERT INTO settings (key, value) VALUES (?, ?) "
+                "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                (key, value),
+            )
+    else:
+        conn.execute(
+            "DELETE FROM settings WHERE key IN "
+            "('session_active', 'session_subject', 'session_started_at')"
+        )
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+@app.get("/api/focus-session/status")
+def focus_session_status(token: str | None = None):
+    if not DEVICE_TOKEN or token != DEVICE_TOKEN:
+        raise HTTPException(status_code=403, detail="invalid token")
+    conn = get_connection()
+    rows = conn.execute(
+        "SELECT key, value FROM settings WHERE key IN "
+        "('session_active', 'session_subject', 'session_started_at')"
+    ).fetchall()
+    conn.close()
+    values = dict(rows)
+    if values.get("session_active") != "1":
+        return {"active": False}
+    return {
+        "active": True,
+        "subject": values.get("session_subject") or None,
+        "started_at": values.get("session_started_at"),
+    }
 
 
 def _send_push_to_all(conn, payload: dict) -> int:

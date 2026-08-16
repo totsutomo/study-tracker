@@ -1108,6 +1108,16 @@ function syncFocusSessionServer(remainingSeconds, subject) {
   }).catch(() => {});
 }
 
+// JpBlocker(Android側のアプリブロック連携)向けに「今セッション中か」を反映する。上の
+// syncFocusSessionServerとは別物(あちらはカウントダウンのみ・push通知の保険用途)。こちらは
+// カウントアップ/カウントダウン問わず開始〜終了を送る。一時停止中は呼ばない(ブロック維持のため)。
+function syncSessionActiveFlag(active, subject) {
+  api("/api/focus-session/active", {
+    method: "POST",
+    body: JSON.stringify({ active, subject: subject || null }),
+  }).catch(() => {});
+}
+
 // timer state lives in plain JS vars, which a page reload (manual refresh, PWA relaunch,
 // server cold-start forcing a reconnect) wipes out; persist it so restoreSession() can rebuild
 // the running clock from wall-clock timestamps instead of losing it silently.
@@ -1195,6 +1205,7 @@ function beginSession(subject, todoId, mode, targetMs, clockOnly, trigger) {
   if (mode === "countdown") {
     syncFocusSessionServer(Math.round(targetMs / 1000), subject);
   }
+  syncSessionActiveFlag(true, subject);
 }
 
 function updateFocusDisplay() {
@@ -1444,6 +1455,7 @@ function resetSessionState() {
   if (wasCountdown) {
     syncFocusSessionServer(null, null);
   }
+  syncSessionActiveFlag(false, null);
 }
 
 function discardSession() {
@@ -1827,10 +1839,23 @@ async function loadMoodPanel() {
     minutesByDate[row.d] = (minutesByDate[row.d] || 0) + row.total_minutes;
   });
 
-  renderMoodChart(dates, dates.map((d) => (d in avgByDate ? avgByDate[d] : null)), entriesByDate, minutesByDate);
+  const dailyScreenTime = await api("/api/screen-time/daily?days=14");
+  const screenMinutesByDate = {};
+  dailyScreenTime.forEach((row) => {
+    screenMinutesByDate[row.date] = row.total_minutes;
+  });
+
+  renderMoodChart(
+    dates,
+    dates.map((d) => (d in avgByDate ? avgByDate[d] : null)),
+    entriesByDate,
+    minutesByDate,
+    screenMinutesByDate
+  );
   loadMoodStats();
   loadMoodReasonStats();
   loadLowMoodAchievement();
+  loadScreenTimeMoodCorrelation();
   loadStudyTriggerStats();
   loadSleepPanel();
 }
@@ -1849,6 +1874,17 @@ async function loadLowMoodAchievement() {
   else el.textContent = `${s.rate}% (${s.achieved_days}/${s.low_mood_days}日)`;
 }
 
+async function loadScreenTimeMoodCorrelation() {
+  const el = document.getElementById("mood-stat-screen-time-correlation");
+  if (!el) return;
+  const s = await api("/api/screen-time/mood-correlation?days=30");
+  if (s.status === "insufficient_data") {
+    el.textContent = "データ不足";
+  } else {
+    el.textContent = `少ない日${s.low_screen_time_avg_mood} / 多い日${s.high_screen_time_avg_mood}`;
+  }
+}
+
 async function loadMoodReasonStats() {
   const rows = await api("/api/mood-logs/reason-stats?days=30");
   const list = document.getElementById("mood-reason-stats");
@@ -1865,7 +1901,7 @@ async function loadMoodReasonStats() {
   });
 }
 
-function renderMoodChart(dates, scores, entriesByDate, minutesByDate) {
+function renderMoodChart(dates, scores, entriesByDate, minutesByDate, screenMinutesByDate) {
   const container = document.getElementById("mood-chart");
   const chartW = 320;
   const chartH = 70;
@@ -1894,6 +1930,32 @@ function renderMoodChart(dates, scores, entriesByDate, minutesByDate) {
     .map((d, i) => `<text x="${xs[i]}" y="${chartH - 1}" font-size="7" fill="var(--text-muted)" text-anchor="middle">${d.slice(8, 10)}</text>`)
     .join("");
 
+  // スクリーンタイム(JpBlocker連携、Part B)。棒(勉強時間)とは別軸で独立にスケーリングし、
+  // 点線で重ねて描画する(棒と同じ軸だと勉強時間より一桁大きくなりがちで潰れるため)。
+  let screenTimePath = "";
+  if (screenMinutesByDate) {
+    const screenValues = dates.map((d) => screenMinutesByDate[d]);
+    const hasScreenData = screenValues.some((v) => v != null);
+    if (hasScreenData) {
+      const maxScreenMinutes = Math.max(60, ...screenValues.filter((v) => v != null));
+      let d2 = "";
+      let drawing2 = false;
+      dates.forEach((d, i) => {
+        const minutes = screenValues[i];
+        if (minutes == null) {
+          drawing2 = false;
+          return;
+        }
+        const y = padTop + plotH - (minutes / maxScreenMinutes) * plotH;
+        d2 += `${drawing2 ? "L" : "M"}${xs[i]},${y} `;
+        drawing2 = true;
+      });
+      screenTimePath = d2
+        ? `<path d="${d2.trim()}" fill="none" stroke="var(--danger)" stroke-width="1.5" stroke-dasharray="3,2" stroke-linecap="round" stroke-linejoin="round"></path>`
+        : "";
+    }
+  }
+
   let pathD = "";
   let drawing = false;
   const dots = [];
@@ -1913,7 +1975,7 @@ function renderMoodChart(dates, scores, entriesByDate, minutesByDate) {
     ? `<path d="${pathD.trim()}" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>`
     : "";
 
-  container.innerHTML = `<svg viewBox="0 0 ${chartW} ${chartH}" class="study-svg-chart">${bars}${path}${dots.join("")}${axisLabels}</svg>`;
+  container.innerHTML = `<svg viewBox="0 0 ${chartW} ${chartH}" class="study-svg-chart">${bars}${screenTimePath}${path}${dots.join("")}${axisLabels}</svg>`;
 
   container.querySelectorAll("circle[data-date]").forEach((circle) => {
     circle.addEventListener("click", () => {
