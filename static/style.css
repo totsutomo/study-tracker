@@ -1485,11 +1485,13 @@ body.focus-open #tabbar {
 
 /* ---------- calendar (events) ---------- */
 
-/* 開いてすぐ「今日の予定」が見えるよう、月表示グリッドより上に配置している */
 .cal-day-detail h3:first-child {
   margin-top: 4px;
 }
 
+/* 以前はcal-day-detail(選択日の予定+期限タスク)をこのcal-board(月グリッド)より上に
+   置いていたが、件数が増えるとグリッド自体が下に押し出されてしまうため、2026-08-16に
+   HTML側の並び順をグリッド→詳細の順に入れ替えた。グリッドは常に画面上部に固定表示される。 */
 .cal-board {
   background: var(--card);
   border: 1px solid var(--border);
