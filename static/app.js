@@ -346,19 +346,19 @@ function renderTodoItem(t, list) {
         <div class="todo-card-main">
           <span class="todo-card-title">${priorityLabel}${escapeHtml(t.title)}${noteMark}</span>
           <span class="todo-card-meta">${t.category || ""} ${dueLabel}${recurLabel}</span>
+          ${showReschedule ? `
+            <div class="reschedule-row">
+              <button type="button" class="reschedule-btn" data-kind="+30">+30分</button>
+              <button type="button" class="reschedule-btn" data-kind="+60">+1時間</button>
+              <button type="button" class="reschedule-btn" data-kind="tomorrow">明日</button>
+            </div>
+          ` : ""}
         </div>
         <div class="todo-card-actions">
           ${!t.done && t.category ? `<button class="play-btn" title="記録開始">${ICONS.play}</button>` : ""}
           <button class="delete-btn" title="削除">${ICONS.trash}</button>
         </div>
       </div>
-      ${showReschedule ? `
-        <div class="reschedule-row">
-          <button type="button" class="reschedule-btn" data-kind="+30">+30分</button>
-          <button type="button" class="reschedule-btn" data-kind="+60">+1時間</button>
-          <button type="button" class="reschedule-btn" data-kind="tomorrow">明日</button>
-        </div>
-      ` : ""}
     </div>
   `;
   li.querySelector("input").addEventListener("click", (e) => {
@@ -1299,10 +1299,28 @@ function showMiniBar() {
   bar.style.setProperty("--subject-color", colorFor(timerSubject));
   updateMiniStatus();
   updateFocusDisplay();
+  raiseFabsAboveMiniBar();
 }
 
 function hideMiniBar() {
   document.getElementById("mini-timer-bar").classList.add("hidden");
+  resetFabPosition();
+}
+
+// 計測中はミニタイマーバーが画面下に浮くので、+ボタン(各タブに1つずつ、.fab)が
+// それと重ならないよう分だけ底上げする(2026-08-16)。
+function raiseFabsAboveMiniBar() {
+  const bar = document.getElementById("mini-timer-bar");
+  const barHeight = bar.getBoundingClientRect().height;
+  document.querySelectorAll(".fab").forEach((fab) => {
+    fab.style.bottom = `calc(92px + ${barHeight}px)`;
+  });
+}
+
+function resetFabPosition() {
+  document.querySelectorAll(".fab").forEach((fab) => {
+    fab.style.bottom = "";
+  });
 }
 
 function updateMiniStatus() {

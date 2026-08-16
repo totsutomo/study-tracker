@@ -511,7 +511,9 @@ h3 { font-size: 12px; color: var(--text-muted); margin: 20px 0 8px; text-transfo
 .reschedule-row {
   display: flex;
   gap: 6px;
-  padding-left: 26px;
+  /* todo-card-main内に移動(2026-08-16): 再生/削除ボタンがこのボタン列も含めた
+     カード全体の中央に来るように。以前はtodo-card-topの外の兄弟要素だったため
+     26pxの左paddingで見た目上位置を合わせていたが、今は親のgapで十分なので不要。 */
 }
 
 /* クイックアクション系のチップ(日付即入力・並べ替え等)は、トグル選択ではなく単発の
