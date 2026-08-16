@@ -1881,7 +1881,7 @@ async function loadScreenTimeMoodCorrelation() {
   if (s.status === "insufficient_data") {
     el.textContent = "データ不足";
   } else {
-    el.textContent = `少ない日${s.low_screen_time_avg_mood} / 多い日${s.high_screen_time_avg_mood}`;
+    el.textContent = `少ない日${s.low_screen_time_avg_minutes}分・気分${s.low_screen_time_avg_mood} / 多い日${s.high_screen_time_avg_minutes}分・気分${s.high_screen_time_avg_mood}`;
   }
 }
 
@@ -1982,12 +1982,14 @@ function renderMoodChart(dates, scores, entriesByDate, minutesByDate, screenMinu
       const { date: d, score } = circle.dataset;
       const entries = (entriesByDate[d] || []).slice().reverse();
       const detail = document.getElementById("mood-chart-detail");
+      const screenMinutes = screenMinutesByDate ? screenMinutesByDate[d] : null;
+      const screenText = screenMinutes != null ? ` ／ スクリーンタイム${screenMinutes}分` : "";
       if (entries.length === 0) {
-        detail.textContent = `${d} 気分平均: ${score}/10`;
+        detail.textContent = `${d} 気分平均: ${score}/10${screenText}`;
         return;
       }
       const lines = entries.map((e) => formatMoodEntryLine(e));
-      detail.textContent = `${d} 気分平均: ${score}/10 ／ ${lines.join(" ／ ")}`;
+      detail.textContent = `${d} 気分平均: ${score}/10 ／ ${lines.join(" ／ ")}${screenText}`;
     });
   });
 }
