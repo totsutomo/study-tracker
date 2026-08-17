@@ -372,6 +372,7 @@ def update_category(category_id: int, category: CategoryUpdate):
     conn.execute("UPDATE categories SET name = ? WHERE id = ?", (name, category_id))
     conn.execute("UPDATE todos SET category = ? WHERE category = ?", (name, old_name))
     conn.execute("UPDATE study_logs SET subject = ? WHERE subject = ?", (name, old_name))
+    conn.execute("UPDATE events SET category = ? WHERE category = ?", (name, old_name))
     conn.commit()
     conn.close()
     return {"id": category_id, "name": name}
