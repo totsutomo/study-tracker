@@ -28,7 +28,7 @@ function initCollapsibleSection(headerId, listId, label, defaultExpanded = false
   const list = document.getElementById(listId);
   header.classList.add("collapsible");
   function render() {
-    header.textContent = `${expanded ? "▼" : "▶"} ${label}(${count}件)`;
+    header.textContent = `${expanded ? "▼" : "▶"} ${label} (${count})`;
     list.style.display = expanded ? "" : "none";
   }
   header.addEventListener("click", () => {
@@ -42,9 +42,9 @@ function initCollapsibleSection(headerId, listId, label, defaultExpanded = false
   };
 }
 
-const updateStudyLogHeader = initCollapsibleSection("study-log-header", "study-log-list", "ログ履歴");
-const updateActivationListHeader = initCollapsibleSection("activation-list-header", "activation-list", "履歴");
-const updateSleepLogHeader = initCollapsibleSection("sleep-log-header", "sleep-log-list", "履歴");
+const updateStudyLogHeader = initCollapsibleSection("study-log-header", "study-log-list", "Log History");
+const updateActivationListHeader = initCollapsibleSection("activation-list-header", "activation-list", "History");
+const updateSleepLogHeader = initCollapsibleSection("sleep-log-header", "sleep-log-list", "History");
 
 // ---------- helpers ----------
 
@@ -196,7 +196,7 @@ function todayStr() {
 
 // ---------- todos ----------
 
-const PRIORITY_LABEL = { high: "高", medium: "中", low: "低" };
+const PRIORITY_LABEL = { high: "High", medium: "Med", low: "Low" };
 
 function nowHHMM() {
   const d = new Date();
@@ -212,7 +212,7 @@ function isOverdue(t) {
 }
 
 const WEEKDAY_ORDER = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
-const WEEKDAY_LABEL = { mon: "月", tue: "火", wed: "水", thu: "木", fri: "金", sat: "土", sun: "日" };
+const WEEKDAY_LABEL = { mon: "Mon", tue: "Tue", wed: "Wed", thu: "Thu", fri: "Fri", sat: "Sat", sun: "Sun" };
 
 // テキストに混ぜ込む小アイコン。絵文字はOS/端末で見た目がバラつく上ダークモードで浮くため、
 // 他のアイコンボタンと同じstroke SVGに統一している(class="inline-icon"でstyle.css側の余白調整)。
@@ -239,9 +239,9 @@ const ICONS = {
 function recurrenceLabel(recurrence) {
   if (!recurrence) return "";
   const days = recurrence.split(",");
-  if (days.length === 7) return ` ${ICONS.repeat}毎日`;
+  if (days.length === 7) return ` ${ICONS.repeat}Daily`;
   const weekdaysOnly = ["mon", "tue", "wed", "thu", "fri"];
-  if (days.length === 5 && weekdaysOnly.every((d) => days.includes(d))) return ` ${ICONS.repeat}平日`;
+  if (days.length === 5 && weekdaysOnly.every((d) => days.includes(d))) return ` ${ICONS.repeat}Weekdays`;
   const sorted = WEEKDAY_ORDER.filter((d) => days.includes(d));
   return ` ${ICONS.repeat}` + sorted.map((d) => WEEKDAY_LABEL[d]).join("");
 }
@@ -337,7 +337,7 @@ function renderTodoItem(t, list) {
   const dotColor = t.category ? colorFor(t.category) : "var(--border)";
   li.innerHTML = `
     <div class="todo-swipe-bg ${t.done ? "undo" : "complete"}">
-      ${t.done ? `${ICONS.repeat} 未完了に戻す` : `${ICONS.check} 完了にする`}
+      ${t.done ? `${ICONS.repeat} Mark incomplete` : `${ICONS.check} Mark complete`}
     </div>
     <div class="todo-swipe-content">
       <div class="todo-card-top">
@@ -348,15 +348,15 @@ function renderTodoItem(t, list) {
           <span class="todo-card-meta">${t.category || ""} ${dueLabel}${recurLabel}</span>
           ${showReschedule ? `
             <div class="reschedule-row">
-              <button type="button" class="reschedule-btn" data-kind="+30">+30分</button>
-              <button type="button" class="reschedule-btn" data-kind="+60">+1時間</button>
-              <button type="button" class="reschedule-btn" data-kind="tomorrow">明日</button>
+              <button type="button" class="reschedule-btn" data-kind="+30">+30 min</button>
+              <button type="button" class="reschedule-btn" data-kind="+60">+1 hr</button>
+              <button type="button" class="reschedule-btn" data-kind="tomorrow">Tomorrow</button>
             </div>
           ` : ""}
         </div>
         <div class="todo-card-actions">
-          ${!t.done && t.category ? `<button class="play-btn" title="記録開始">${ICONS.play}</button>` : ""}
-          <button class="delete-btn" title="削除">${ICONS.trash}</button>
+          ${!t.done && t.category ? `<button class="play-btn" title="Start recording">${ICONS.play}</button>` : ""}
+          <button class="delete-btn" title="Delete">${ICONS.trash}</button>
         </div>
       </div>
     </div>
@@ -428,12 +428,12 @@ function renderTodos() {
   todos.forEach((t) => groups[todoGroupOf(t)].push(t));
 
   const sections = [
-    ["overdue", "期限切れ"],
-    ["today", "今日"],
-    ["week", "今週"],
-    ["later", "それ以降"],
-    ["none", "期限なし"],
-    ["done", "完了"],
+    ["overdue", "Overdue"],
+    ["today", "Today"],
+    ["week", "This week"],
+    ["later", "Later"],
+    ["none", "No due date"],
+    ["done", "Done"],
   ];
 
   sections.forEach(([key, label]) => {
@@ -458,14 +458,14 @@ function renderTodos() {
   });
 
   if (todos.length === 0) {
-    groupsEl.innerHTML = "<p class='meta'>該当するタスクがありません</p>";
+    groupsEl.innerHTML = "<p class='meta'>No matching tasks</p>";
   }
 
   const deferCandidates = [...groups.overdue, ...groups.today].filter((t) => t.priority !== "high");
   const deferBtn = document.getElementById("defer-today-btn");
   deferBtn.classList.toggle("hidden", deferCandidates.length === 0);
   deferBtn.onclick = async () => {
-    if (!confirm(`優先度が高以外の${deferCandidates.length}件を明日に繰り越します`)) return;
+    if (!confirm(`Push ${deferCandidates.length} non-high-priority task(s) to tomorrow?`)) return;
     await Promise.all(
       deferCandidates.map((t) =>
         api(`/api/todos/${t.id}/due`, {
@@ -496,13 +496,13 @@ function renderTodoStats(stats) {
       <div class="stat-bar-row">
         <span class="meta">${d.d.slice(5)}</span>
         <div class="stat-bar-track"><div class="stat-bar-fill" style="width:${(d.c / maxDaily) * 100}%"></div></div>
-        <span class="meta">${d.c}件</span>
+        <span class="meta">${d.c}</span>
       </div>
     `)
     .join("");
   el.innerHTML = `
-    <p>累計達成: ${stats.done}/${stats.total}件(達成率 ${stats.rate}%)</p>
-    ${stats.daily.length ? `<p class="meta">直近7日の完了数</p>${barsHtml}` : ""}
+    <p>Completed: ${stats.done}/${stats.total} (${stats.rate}%)</p>
+    ${stats.daily.length ? `<p class="meta">Completions in the last 7 days</p>${barsHtml}` : ""}
   `;
 }
 
@@ -645,7 +645,7 @@ async function loadCategories() {
   const optionsHtml = cats.map((c) => `<option value="${escapeHtml(c.name)}">${escapeHtml(c.name)}</option>`).join("");
   addSelect.innerHTML = optionsHtml;
   detailSelect.innerHTML = optionsHtml;
-  filterSelect.innerHTML = `<option value="">カテゴリ: すべて</option>` + optionsHtml;
+  filterSelect.innerHTML = `<option value="">Category: All</option>` + optionsHtml;
   if (cats.some((c) => c.name === addCurrent)) addSelect.value = addCurrent;
   if (cats.some((c) => c.name === detailCurrent)) detailSelect.value = detailCurrent;
   filterSelect.value = filterCurrent;
@@ -655,7 +655,7 @@ function renderCategoryItem(cat, list) {
   const li = document.createElement("li");
   li.innerHTML = `
     <input type="text" class="category-name-input" value="${escapeHtml(cat.name)}">
-    <button class="delete-btn" title="削除">×</button>
+    <button class="delete-btn" title="Delete">×</button>
   `;
   const input = li.querySelector("input");
   input.addEventListener("change", async () => {
@@ -712,7 +712,7 @@ async function updateLastUpdated() {
   const el = document.getElementById("settings-last-updated");
   try {
     const { lastUpdated } = await api("/api/build-info");
-    el.textContent = `最終更新: ${new Date(lastUpdated).toLocaleString("ja-JP", {
+    el.textContent = `Last updated: ${new Date(lastUpdated).toLocaleString("en-NZ", {
       year: "numeric",
       month: "2-digit",
       day: "2-digit",
@@ -720,7 +720,7 @@ async function updateLastUpdated() {
       minute: "2-digit",
     })}`;
   } catch {
-    el.textContent = "最終更新: 取得できませんでした";
+    el.textContent = "Last updated: unavailable";
   }
 }
 updateLastUpdated();
@@ -735,11 +735,11 @@ document.getElementById("todo-time-toggle").addEventListener("click", () => {
     timeInput.value = "";
     notifySelect.style.display = "none";
     notifySelect.value = "";
-    toggleBtn.textContent = "+ 時刻を追加";
+    toggleBtn.textContent = "+ Add time";
   } else {
     timeInput.style.display = "";
     notifySelect.style.display = "";
-    toggleBtn.textContent = "− 時刻を削除";
+    toggleBtn.textContent = "− Remove time";
     timeInput.focus();
     if (timeInput.showPicker) {
       try {
@@ -761,11 +761,11 @@ document.getElementById("todo-detail-time-toggle").addEventListener("click", () 
     timeInput.value = "";
     notifySelect.style.display = "none";
     notifySelect.value = "";
-    toggleBtn.textContent = "+ 時刻を追加";
+    toggleBtn.textContent = "+ Add time";
   } else {
     timeInput.style.display = "";
     notifySelect.style.display = "";
-    toggleBtn.textContent = "− 時刻を削除";
+    toggleBtn.textContent = "− Remove time";
     timeInput.focus();
     if (timeInput.showPicker) {
       try {
@@ -800,7 +800,7 @@ guardedSubmit(document.getElementById("todo-form"), async (e) => {
   document.getElementById("todo-notify").value = "";
   document.getElementById("todo-notify").style.display = "none";
   document.getElementById("todo-note").value = "";
-  document.getElementById("todo-time-toggle").textContent = "+ 時刻を追加";
+  document.getElementById("todo-time-toggle").textContent = "+ Add time";
   setRecurrenceDays([]);
   closeTodoAddPanel();
   loadTodos();
@@ -822,13 +822,13 @@ function openTodoDetail(t) {
   if (t.due_time) {
     timeInput.style.display = "";
     notifySelect.style.display = "";
-    toggleBtn.textContent = "− 時刻を削除";
+    toggleBtn.textContent = "− Remove time";
     timeInput.value = t.due_time;
     notifySelect.value = t.notify_offset_minutes != null ? String(t.notify_offset_minutes) : "";
   } else {
     timeInput.style.display = "none";
     notifySelect.style.display = "none";
-    toggleBtn.textContent = "+ 時刻を追加";
+    toggleBtn.textContent = "+ Add time";
     timeInput.value = "";
     notifySelect.value = "";
   }
@@ -867,7 +867,7 @@ guardedSubmit(document.getElementById("todo-detail-form"), async (e) => {
     method: "PUT",
     body: JSON.stringify({ title, category, priority, due_date, due_time, recurrence, notify_offset_minutes, note }),
   });
-  document.getElementById("todo-detail-status").textContent = "保存しました";
+  document.getElementById("todo-detail-status").textContent = "Saved";
   loadTodos();
   loadCalendar();
   closeTodoDetail();
@@ -993,7 +993,7 @@ const startPanel = document.getElementById("start-panel");
 
 function openStartPanel(subject, todoId) {
   if (timerSubject) {
-    alert("すでにタイマーが動いています");
+    alert("A timer is already running");
     return;
   }
   pendingStart = { subject, todoId };
@@ -1056,7 +1056,7 @@ document.getElementById("start-begin-btn").addEventListener("click", () => {
   if (startMode === "countdown") {
     const minutes = parseInt(document.getElementById("start-duration-input").value, 10);
     if (!minutes || minutes <= 0) {
-      alert("時間(分)を入力してください");
+      alert("Please enter a duration (min)");
       return;
     }
     targetMs = minutes * 60000;
@@ -1277,7 +1277,7 @@ function openFocusOverlay() {
   document.getElementById("focus-subject-name").textContent = timerSubject;
   document.getElementById("focus-timer").style.color = color;
   document.getElementById("focus-ring-fill").style.stroke = color;
-  document.getElementById("focus-pause-btn").textContent = "一時停止";
+  document.getElementById("focus-pause-btn").textContent = "Pause";
   document.getElementById("focus-clockonly-badge").classList.toggle("hidden", !sessionClockOnly);
   document.getElementById("focus-keepawake-badge").classList.toggle("hidden", !sessionKeepAwake);
   const overlay = document.getElementById("focus-overlay");
@@ -1349,7 +1349,7 @@ function resetFabPosition() {
 }
 
 function updateMiniStatus() {
-  document.getElementById("mini-timer-status").textContent = isPaused ? "一時停止中" : "";
+  document.getElementById("mini-timer-status").textContent = isPaused ? "Paused" : "";
   document.getElementById("mini-pause-btn").textContent = isPaused ? "▶" : "⏸";
 }
 
@@ -1387,7 +1387,7 @@ function resumeSession() {
 
 function updatePauseUI() {
   const overlay = document.getElementById("focus-overlay");
-  document.getElementById("focus-pause-btn").textContent = isPaused ? "再開" : "一時停止";
+  document.getElementById("focus-pause-btn").textContent = isPaused ? "Resume" : "Pause";
   overlay.classList.toggle("paused", isPaused);
   updateMiniStatus();
   updateFocusDisplay();
@@ -1479,7 +1479,7 @@ function resetSessionState() {
 
 function discardSession() {
   if (!timerSubject) return;
-  if (!confirm("記録せずにこのセッションを破棄しますか?")) return;
+  if (!confirm("Discard this session without saving it?")) return;
   resetSessionState();
 }
 
@@ -1497,7 +1497,7 @@ async function finishSession(elapsedMinutes) {
       start_trigger: startTrigger,
     }),
   });
-  if (todoId && confirm("このタスクを完了にする?")) {
+  if (todoId && confirm("Mark this task complete?")) {
     await api(`/api/todos/${todoId}/toggle`, { method: "POST" });
     loadTodos();
     loadTodoStats();
@@ -1531,8 +1531,8 @@ async function notifyLocal(title, body) {
 
 function notifySessionEnd(subject) {
   if (navigator.vibrate) navigator.vibrate(SESSION_END_VIBRATE_PATTERN);
-  notifyLocal("Compass", `${subject}: 設定した時間が終了しました(停止するまで記録は続きます)`);
-  alert(`${subject}: 設定した時間が終了しました\n停止するまでそのまま記録が続きます`);
+  notifyLocal("Compass", `${subject}: time's up (still recording until you stop)`);
+  alert(`${subject}: time's up\nStill recording until you stop`);
 }
 
 document.getElementById("focus-stop-btn").addEventListener("click", async () => {
@@ -1641,7 +1641,7 @@ async function loadWeeklyChart() {
   });
   renderStudyChart(weeks, byBucket, subjectNames, {
     axisLabel: monthDayLabel,
-    detailLabel: (w) => `${monthDayLabel(w)}週`,
+    detailLabel: (w) => `Week of ${monthDayLabel(w)}`,
   });
 }
 
@@ -1701,14 +1701,14 @@ function renderStudyChart(buckets, byBucket, subjectNames, labelFns) {
   container.querySelectorAll("rect[data-subject]").forEach((rect) => {
     rect.addEventListener("click", () => {
       const { bucket, subject, minutes } = rect.dataset;
-      document.getElementById("study-chart-detail").textContent = `${labelFns.detailLabel(bucket)} ${subject}: ${minutes}分`;
+      document.getElementById("study-chart-detail").textContent = `${labelFns.detailLabel(bucket)} ${subject}: ${minutes} min`;
     });
   });
 }
 
 function updateChartTitle() {
   document.getElementById("study-chart-title").textContent =
-    chartGranularity === "day" ? "直近14日間" : `直近${WEEKLY_CHART_WEEKS}週間`;
+    chartGranularity === "day" ? "Last 14 days" : `Last ${WEEKLY_CHART_WEEKS} weeks`;
 }
 
 document.querySelectorAll(".period-btn").forEach((btn) => {
@@ -1727,8 +1727,8 @@ updateChartTitle();
 // ---------- weekly / monthly goal progress ----------
 
 function formatDuration(minutes) {
-  if (minutes < 60) return `${minutes}分`;
-  return `${(minutes / 60).toFixed(1)}時間`;
+  if (minutes < 60) return `${minutes} min`;
+  return `${(minutes / 60).toFixed(1)} hr`;
 }
 
 async function loadGoalProgress() {
@@ -1744,16 +1744,16 @@ async function loadGoalProgress() {
   const bannerFill = document.getElementById("daily-min-banner-fill");
   if (p.daily_minimum_minutes) {
     const reached = p.today_minutes >= p.daily_minimum_minutes;
-    const labelText = `${p.today_minutes} / ${p.daily_minimum_minutes}分${reached ? ` ${ICONS.check}` : ""}`;
+    const labelText = `${p.today_minutes} / ${p.daily_minimum_minutes} min${reached ? ` ${ICONS.check}` : ""}`;
     const fillPct = `${Math.min(100, (p.today_minutes / p.daily_minimum_minutes) * 100)}%`;
     dailyMinLabel.innerHTML = labelText;
     dailyMinFill.style.width = fillPct;
     banner.classList.remove("hidden");
     banner.classList.toggle("reached", reached);
-    bannerLabel.innerHTML = reached ? `今日の最低ライン ${labelText}` : `今日あと${p.daily_minimum_minutes - p.today_minutes}分`;
+    bannerLabel.innerHTML = reached ? `Today's minimum ${labelText}` : `${p.daily_minimum_minutes - p.today_minutes} min left today`;
     bannerFill.style.width = fillPct;
   } else {
-    dailyMinLabel.textContent = "未設定";
+    dailyMinLabel.textContent = "Not set";
     dailyMinFill.style.width = "0%";
     banner.classList.add("hidden");
   }
@@ -1765,15 +1765,15 @@ async function loadGoalProgress() {
   const monthGoalHours = p.monthly_goal_minutes ? p.monthly_goal_minutes / 60 : null;
 
   document.getElementById("week-progress-label").textContent = weekGoalHours
-    ? `${weekHours} / ${weekGoalHours}時間`
-    : `${weekHours}時間(目標未設定)`;
+    ? `${weekHours} / ${weekGoalHours} hr`
+    : `${weekHours} hr (no goal set)`;
   document.getElementById("week-progress-fill").style.width = weekGoalHours
     ? `${Math.min(100, (p.week_minutes / p.weekly_goal_minutes) * 100)}%`
     : "0%";
 
   document.getElementById("month-progress-label").textContent = monthGoalHours
-    ? `${monthHours} / ${monthGoalHours}時間`
-    : `${monthHours}時間(目標未設定)`;
+    ? `${monthHours} / ${monthGoalHours} hr`
+    : `${monthHours} hr (no goal set)`;
   document.getElementById("month-progress-fill").style.width = monthGoalHours
     ? `${Math.min(100, (p.month_minutes / p.monthly_goal_minutes) * 100)}%`
     : "0%";
@@ -1822,7 +1822,7 @@ function setSelectedMoodReason(reason) {
 function formatMoodEntryLine(entry) {
   const time = (entry.logged_at || "").slice(11, 16);
   const tags = [entry.reason, entry.note].filter(Boolean).join(" / ");
-  return `${time} 気分${entry.score}${tags ? `(${tags})` : ""}`;
+  return `${time} Mood ${entry.score}${tags ? `(${tags})` : ""}`;
 }
 
 async function loadMoodPanel() {
@@ -1833,10 +1833,10 @@ async function loadMoodPanel() {
   const status = document.getElementById("mood-today-status");
   const listEl = document.getElementById("mood-today-list");
   if (todayEntries.length > 0) {
-    status.textContent = `今日 ${todayEntries.length}件記録`;
+    status.textContent = `${todayEntries.length} entries today`;
     listEl.innerHTML = todayEntries.map((e) => `<div class="mood-today-entry">${formatMoodEntryLine(e)}</div>`).join("");
   } else {
-    status.textContent = "未記録";
+    status.textContent = "Not recorded";
     listEl.innerHTML = "";
   }
 
@@ -1888,9 +1888,9 @@ async function loadMoodStats() {
 async function loadLowMoodAchievement() {
   const s = await api("/api/mood-logs/low-mood-achievement?days=30");
   const el = document.getElementById("mood-stat-low-mood-rate");
-  if (s.status === "not_configured") el.textContent = "未設定";
-  else if (s.status === "insufficient_data") el.textContent = "データ不足";
-  else el.textContent = `${s.rate}% (${s.achieved_days}/${s.low_mood_days}日)`;
+  if (s.status === "not_configured") el.textContent = "Not set";
+  else if (s.status === "insufficient_data") el.textContent = "Not enough data";
+  else el.textContent = `${s.rate}% (${s.achieved_days}/${s.low_mood_days} days)`;
 }
 
 async function loadScreenTimeMoodCorrelation() {
@@ -1898,9 +1898,9 @@ async function loadScreenTimeMoodCorrelation() {
   if (!el) return;
   const s = await api("/api/screen-time/mood-correlation?days=30");
   if (s.status === "insufficient_data") {
-    el.textContent = "データ不足";
+    el.textContent = "Not enough data";
   } else {
-    el.textContent = `少ない日${s.low_screen_time_avg_minutes}分・気分${s.low_screen_time_avg_mood} / 多い日${s.high_screen_time_avg_minutes}分・気分${s.high_screen_time_avg_mood}`;
+    el.textContent = `Low screen time days: ${s.low_screen_time_avg_minutes} min, mood ${s.low_screen_time_avg_mood} / High screen time days: ${s.high_screen_time_avg_minutes} min, mood ${s.high_screen_time_avg_mood}`;
   }
 }
 
@@ -1915,7 +1915,7 @@ async function loadMoodReasonStats() {
   list.classList.remove("hidden");
   rows.forEach((r) => {
     const li = document.createElement("li");
-    li.textContent = `${r.reason} 平均${r.avg_score} (${r.count}件)`;
+    li.textContent = `${r.reason} avg ${r.avg_score} (${r.count})`;
     list.appendChild(li);
   });
 }
@@ -2002,13 +2002,13 @@ function renderMoodChart(dates, scores, entriesByDate, minutesByDate, screenMinu
       const entries = (entriesByDate[d] || []).slice().reverse();
       const detail = document.getElementById("mood-chart-detail");
       const screenMinutes = screenMinutesByDate ? screenMinutesByDate[d] : null;
-      const screenText = screenMinutes != null ? ` ／ スクリーンタイム${screenMinutes}分` : "";
+      const screenText = screenMinutes != null ? ` / Screen time ${screenMinutes} min` : "";
       if (entries.length === 0) {
-        detail.textContent = `${d} 気分平均: ${score}/10${screenText}`;
+        detail.textContent = `${d} Mood avg: ${score}/10${screenText}`;
         return;
       }
       const lines = entries.map((e) => formatMoodEntryLine(e));
-      detail.textContent = `${d} 気分平均: ${score}/10 ／ ${lines.join(" ／ ")}${screenText}`;
+      detail.textContent = `${d} Mood avg: ${score}/10 / ${lines.join(" / ")}${screenText}`;
     });
   });
 }
@@ -2063,12 +2063,12 @@ async function loadStudySummary() {
   const list = document.getElementById("study-summary");
   list.innerHTML = "";
   if (summary.length === 0) {
-    list.innerHTML = "<li>まだ記録がありません</li>";
+    list.innerHTML = "<li>No records yet</li>";
     return;
   }
   summary.forEach((s) => {
     const li = document.createElement("li");
-    li.innerHTML = `<span>${s.subject}</span><span class="meta">${s.total_minutes}分</span>`;
+    li.innerHTML = `<span>${s.subject}</span><span class="meta">${s.total_minutes} min</span>`;
     list.appendChild(li);
   });
 }
@@ -2076,9 +2076,9 @@ async function loadStudySummary() {
 function formatLogDuration(minutes) {
   const h = Math.floor(minutes / 60);
   const m = minutes % 60;
-  if (h === 0) return `${m}分`;
-  if (m === 0) return `${h}時間`;
-  return `${h}時間${m}分`;
+  if (h === 0) return `${m} min`;
+  if (m === 0) return `${h} hr`;
+  return `${h} hr ${m} min`;
 }
 
 function formatLoggedAt(s) {
@@ -2102,7 +2102,7 @@ async function loadStudyLogList() {
         <span class="log-time">${formatLoggedAt(l.logged_at)}</span>
       </span>
       <span class="log-duration">${formatLogDuration(l.minutes)}</span>
-      <button class="delete-btn" title="削除">×</button>
+      <button class="delete-btn" title="Delete">×</button>
     `;
     li.querySelector(".delete-btn").addEventListener("click", async () => {
       await api(`/api/study-logs/${l.id}`, { method: "DELETE" });
@@ -2122,12 +2122,12 @@ let lastCountdown = null;
 function renderCountdown(c) {
   lastCountdown = c;
   document.getElementById("countdown").innerHTML =
-    `${escapeHtml(c.label)}まで<br><span class="days">${c.days_left}日</span>`;
+    `Until ${escapeHtml(c.label)}<br><span class="days">${c.days_left} days</span>`;
   // 起動画面の「あと◯◯日」にも同じ値を反映する(同じAPIを二重に叩かないよう共用)
   const bootDays = document.getElementById("boot-goal-days");
   if (bootDays) bootDays.textContent = c.days_left;
   const bootLabel = document.getElementById("boot-goal-label");
-  if (bootLabel) bootLabel.textContent = `${c.label}まで`;
+  if (bootLabel) bootLabel.textContent = `Until ${c.label}`;
 }
 
 async function loadCountdown() {
@@ -2167,7 +2167,7 @@ async function loadGoals() {
     li.innerHTML = `
       <input type="checkbox" ${g.done ? "checked" : ""}>
       <span>${escapeHtml(g.title)}</span>
-      <button class="delete-btn" title="削除">×</button>
+      <button class="delete-btn" title="Delete">×</button>
     `;
     li.querySelector("input").addEventListener("click", async () => {
       await api(`/api/goals/${g.id}/toggle`, { method: "POST" });
@@ -2182,7 +2182,7 @@ async function loadGoals() {
   const doneCount = goals.filter((g) => g.done).length;
   const pct = goals.length ? Math.round((doneCount / goals.length) * 100) : 0;
   document.getElementById("goal-progress").textContent =
-    goals.length ? `達成率: ${doneCount}/${goals.length} (${pct}%)` : "";
+    goals.length ? `Achieved: ${doneCount}/${goals.length} (${pct}%)` : "";
 }
 
 guardedSubmit(document.getElementById("goal-form"), async (e) => {
@@ -2210,7 +2210,7 @@ function updateActivationBanner() {
   }
   const triggered = new Date(activationActiveLog.triggered_at.replace(" ", "T"));
   const elapsedMin = Math.max(0, Math.floor((Date.now() - triggered.getTime()) / 60000));
-  label.innerHTML = `${ICONS.alert} 発動中・経過 ${formatLogDuration(elapsedMin)}`;
+  label.innerHTML = `${ICONS.alert} Active · elapsed ${formatLogDuration(elapsedMin)}`;
   banner.classList.remove("hidden");
 }
 
@@ -2222,9 +2222,9 @@ async function loadActivationActive() {
   const settingsReturnBtn = document.getElementById("settings-activation-return-btn");
   if (activationActiveLog) {
     btn.classList.add("active");
-    btn.title = "タップで復帰を記録";
+    btn.title = "Tap to log return";
     const noteText = activationActiveLog.note ? ` ${activationActiveLog.note}` : "";
-    const label = `発動中: ${formatLoggedAt(activationActiveLog.triggered_at)}〜${noteText}`;
+    const label = `Active: ${formatLoggedAt(activationActiveLog.triggered_at)}〜${noteText}`;
     statusEl.textContent = label;
     settingsStatusEl.textContent = label;
     settingsReturnBtn.classList.remove("hidden");
@@ -2235,7 +2235,7 @@ async function loadActivationActive() {
     btn.classList.remove("active");
     btn.title = "";
     statusEl.textContent = "";
-    settingsStatusEl.textContent = "発動中ではありません";
+    settingsStatusEl.textContent = "Not currently active";
     settingsReturnBtn.classList.add("hidden");
     if (activationTickInterval) {
       clearInterval(activationTickInterval);
@@ -2256,9 +2256,9 @@ async function returnActivation() {
 
 async function loadActivationStats() {
   const s = await api("/api/activation-logs/stats");
-  document.getElementById("activation-stat-week").textContent = `${s.week_count}件`;
-  document.getElementById("activation-stat-month").textContent = `${s.month_count}件`;
-  document.getElementById("activation-stat-total").textContent = `${s.total_count}件`;
+  document.getElementById("activation-stat-week").textContent = `${s.week_count}`;
+  document.getElementById("activation-stat-month").textContent = `${s.month_count}`;
+  document.getElementById("activation-stat-total").textContent = `${s.total_count}`;
 }
 
 async function loadActivationPostReturnStats() {
@@ -2267,8 +2267,8 @@ async function loadActivationPostReturnStats() {
   if (!el) return;
   el.textContent =
     s.count > 0
-      ? `復帰後の学習(直近30日): 平均${s.avg_minutes}分 (${s.count}件)`
-      : "復帰後の学習(直近30日): データなし";
+      ? `Study after return (last 30 days): avg ${s.avg_minutes} min (${s.count})`
+      : "Study after return (last 30 days): no data";
 }
 
 async function loadActivationMoodReasons() {
@@ -2282,7 +2282,7 @@ async function loadActivationMoodReasons() {
   list.classList.remove("hidden");
   rows.forEach((r) => {
     const li = document.createElement("li");
-    li.textContent = `${r.mood_reason} ${r.count}件`;
+    li.textContent = `${r.mood_reason} ${r.count}`;
     list.appendChild(li);
   });
 }
@@ -2298,7 +2298,7 @@ async function loadStudyTriggerStats() {
   list.classList.remove("hidden");
   rows.forEach((r) => {
     const li = document.createElement("li");
-    li.textContent = `${r.start_trigger} ${r.count}件`;
+    li.textContent = `${r.start_trigger} ${r.count}`;
     list.appendChild(li);
   });
 }
@@ -2309,17 +2309,17 @@ async function loadActivationList() {
   list.innerHTML = "";
   updateActivationListHeader(logs.length);
   if (logs.length === 0) {
-    list.innerHTML = "<li>記録がありません</li>";
+    list.innerHTML = "<li>No records</li>";
     return;
   }
   logs.forEach((l) => {
     const li = document.createElement("li");
-    const returnedPart = l.returned_at ? `→ ${formatLoggedAt(l.returned_at)}` : "進行中";
+    const returnedPart = l.returned_at ? `→ ${formatLoggedAt(l.returned_at)}` : "In progress";
     const noteMark = l.note ? `<span class="meta">${escapeHtml(l.note)}</span>` : "";
     let postReturnMark = "";
     if (l.returned_at) {
       const label =
-        l.post_return_minutes > 0 ? `復帰後${l.post_return_minutes}分学習` : "学習記録なし";
+        l.post_return_minutes > 0 ? `${l.post_return_minutes} min studied after return` : "No study logged";
       postReturnMark = `<span class="meta">${label}</span>`;
     }
     li.innerHTML = `
@@ -2328,7 +2328,7 @@ async function loadActivationList() {
         ${noteMark}
         ${postReturnMark}
       </span>
-      <button class="delete-btn" title="削除">×</button>
+      <button class="delete-btn" title="Delete">×</button>
     `;
     li.querySelector(".delete-btn").addEventListener("click", async () => {
       await api(`/api/activation-logs/${l.id}`, { method: "DELETE" });
@@ -2386,7 +2386,7 @@ document.querySelectorAll("#activation-reason-picker .reason-btn").forEach((btn)
 function openActivationPanel() {
   activationPanel.classList.remove("hidden");
   activationBackdrop.classList.remove("hidden");
-  document.getElementById("activation-time-preview").textContent = `記録時刻: ${nowHHMM()}`;
+  document.getElementById("activation-time-preview").textContent = `Time: ${nowHHMM()}`;
   document.getElementById("activation-note").value = "";
   activationSelectedMood = null;
   activationSelectedReason = null;
@@ -2434,7 +2434,7 @@ document.getElementById("activation-export-btn").addEventListener("click", async
   const since = `${addDaysToDate(todayStr(), -6)} 00:00:00`;
   const { text, count } = await api(`/api/activation-logs/export?since=${encodeURIComponent(since)}`);
   const textarea = document.getElementById("activation-export-text");
-  textarea.value = count ? text : "直近7日分の記録はありません";
+  textarea.value = count ? text : "No records in the last 7 days";
   textarea.classList.remove("hidden");
   document.getElementById("activation-copy-btn").classList.toggle("hidden", count === 0);
 });
@@ -2444,12 +2444,12 @@ document.getElementById("activation-copy-btn").addEventListener("click", async (
   const copyBtn = document.getElementById("activation-copy-btn");
   try {
     await navigator.clipboard.writeText(textarea.value);
-    copyBtn.textContent = "コピーしました";
+    copyBtn.textContent = "Copied";
   } catch {
     textarea.select();
-    copyBtn.textContent = "手動でコピーしてください";
+    copyBtn.textContent = "Please copy manually";
   }
-  setTimeout(() => { copyBtn.textContent = "コピー"; }, 1500);
+  setTimeout(() => { copyBtn.textContent = "Copy"; }, 1500);
 });
 
 // ---------- sleep logs ----------
@@ -2469,7 +2469,7 @@ function updateSleepBanner() {
   }
   const bedtime = new Date(sleepActiveLog.bedtime_at.replace(" ", "T"));
   const elapsedMin = Math.max(0, Math.floor((Date.now() - bedtime.getTime()) / 60000));
-  label.innerHTML = `${ICONS.moon} 就寝中・経過 ${formatLogDuration(elapsedMin)}`;
+  label.innerHTML = `${ICONS.moon} Sleeping · elapsed ${formatLogDuration(elapsedMin)}`;
   banner.classList.remove("hidden");
 }
 
@@ -2495,8 +2495,8 @@ async function loadSleepActive() {
   const settingsWakeBtn = document.getElementById("settings-sleep-wake-btn");
   if (sleepActiveLog) {
     btn.classList.add("active");
-    btn.title = "タップで起床を記録";
-    settingsStatusEl.textContent = `就寝中: ${formatLoggedAt(sleepActiveLog.bedtime_at)}〜`;
+    btn.title = "Tap to log wake-up";
+    settingsStatusEl.textContent = `Sleeping since: ${formatLoggedAt(sleepActiveLog.bedtime_at)}〜`;
     settingsWakeBtn.classList.remove("hidden");
     if (!sleepTickInterval) {
       sleepTickInterval = setInterval(updateSleepBanner, 30000);
@@ -2504,7 +2504,7 @@ async function loadSleepActive() {
   } else {
     btn.classList.remove("active");
     btn.title = "";
-    settingsStatusEl.textContent = "就寝中ではありません";
+    settingsStatusEl.textContent = "Not currently sleeping";
     settingsWakeBtn.classList.add("hidden");
     if (sleepTickInterval) {
       clearInterval(sleepTickInterval);
@@ -2542,7 +2542,7 @@ function renderSleepStats(logs, stats) {
   lastNightEl.textContent = lastCompleted
     ? formatLogDuration(sleepDurationMinutes(lastCompleted.bedtime_at, lastCompleted.wake_at))
     : "-";
-  avgEl.textContent = stats.count > 0 ? `${formatLogDuration(Math.round(stats.avg_minutes))} (${stats.count}件)` : "データなし";
+  avgEl.textContent = stats.count > 0 ? `${formatLogDuration(Math.round(stats.avg_minutes))} (${stats.count})` : "No data";
 }
 
 function renderSleepLogList(logs) {
@@ -2550,28 +2550,28 @@ function renderSleepLogList(logs) {
   list.innerHTML = "";
   updateSleepLogHeader(logs.length);
   if (logs.length === 0) {
-    list.innerHTML = "<li>記録がありません</li>";
+    list.innerHTML = "<li>No records</li>";
     return;
   }
   logs.forEach((l) => {
     const li = document.createElement("li");
     const minutes = sleepDurationMinutes(l.bedtime_at, l.wake_at);
-    const durationLabel = minutes != null ? ` (${formatLogDuration(minutes)})` : " (就寝中)";
+    const durationLabel = minutes != null ? ` (${formatLogDuration(minutes)})` : " (sleeping)";
     li.innerHTML = `
       <span class="log-info">
         <span>${formatLoggedAt(l.bedtime_at)} → ${l.wake_at ? formatLoggedAt(l.wake_at) : "..."}${durationLabel}</span>
       </span>
-      <button class="edit-btn icon-btn" title="編集">
+      <button class="edit-btn icon-btn" title="Edit">
         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
              stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
           <path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/>
         </svg>
       </button>
-      <button class="delete-btn" title="削除">×</button>
+      <button class="delete-btn" title="Delete">×</button>
       <div class="sleep-edit-row hidden">
         <input type="datetime-local" class="sleep-edit-bedtime" value="${toDatetimeLocalValue(l.bedtime_at)}">
         <input type="datetime-local" class="sleep-edit-wake" value="${toDatetimeLocalValue(l.wake_at)}">
-        <button type="button" class="quick-date-btn sleep-edit-save">保存</button>
+        <button type="button" class="quick-date-btn sleep-edit-save">Save</button>
       </div>
     `;
     li.querySelector(".edit-btn").addEventListener("click", () => {
@@ -2626,9 +2626,9 @@ async function renderBedtimeCarryoverList() {
     li.innerHTML = `
       <span class="log-info"><span>${escapeHtml(t.title)}</span></span>
       <div class="bedtime-actions">
-        <button type="button" class="reschedule-btn" data-action="tomorrow">明日へ</button>
-        <button type="button" class="reschedule-btn" data-action="keep">そのまま</button>
-        <button type="button" class="reschedule-btn danger-text" data-action="delete">削除</button>
+        <button type="button" class="reschedule-btn" data-action="tomorrow">To tomorrow</button>
+        <button type="button" class="reschedule-btn" data-action="keep">Keep as is</button>
+        <button type="button" class="reschedule-btn danger-text" data-action="delete">Delete</button>
       </div>
     `;
     li.querySelector('[data-action="tomorrow"]').addEventListener("click", async () => {
@@ -2712,7 +2712,7 @@ function populateEventCategorySelect(cats) {
     const select = document.getElementById(id);
     const previous = select.value;
     select.innerHTML =
-      `<option value="">カテゴリ: なし</option>` +
+      `<option value="">Category: None</option>` +
       cats.map((c) => `<option value="${escapeHtml(c.name)}">${escapeHtml(c.name)}</option>`).join("");
     if (cats.some((c) => c.name === previous)) select.value = previous;
   });
@@ -2762,12 +2762,16 @@ function mondayOf(dateStr) {
   return addDaysToDate(dateStr, -dow);
 }
 
-const CAL_WEEKDAY_JA = ["日", "月", "火", "水", "木", "金", "土"];
+const CAL_WEEKDAY_EN = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const CAL_MONTH_EN = [
+  "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December",
+];
 
 function formatCalDetailTitle(dateStr) {
   const d = new Date(dateStr + "T00:00:00");
-  const label = `${d.getMonth() + 1}月${d.getDate()}日(${CAL_WEEKDAY_JA[d.getDay()]})`;
-  return dateStr === todayStr() ? `${label} ・ 今日` : label;
+  const label = `${CAL_MONTH_EN[d.getMonth()]} ${d.getDate()} (${CAL_WEEKDAY_EN[d.getDay()]})`;
+  return dateStr === todayStr() ? `${label} · Today` : label;
 }
 
 // 予定タブは起動時にアクティブでないため後回しにされがちで、実際に開いたときに
@@ -2784,7 +2788,7 @@ async function hydrateCalendarFromCache() {
   ]);
   if (!events && !todos) return false;
   try {
-    document.getElementById("cal-month-label").textContent = `${calYear}年${calMonth}月`;
+    document.getElementById("cal-month-label").textContent = `${CAL_MONTH_EN[calMonth - 1]} ${calYear}`;
     calEventsCache = events || [];
     calTodosCache = (todos || []).filter((t) => t.due_date);
     calStudyDaysCache = new Set(studyDays || []);
@@ -2824,10 +2828,10 @@ function updateCalMonthLabel() {
     const endD = new Date(weekEnd + "T00:00:00");
     document.getElementById("cal-month-label").textContent =
       startD.getMonth() === endD.getMonth()
-        ? `${startD.getFullYear()}年${startD.getMonth() + 1}月${startD.getDate()}日〜${endD.getDate()}日`
-        : `${startD.getFullYear()}年${startD.getMonth() + 1}月${startD.getDate()}日〜${endD.getMonth() + 1}月${endD.getDate()}日`;
+        ? `${CAL_MONTH_EN[startD.getMonth()]} ${startD.getDate()}〜${endD.getDate()}, ${startD.getFullYear()}`
+        : `${CAL_MONTH_EN[startD.getMonth()]} ${startD.getDate()} 〜 ${CAL_MONTH_EN[endD.getMonth()]} ${endD.getDate()}, ${startD.getFullYear()}`;
   } else {
-    document.getElementById("cal-month-label").textContent = `${calYear}年${calMonth}月`;
+    document.getElementById("cal-month-label").textContent = `${CAL_MONTH_EN[calMonth - 1]} ${calYear}`;
   }
 }
 
@@ -2941,7 +2945,7 @@ function renderCalGrid() {
         const e = dayEvents[0];
         eventMark = `
           <span class="cal-event-label" style="color:${colorFor(e.category || "")}">${escapeHtml(e.title)}</span>
-          <span class="cal-event-more">+${dayEvents.length - 1}件</span>
+          <span class="cal-event-more">+${dayEvents.length - 1} more</span>
         `;
       }
       const todoMark = dayTodos.length ? `<span class="cal-todo-dot"></span>` : "";
@@ -3096,7 +3100,7 @@ function renderCalDayDetail() {
   const eventList = document.getElementById("cal-event-list");
   const todoList = document.getElementById("cal-todo-list");
   if (!selectedCalDate) {
-    title.textContent = "日付を選んでください";
+    title.textContent = "Select a date";
     eventList.innerHTML = "";
     todoList.innerHTML = "";
     return;
@@ -3108,7 +3112,7 @@ function renderCalDayDetail() {
     .sort((a, b) => a.start_time.localeCompare(b.start_time));
   eventList.innerHTML = "";
   if (dayEvents.length === 0) {
-    eventList.innerHTML = "<li>予定はありません</li>";
+    eventList.innerHTML = "<li>No events</li>";
   }
   dayEvents.forEach((ev) => {
     const li = document.createElement("li");
@@ -3119,11 +3123,11 @@ function renderCalDayDetail() {
         <span class="log-subject">${escapeHtml(ev.title)}${noteMark}</span>
         <span class="log-time">${ev.start_time}〜${ev.end_time}${ev.recurrence ? ` ${ICONS.repeat}` : ""}</span>
       </span>
-      <button class="delete-btn" title="削除">×</button>
+      <button class="delete-btn" title="Delete">×</button>
     `;
     li.querySelector(".delete-btn").addEventListener("click", async (e) => {
       e.stopPropagation();
-      if (ev.recurrence && !confirm("繰り返し予定です。この予定シリーズ全体を削除しますか?")) return;
+      if (ev.recurrence && !confirm("This is a recurring event. Delete the entire series?")) return;
       await api(`/api/events/${ev.id}`, { method: "DELETE" });
       loadCalendar();
     });
@@ -3135,7 +3139,7 @@ function renderCalDayDetail() {
   const dayTodos = calTodosCache.filter((t) => t.due_date === selectedCalDate);
   todoList.innerHTML = "";
   if (dayTodos.length === 0) {
-    todoList.innerHTML = "<li>期限のタスクはありません</li>";
+    todoList.innerHTML = "<li>No tasks due</li>";
   }
   dayTodos.forEach((t) => {
     const li = document.createElement("li");
@@ -3436,7 +3440,7 @@ guardedSubmit(document.getElementById("event-detail-form"), async (e) => {
       note,
     }),
   });
-  document.getElementById("event-detail-status").textContent = "保存しました";
+  document.getElementById("event-detail-status").textContent = "Saved";
   closeEventDetail();
   loadCalendar();
 });
@@ -3464,25 +3468,25 @@ async function updatePushStatus() {
   const statusEl = document.getElementById("push-status");
   const btn = document.getElementById("push-toggle-btn");
   if (!pushSupported()) {
-    statusEl.textContent = "この端末/ブラウザは通知に対応していません";
+    statusEl.textContent = "This device/browser doesn't support notifications";
     btn.disabled = true;
     return;
   }
   const sub = await getPushSubscription();
-  statusEl.textContent = sub ? "通知は有効です" : "通知は無効です";
-  btn.textContent = sub ? "通知を無効にする" : "通知を有効にする";
+  statusEl.textContent = sub ? "Notifications are on" : "Notifications are off";
+  btn.textContent = sub ? "Turn off notifications" : "Turn on notifications";
   btn.disabled = false;
 }
 
 async function enablePush() {
   const permission = await Notification.requestPermission();
   if (permission !== "granted") {
-    alert("通知が許可されませんでした");
+    alert("Notification permission was not granted");
     return;
   }
   const { publicKey } = await api("/api/push/vapid-public-key");
   if (!publicKey) {
-    alert("サーバー側の通知設定が未完了です");
+    alert("Server-side notification setup isn't complete");
     return;
   }
   const reg = await navigator.serviceWorker.ready;

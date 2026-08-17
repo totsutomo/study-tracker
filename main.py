@@ -847,9 +847,9 @@ def export_activation_logs(since: str | None = None):
     for r in rows:
         triggered = r["triggered_at"][:16]
         note = r["note"] or ""
-        line = f"- 発動 {triggered} きっかけ: {note}"
+        line = f"- Activation {triggered} trigger: {note}"
         if r["returned_at"]:
-            line += f" / 復帰 {r['returned_at'][:16]}"
+            line += f" / Return {r['returned_at'][:16]}"
         lines.append(line)
     return {"text": "\n".join(lines), "count": len(lines)}
 
@@ -1089,7 +1089,7 @@ def delete_goal(goal_id: int):
     return {"ok": True}
 
 
-DEFAULT_COUNTDOWN_LABEL = "英検準1級・C1 目標(留学終了)"
+DEFAULT_COUNTDOWN_LABEL = "Eiken Pre-1 / CEFR C1 goal (end of study abroad)"
 DEFAULT_COUNTDOWN_TARGET_DATE = date(2026, 11, 30)
 
 
@@ -1364,7 +1364,7 @@ def push_check(token: str | None = None):
         notify_at = due_dt - timedelta(minutes=todo["notify_offset_minutes"])
         if notify_at <= now:
             sent_count += _send_push_to_all(conn, {
-                "title": "ToDoの期限",
+                "title": "Task due",
                 "body": todo["title"],
                 "tag": f"todo-{todo['id']}",
             })
@@ -1399,7 +1399,7 @@ def push_check(token: str | None = None):
             notify_at = start_dt - timedelta(minutes=event["notify_offset_minutes"])
             if notify_at <= now:
                 sent_count += _send_push_to_all(conn, {
-                    "title": "予定",
+                    "title": "Event",
                     "body": event["title"],
                     "tag": f"event-{event['id']}-{occ_date.isoformat()}",
                 })
@@ -1416,8 +1416,8 @@ def push_check(token: str | None = None):
         triggered_dt = datetime.fromisoformat(act["triggered_at"].replace(" ", "T"))
         if now - triggered_dt >= timedelta(minutes=ACTIVATION_REMINDER_MINUTES):
             sent_count += _send_push_to_all(conn, {
-                "title": "発動ログ",
-                "body": "まだ復帰の記録がないよ",
+                "title": "Activation Log",
+                "body": "You haven't logged your return yet",
                 "tag": f"activation-{act['id']}",
             })
             conn.execute(
@@ -1465,7 +1465,7 @@ def push_check(token: str | None = None):
             if notably_fewer or notably_later:
                 sent_count += _send_push_to_all(conn, {
                     "title": "Compass",
-                    "body": "今日は少し記録が静かだね。無理のない範囲で大丈夫だよ",
+                    "body": "It's been a bit quiet today. No pressure, take it easy",
                     "tag": "activation-encouragement",
                 })
                 conn.execute(
@@ -1485,8 +1485,8 @@ def push_check(token: str | None = None):
             ).fetchone()
             if not last_notified_row or last_notified_row[0] != today_str:
                 sent_count += _send_push_to_all(conn, {
-                    "title": "今日の気持ち",
-                    "body": "今日の気分がまだ記録されていないよ",
+                    "title": "Today's Mood",
+                    "body": "You haven't logged your mood today yet",
                     "tag": "mood-reminder",
                 })
                 conn.execute(
@@ -1504,7 +1504,7 @@ def push_check(token: str | None = None):
         if datetime.fromisoformat(focus_end_at) <= now:
             sent_count += _send_push_to_all(conn, {
                 "title": "Compass",
-                "body": f"{focus_rows.get('focus_target_subject') or '学習'}: 設定した時間が終了しました",
+                "body": f"{focus_rows.get('focus_target_subject') or 'Study'}: time's up",
                 "tag": "focus-session",
             })
             conn.execute(

@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="ja">
+<html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -17,17 +17,17 @@
 
 <div id="boot-loading" class="boot-loading">
   <div class="boot-goal">
-    <div class="boot-goal-label" id="boot-goal-label">目標まで</div>
+    <div class="boot-goal-label" id="boot-goal-label">Until goal</div>
     <div class="boot-goal-days">
       <span class="boot-goal-number" id="boot-goal-days">--</span>
-      <span class="boot-goal-unit">日</span>
+      <span class="boot-goal-unit">days</span>
     </div>
   </div>
   <div class="boot-spinner"></div>
 </div>
 
 <header>
-  <button type="button" id="settings-btn" class="icon-btn" aria-label="設定">
+  <button type="button" id="settings-btn" class="icon-btn" aria-label="Settings">
     <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor"
          stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
       <circle cx="12" cy="12" r="3"/>
@@ -35,7 +35,7 @@
     </svg>
   </button>
   <h1>Compass</h1>
-  <button type="button" id="sleep-btn" class="icon-btn sleep-btn" aria-label="就寝記録">
+  <button type="button" id="sleep-btn" class="icon-btn sleep-btn" aria-label="Sleep log">
     <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor"
          stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
       <path d="M2 18v3"/>
@@ -44,7 +44,7 @@
       <path d="M22 18v3"/>
     </svg>
   </button>
-  <button type="button" id="activation-btn" class="icon-btn activation-btn" aria-label="発動ログ">
+  <button type="button" id="activation-btn" class="icon-btn activation-btn" aria-label="Activation log">
     <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor"
          stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
       <circle cx="12" cy="12" r="10"/>
@@ -78,210 +78,210 @@
           <circle cx="11" cy="11" r="7"/>
           <line x1="21" y1="21" x2="16.65" y2="16.65"/>
         </svg>
-        <input type="text" id="todo-search" placeholder="検索">
+        <input type="text" id="todo-search" placeholder="Search">
       </div>
       <select id="todo-filter-category">
-        <option value="">カテゴリ: すべて</option>
-        <option value="英語">英語</option>
-        <option value="数学">数学</option>
-        <option value="世界史">世界史</option>
-        <option value="その他">その他</option>
+        <option value="">Category: All</option>
+        <option value="英語">English</option>
+        <option value="数学">Math</option>
+        <option value="世界史">World History</option>
+        <option value="その他">Other</option>
       </select>
-      <label class="checkbox-label"><input type="checkbox" id="todo-filter-today"> 今日の分だけ</label>
+      <label class="checkbox-label"><input type="checkbox" id="todo-filter-today"> Today only</label>
     </div>
 
-    <button type="button" id="defer-today-btn" class="quick-date-btn hidden">今日はここまで(優先度低〜中を明日へ)</button>
+    <button type="button" id="defer-today-btn" class="quick-date-btn hidden">Done for today (push low/med priority to tomorrow)</button>
 
     <div id="todo-groups"></div>
 
-    <h3>完了実績</h3>
+    <h3>Completed</h3>
     <div id="todo-stats"></div>
 
-    <button type="button" id="todo-fab" class="fab" aria-label="タスクを追加">+</button>
+    <button type="button" id="todo-fab" class="fab" aria-label="Add task">+</button>
 
     <div id="todo-add-backdrop" class="backdrop hidden"></div>
     <div id="todo-add-panel" class="add-panel hidden">
       <div class="panel-header">
-        <h3>新しいタスク</h3>
-        <button type="button" id="todo-add-close" class="panel-close" aria-label="閉じる">×</button>
+        <h3>New Task</h3>
+        <button type="button" id="todo-add-close" class="panel-close" aria-label="Close">×</button>
       </div>
       <form id="todo-form" class="add-form">
-        <input type="text" id="todo-title" placeholder="タスク名" required>
+        <input type="text" id="todo-title" placeholder="Task name" required>
         <div class="form-row">
           <select id="todo-category">
-            <option value="英語">英語</option>
-            <option value="数学">数学</option>
-            <option value="世界史">世界史</option>
-            <option value="その他">その他</option>
+            <option value="英語">English</option>
+            <option value="数学">Math</option>
+            <option value="世界史">World History</option>
+            <option value="その他">Other</option>
           </select>
           <select id="todo-priority">
-            <option value="high">優先度: 高</option>
-            <option value="medium" selected>優先度: 中</option>
-            <option value="low">優先度: 低</option>
+            <option value="high">Priority: High</option>
+            <option value="medium" selected>Priority: Medium</option>
+            <option value="low">Priority: Low</option>
           </select>
         </div>
         <div class="due-row">
           <input type="date" id="todo-due-date">
-          <button type="button" class="quick-date-btn" data-quick="today" data-quick-target="todo-due-date">今日</button>
-          <button type="button" class="quick-date-btn" data-quick="tomorrow" data-quick-target="todo-due-date">明日</button>
-          <button type="button" class="quick-date-btn" data-quick="nextweek" data-quick-target="todo-due-date">来週</button>
-          <button type="button" class="quick-date-btn" data-quick="clear" data-quick-target="todo-due-date">クリア</button>
+          <button type="button" class="quick-date-btn" data-quick="today" data-quick-target="todo-due-date">Today</button>
+          <button type="button" class="quick-date-btn" data-quick="tomorrow" data-quick-target="todo-due-date">Tomorrow</button>
+          <button type="button" class="quick-date-btn" data-quick="nextweek" data-quick-target="todo-due-date">Next week</button>
+          <button type="button" class="quick-date-btn" data-quick="clear" data-quick-target="todo-due-date">Clear</button>
         </div>
-        <button type="button" id="todo-time-toggle" class="time-toggle-btn">+ 時刻を追加</button>
+        <button type="button" id="todo-time-toggle" class="time-toggle-btn">+ Add time</button>
         <input type="time" id="todo-due-time" style="display:none;">
         <select id="todo-notify" style="display:none;">
-          <option value="">通知しない</option>
-          <option value="0">その時刻に通知</option>
-          <option value="10">10分前に通知</option>
-          <option value="30">30分前に通知</option>
-          <option value="60">1時間前に通知</option>
+          <option value="">No notification</option>
+          <option value="0">Notify at time</option>
+          <option value="10">Notify 10 min before</option>
+          <option value="30">Notify 30 min before</option>
+          <option value="60">Notify 1 hr before</option>
         </select>
         <div class="due-row">
-          <button type="button" class="quick-date-btn" data-recur-preset="daily">毎日</button>
-          <button type="button" class="quick-date-btn" data-recur-preset="weekdays">平日</button>
-          <button type="button" class="quick-date-btn" data-recur-preset="clear">クリア</button>
+          <button type="button" class="quick-date-btn" data-recur-preset="daily">Daily</button>
+          <button type="button" class="quick-date-btn" data-recur-preset="weekdays">Weekdays</button>
+          <button type="button" class="quick-date-btn" data-recur-preset="clear">Clear</button>
         </div>
         <div class="weekday-picker" id="todo-recurrence-picker">
-          <button type="button" class="weekday-btn" data-day="sun">日</button>
-          <button type="button" class="weekday-btn" data-day="mon">月</button>
-          <button type="button" class="weekday-btn" data-day="tue">火</button>
-          <button type="button" class="weekday-btn" data-day="wed">水</button>
-          <button type="button" class="weekday-btn" data-day="thu">木</button>
-          <button type="button" class="weekday-btn" data-day="fri">金</button>
-          <button type="button" class="weekday-btn" data-day="sat">土</button>
+          <button type="button" class="weekday-btn" data-day="sun">Sun</button>
+          <button type="button" class="weekday-btn" data-day="mon">Mon</button>
+          <button type="button" class="weekday-btn" data-day="tue">Tue</button>
+          <button type="button" class="weekday-btn" data-day="wed">Wed</button>
+          <button type="button" class="weekday-btn" data-day="thu">Thu</button>
+          <button type="button" class="weekday-btn" data-day="fri">Fri</button>
+          <button type="button" class="weekday-btn" data-day="sat">Sat</button>
         </div>
-        <textarea id="todo-note" rows="3" placeholder="メモ(任意)"></textarea>
-        <button type="submit">+ 追加</button>
+        <textarea id="todo-note" rows="3" placeholder="Note (optional)"></textarea>
+        <button type="submit">+ Add</button>
       </form>
     </div>
 
     <div id="todo-detail-backdrop" class="backdrop hidden"></div>
     <div id="todo-detail-panel" class="add-panel hidden">
       <div class="panel-header">
-        <h3>タスクを編集</h3>
-        <button type="button" id="todo-detail-close" class="panel-close" aria-label="閉じる">×</button>
+        <h3>Edit Task</h3>
+        <button type="button" id="todo-detail-close" class="panel-close" aria-label="Close">×</button>
       </div>
       <form id="todo-detail-form" class="add-form">
-        <input type="text" id="todo-detail-title" placeholder="タスク名" required>
+        <input type="text" id="todo-detail-title" placeholder="Task name" required>
         <div class="form-row">
           <select id="todo-detail-category"></select>
           <select id="todo-detail-priority">
-            <option value="high">優先度: 高</option>
-            <option value="medium">優先度: 中</option>
-            <option value="low">優先度: 低</option>
+            <option value="high">Priority: High</option>
+            <option value="medium">Priority: Medium</option>
+            <option value="low">Priority: Low</option>
           </select>
         </div>
         <div class="due-row">
           <input type="date" id="todo-detail-due-date">
-          <button type="button" class="quick-date-btn" data-quick="today" data-quick-target="todo-detail-due-date">今日</button>
-          <button type="button" class="quick-date-btn" data-quick="tomorrow" data-quick-target="todo-detail-due-date">明日</button>
-          <button type="button" class="quick-date-btn" data-quick="nextweek" data-quick-target="todo-detail-due-date">来週</button>
-          <button type="button" class="quick-date-btn" data-quick="clear" data-quick-target="todo-detail-due-date">クリア</button>
+          <button type="button" class="quick-date-btn" data-quick="today" data-quick-target="todo-detail-due-date">Today</button>
+          <button type="button" class="quick-date-btn" data-quick="tomorrow" data-quick-target="todo-detail-due-date">Tomorrow</button>
+          <button type="button" class="quick-date-btn" data-quick="nextweek" data-quick-target="todo-detail-due-date">Next week</button>
+          <button type="button" class="quick-date-btn" data-quick="clear" data-quick-target="todo-detail-due-date">Clear</button>
         </div>
-        <button type="button" id="todo-detail-time-toggle" class="time-toggle-btn">+ 時刻を追加</button>
+        <button type="button" id="todo-detail-time-toggle" class="time-toggle-btn">+ Add time</button>
         <input type="time" id="todo-detail-due-time" style="display:none;">
         <select id="todo-detail-notify" style="display:none;">
-          <option value="">通知しない</option>
-          <option value="0">その時刻に通知</option>
-          <option value="10">10分前に通知</option>
-          <option value="30">30分前に通知</option>
-          <option value="60">1時間前に通知</option>
+          <option value="">No notification</option>
+          <option value="0">Notify at time</option>
+          <option value="10">Notify 10 min before</option>
+          <option value="30">Notify 30 min before</option>
+          <option value="60">Notify 1 hr before</option>
         </select>
         <div class="due-row">
-          <button type="button" class="quick-date-btn" data-recur-preset="daily">毎日</button>
-          <button type="button" class="quick-date-btn" data-recur-preset="weekdays">平日</button>
-          <button type="button" class="quick-date-btn" data-recur-preset="clear">クリア</button>
+          <button type="button" class="quick-date-btn" data-recur-preset="daily">Daily</button>
+          <button type="button" class="quick-date-btn" data-recur-preset="weekdays">Weekdays</button>
+          <button type="button" class="quick-date-btn" data-recur-preset="clear">Clear</button>
         </div>
         <div class="weekday-picker" id="todo-detail-recurrence-picker">
-          <button type="button" class="weekday-btn" data-day="sun">日</button>
-          <button type="button" class="weekday-btn" data-day="mon">月</button>
-          <button type="button" class="weekday-btn" data-day="tue">火</button>
-          <button type="button" class="weekday-btn" data-day="wed">水</button>
-          <button type="button" class="weekday-btn" data-day="thu">木</button>
-          <button type="button" class="weekday-btn" data-day="fri">金</button>
-          <button type="button" class="weekday-btn" data-day="sat">土</button>
+          <button type="button" class="weekday-btn" data-day="sun">Sun</button>
+          <button type="button" class="weekday-btn" data-day="mon">Mon</button>
+          <button type="button" class="weekday-btn" data-day="tue">Tue</button>
+          <button type="button" class="weekday-btn" data-day="wed">Wed</button>
+          <button type="button" class="weekday-btn" data-day="thu">Thu</button>
+          <button type="button" class="weekday-btn" data-day="fri">Fri</button>
+          <button type="button" class="weekday-btn" data-day="sat">Sat</button>
         </div>
-        <textarea id="todo-detail-note" rows="3" placeholder="メモ(任意)"></textarea>
-        <button type="submit">保存</button>
+        <textarea id="todo-detail-note" rows="3" placeholder="Note (optional)"></textarea>
+        <button type="submit">Save</button>
       </form>
       <span class="meta" id="todo-detail-status"></span>
     </div>
   </section>
 
   <section id="tab-study" class="tab-panel">
-    <h2>学習ログ</h2>
+    <h2>Study Log</h2>
     <div class="study-buttons" id="study-buttons"></div>
 
-    <button type="button" id="manual-log-toggle" class="quick-date-btn">+ 手動で記録</button>
+    <button type="button" id="manual-log-toggle" class="quick-date-btn">+ Manual entry</button>
 
     <div class="study-fab-menu hidden" id="study-fab-menu"></div>
-    <button type="button" id="study-fab" class="fab" aria-label="学習を記録">▶</button>
+    <button type="button" id="study-fab" class="fab" aria-label="Record study">▶</button>
     <form id="manual-log-form" class="add-form hidden">
       <select id="manual-log-subject" required></select>
-      <input type="number" id="manual-log-minutes" placeholder="分" min="1" required>
+      <input type="number" id="manual-log-minutes" placeholder="min" min="1" required>
       <input type="datetime-local" id="manual-log-datetime" required>
-      <input type="text" id="manual-log-note" placeholder="メモ(任意)">
-      <button type="submit">追加</button>
+      <input type="text" id="manual-log-note" placeholder="Note (optional)">
+      <button type="submit">Add</button>
     </form>
 
-    <h3>目標</h3>
+    <h3>Goal</h3>
     <div class="goal-progress-card">
       <div class="goal-progress-row">
-        <span>今日の最低ライン</span>
+        <span>Today's minimum</span>
         <span class="meta" id="daily-min-label"></span>
       </div>
       <div class="stat-bar-track"><div class="stat-bar-fill" id="daily-min-fill"></div></div>
     </div>
     <div class="goal-progress-card">
       <div class="goal-progress-row">
-        <span>今週</span>
+        <span>This week</span>
         <span class="meta" id="week-progress-label"></span>
       </div>
       <div class="stat-bar-track"><div class="stat-bar-fill" id="week-progress-fill"></div></div>
     </div>
     <div class="goal-progress-card">
       <div class="goal-progress-row">
-        <span>今月</span>
+        <span>This month</span>
         <span class="meta" id="month-progress-label"></span>
       </div>
       <div class="stat-bar-track"><div class="stat-bar-fill" id="month-progress-fill"></div></div>
     </div>
     <form id="goal-minutes-form" class="add-form">
-      <input type="number" id="daily-goal-input" placeholder="1日の最低ライン(分)" min="0" step="1">
-      <input type="number" id="weekly-goal-input" placeholder="週間目標(時間)" min="0" step="0.5">
-      <input type="number" id="monthly-goal-input" placeholder="月間目標(時間)" min="0" step="0.5">
-      <button type="submit">保存</button>
+      <input type="number" id="daily-goal-input" placeholder="Daily minimum (min)" min="0" step="1">
+      <input type="number" id="weekly-goal-input" placeholder="Weekly goal (hr)" min="0" step="0.5">
+      <input type="number" id="monthly-goal-input" placeholder="Monthly goal (hr)" min="0" step="0.5">
+      <button type="submit">Save</button>
     </form>
 
     <div class="stats-header">
-      <div class="stat-cell"><span class="stat-label">今日</span><span class="stat-value" id="stat-today"></span></div>
-      <div class="stat-cell"><span class="stat-label">今月</span><span class="stat-value" id="stat-month"></span></div>
-      <div class="stat-cell"><span class="stat-label">累計</span><span class="stat-value" id="stat-total"></span></div>
+      <div class="stat-cell"><span class="stat-label">Today</span><span class="stat-value" id="stat-today"></span></div>
+      <div class="stat-cell"><span class="stat-label">This month</span><span class="stat-value" id="stat-month"></span></div>
+      <div class="stat-cell"><span class="stat-label">Total</span><span class="stat-value" id="stat-total"></span></div>
     </div>
 
     <div class="chart-header-row">
-      <h3 id="study-chart-title">直近10週間</h3>
+      <h3 id="study-chart-title">Last 10 weeks</h3>
       <div class="period-toggle">
-        <button type="button" class="period-btn active" data-granularity="week">週</button>
-        <button type="button" class="period-btn" data-granularity="day">日</button>
+        <button type="button" class="period-btn active" data-granularity="week">Week</button>
+        <button type="button" class="period-btn" data-granularity="day">Day</button>
       </div>
     </div>
     <div id="study-chart"></div>
-    <p class="meta" id="study-chart-detail">棒をタップすると内訳が表示されます</p>
+    <p class="meta" id="study-chart-detail">Tap a bar to see the breakdown</p>
 
-    <h3>直近7日間の合計</h3>
+    <h3>Last 7 days total</h3>
     <ul id="study-summary" class="list"></ul>
 
-    <h3 id="study-log-header">ログ履歴</h3>
+    <h3 id="study-log-header">History</h3>
     <ul id="study-log-list" class="list"></ul>
   </section>
 
   <section id="tab-mood" class="tab-panel">
-    <h2>気持ち</h2>
+    <h2>Mood</h2>
     <div class="goal-progress-card">
       <div class="goal-progress-row">
-        <span>今の気持ち</span>
-        <span class="meta" id="mood-today-status">未記録</span>
+        <span>Current mood</span>
+        <span class="meta" id="mood-today-status">Not recorded</span>
       </div>
       <div class="mood-scale-buttons" id="mood-scale-buttons">
         <button type="button" class="mood-scale-btn" data-score="1">1</button>
@@ -295,101 +295,101 @@
         <button type="button" class="mood-scale-btn" data-score="9">9</button>
         <button type="button" class="mood-scale-btn" data-score="10">10</button>
       </div>
-      <div class="mood-scale-labels"><span>1: つらい</span><span>10: 絶好調</span></div>
+      <div class="mood-scale-labels"><span>1: Rough</span><span>10: Great</span></div>
       <div class="mood-reason-picker" id="mood-reason-picker">
-        <button type="button" class="reason-btn" data-reason="体調不良" data-tier="low">体調不良</button>
-        <button type="button" class="reason-btn" data-reason="寝不足" data-tier="low">寝不足</button>
-        <button type="button" class="reason-btn" data-reason="人間関係" data-tier="low">人間関係</button>
-        <button type="button" class="reason-btn" data-reason="疲労" data-tier="low">疲労</button>
-        <button type="button" class="reason-btn" data-reason="英語が通じなかった" data-tier="low">英語が通じなかった</button>
-        <button type="button" class="reason-btn" data-reason="勉強がはかどった" data-tier="high">勉強がはかどった</button>
-        <button type="button" class="reason-btn" data-reason="やる気が出た" data-tier="high">やる気が出た</button>
-        <button type="button" class="reason-btn" data-reason="よく眠れた" data-tier="high">よく眠れた</button>
-        <button type="button" class="reason-btn" data-reason="楽しいことがあった" data-tier="high">楽しいことがあった</button>
-        <button type="button" class="reason-btn" data-reason="英語が通じた" data-tier="high">英語が通じた</button>
-        <button type="button" class="reason-btn" data-reason="特になし" data-tier="both">特になし</button>
+        <button type="button" class="reason-btn" data-reason="Not feeling well" data-tier="low">Not feeling well</button>
+        <button type="button" class="reason-btn" data-reason="Lack of sleep" data-tier="low">Lack of sleep</button>
+        <button type="button" class="reason-btn" data-reason="Relationship stress" data-tier="low">Relationship stress</button>
+        <button type="button" class="reason-btn" data-reason="Fatigue" data-tier="low">Fatigue</button>
+        <button type="button" class="reason-btn" data-reason="Couldn't communicate in English" data-tier="low">Couldn't communicate in English</button>
+        <button type="button" class="reason-btn" data-reason="Study went well" data-tier="high">Study went well</button>
+        <button type="button" class="reason-btn" data-reason="Felt motivated" data-tier="high">Felt motivated</button>
+        <button type="button" class="reason-btn" data-reason="Slept well" data-tier="high">Slept well</button>
+        <button type="button" class="reason-btn" data-reason="Something fun happened" data-tier="high">Something fun happened</button>
+        <button type="button" class="reason-btn" data-reason="Communicated well in English" data-tier="high">Communicated well in English</button>
+        <button type="button" class="reason-btn" data-reason="Nothing in particular" data-tier="both">Nothing in particular</button>
       </div>
-      <input type="text" id="mood-note" placeholder="メモ(任意)">
+      <input type="text" id="mood-note" placeholder="Note (optional)">
       <div class="mood-today-list" id="mood-today-list"></div>
-      <button type="button" id="mood-save-btn">記録する</button>
+      <button type="button" id="mood-save-btn">Save</button>
     </div>
 
     <div class="stats-header">
-      <div class="stat-cell"><span class="stat-label">今週平均</span><span class="stat-value" id="mood-stat-week"></span></div>
-      <div class="stat-cell"><span class="stat-label">今月平均</span><span class="stat-value" id="mood-stat-month"></span></div>
-      <div class="stat-cell"><span class="stat-label">低気分日の達成率</span><span class="stat-value" id="mood-stat-low-mood-rate"></span></div>
+      <div class="stat-cell"><span class="stat-label">Week avg</span><span class="stat-value" id="mood-stat-week"></span></div>
+      <div class="stat-cell"><span class="stat-label">Month avg</span><span class="stat-value" id="mood-stat-month"></span></div>
+      <div class="stat-cell"><span class="stat-label">Low-mood day achievement</span><span class="stat-value" id="mood-stat-low-mood-rate"></span></div>
     </div>
     <div class="stats-header">
-      <div class="stat-cell"><span class="stat-label">スクリーンタイム別の気分平均</span><span class="stat-value" id="mood-stat-screen-time-correlation"></span></div>
+      <div class="stat-cell"><span class="stat-label">Mood avg by screen time</span><span class="stat-value" id="mood-stat-screen-time-correlation"></span></div>
     </div>
 
     <div class="goal-progress-card">
       <div class="goal-progress-row">
-        <span>気持ちの推移(直近14日間)</span>
+        <span>Mood trend (last 14 days)</span>
       </div>
       <div id="mood-chart"></div>
-      <p class="meta">背景の棒は同じ日の勉強時間、点線はスクリーンタイム(JpBlocker連携)の目安です</p>
-      <p class="meta" id="mood-chart-detail">点をタップすると詳細が表示されます</p>
+      <p class="meta">Background bars are study time for that day; the dashed line is screen time (JpBlocker) for reference</p>
+      <p class="meta" id="mood-chart-detail">Tap a point for details</p>
     </div>
 
     <ul id="mood-reason-stats" class="mood-reason-list hidden"></ul>
 
-    <h2>発動ログ</h2>
+    <h2>Activation Log</h2>
     <p class="meta" id="activation-current-status"></p>
     <div class="stats-header">
-      <div class="stat-cell"><span class="stat-label">今週</span><span class="stat-value" id="activation-stat-week"></span></div>
-      <div class="stat-cell"><span class="stat-label">今月</span><span class="stat-value" id="activation-stat-month"></span></div>
-      <div class="stat-cell"><span class="stat-label">累計</span><span class="stat-value" id="activation-stat-total"></span></div>
+      <div class="stat-cell"><span class="stat-label">This week</span><span class="stat-value" id="activation-stat-week"></span></div>
+      <div class="stat-cell"><span class="stat-label">This month</span><span class="stat-value" id="activation-stat-month"></span></div>
+      <div class="stat-cell"><span class="stat-label">Total</span><span class="stat-value" id="activation-stat-total"></span></div>
     </div>
     <p class="meta" id="activation-post-return-stats"></p>
     <ul id="activation-mood-reasons" class="mood-reason-list hidden"></ul>
     <ul id="study-trigger-stats" class="mood-reason-list hidden"></ul>
-    <h3 id="activation-list-header">履歴</h3>
+    <h3 id="activation-list-header">History</h3>
     <ul id="activation-list" class="list"></ul>
     <div class="due-row">
-      <button type="button" id="activation-export-btn" class="quick-date-btn">直近7日分をエクスポート</button>
-      <button type="button" id="activation-copy-btn" class="quick-date-btn hidden">コピー</button>
+      <button type="button" id="activation-export-btn" class="quick-date-btn">Export last 7 days</button>
+      <button type="button" id="activation-copy-btn" class="quick-date-btn hidden">Copy</button>
     </div>
     <textarea id="activation-export-text" rows="6" class="hidden" readonly></textarea>
 
-    <h2>睡眠</h2>
+    <h2>Sleep</h2>
     <div class="stats-header">
-      <div class="stat-cell"><span class="stat-label">昨晩</span><span class="stat-value" id="sleep-stat-last-night"></span></div>
-      <div class="stat-cell"><span class="stat-label">直近30日平均</span><span class="stat-value" id="sleep-stat-avg"></span></div>
+      <div class="stat-cell"><span class="stat-label">Last night</span><span class="stat-value" id="sleep-stat-last-night"></span></div>
+      <div class="stat-cell"><span class="stat-label">Last 30 days avg</span><span class="stat-value" id="sleep-stat-avg"></span></div>
     </div>
-    <h3 id="sleep-log-header">履歴</h3>
+    <h3 id="sleep-log-header">History</h3>
     <ul id="sleep-log-list" class="list"></ul>
   </section>
 
   <section id="tab-goal" class="tab-panel">
-    <h2>目標達成度</h2>
+    <h2>Goal Progress</h2>
     <div id="countdown"></div>
-    <button type="button" id="countdown-edit-toggle" class="quick-date-btn">大きな目標を編集</button>
+    <button type="button" id="countdown-edit-toggle" class="quick-date-btn">Edit big goal</button>
     <form id="countdown-edit-form" class="add-form hidden">
-      <input type="text" id="countdown-edit-label" placeholder="目標名(例: 英検準1級・C1 目標(留学終了))" required>
+      <input type="text" id="countdown-edit-label" placeholder="Goal name (e.g. Eiken Pre-1 / CEFR C1 goal (end of study abroad))" required>
       <input type="date" id="countdown-edit-date" required>
-      <button type="submit">保存</button>
+      <button type="submit">Save</button>
     </form>
     <ul id="goal-list" class="list"></ul>
     <form id="goal-form" class="add-form">
-      <input type="text" id="goal-title" placeholder="達成したい項目(例: 単語1800語)" required>
-      <button type="submit">+ 追加</button>
+      <input type="text" id="goal-title" placeholder="Item to achieve (e.g. 1800 vocabulary words)" required>
+      <button type="submit">+ Add</button>
     </form>
     <div id="goal-progress"></div>
   </section>
 
   <section id="tab-calendar" class="tab-panel">
-    <h2>予定</h2>
+    <h2>Calendar</h2>
 
     <div class="cal-board">
       <div class="cal-view-toggle" id="cal-view-toggle">
-        <button type="button" class="cal-view-btn active" data-view="month">月</button>
-        <button type="button" class="cal-view-btn" data-view="week">週</button>
+        <button type="button" class="cal-view-btn active" data-view="month">Month</button>
+        <button type="button" class="cal-view-btn" data-view="week">Week</button>
       </div>
       <div class="month-nav">
-        <button type="button" id="cal-prev" class="icon-btn" aria-label="前へ">‹</button>
+        <button type="button" id="cal-prev" class="icon-btn" aria-label="Previous">‹</button>
         <span id="cal-month-label"></span>
-        <button type="button" id="cal-next" class="icon-btn" aria-label="次へ">›</button>
+        <button type="button" id="cal-next" class="icon-btn" aria-label="Next">›</button>
       </div>
       <div class="cal-weekday-row" id="cal-weekday-row">
         <span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span class="sat">Sat</span><span class="sun">Sun</span>
@@ -408,24 +408,24 @@
     </div>
 
     <div class="cal-day-detail">
-      <h3 id="cal-detail-title">日付を選んでください</h3>
+      <h3 id="cal-detail-title">Select a date</h3>
       <ul id="cal-event-list" class="list"></ul>
-      <h3>期限のタスク</h3>
+      <h3>Tasks due</h3>
       <ul id="cal-todo-list" class="list"></ul>
     </div>
 
-    <button type="button" id="event-fab" class="fab" aria-label="予定を追加">+</button>
+    <button type="button" id="event-fab" class="fab" aria-label="Add event">+</button>
 
     <div id="event-add-backdrop" class="backdrop hidden"></div>
     <div id="event-add-panel" class="add-panel hidden">
       <div class="panel-header">
-        <h3>新しい予定</h3>
-        <button type="button" id="event-add-close" class="panel-close" aria-label="閉じる">×</button>
+        <h3>New Event</h3>
+        <button type="button" id="event-add-close" class="panel-close" aria-label="Close">×</button>
       </div>
       <form id="event-form" class="add-form">
-        <input type="text" id="event-title" placeholder="予定のタイトル" required>
+        <input type="text" id="event-title" placeholder="Event title" required>
         <select id="event-category">
-          <option value="">カテゴリ: なし</option>
+          <option value="">Category: None</option>
         </select>
         <div class="form-row">
           <input type="date" id="event-date" required>
@@ -435,42 +435,42 @@
           <input type="time" id="event-end-time" required>
         </div>
         <select id="event-notify">
-          <option value="">通知しない</option>
-          <option value="0">開始時刻に通知</option>
-          <option value="10">10分前に通知</option>
-          <option value="30">30分前に通知</option>
-          <option value="60">1時間前に通知</option>
+          <option value="">No notification</option>
+          <option value="0">Notify at start time</option>
+          <option value="10">Notify 10 min before</option>
+          <option value="30">Notify 30 min before</option>
+          <option value="60">Notify 1 hr before</option>
         </select>
         <div class="due-row">
-          <button type="button" class="quick-date-btn" data-recur-preset="daily">毎日</button>
-          <button type="button" class="quick-date-btn" data-recur-preset="weekdays">平日</button>
-          <button type="button" class="quick-date-btn" data-recur-preset="clear">クリア</button>
+          <button type="button" class="quick-date-btn" data-recur-preset="daily">Daily</button>
+          <button type="button" class="quick-date-btn" data-recur-preset="weekdays">Weekdays</button>
+          <button type="button" class="quick-date-btn" data-recur-preset="clear">Clear</button>
         </div>
         <div class="weekday-picker" id="event-recurrence-picker">
-          <button type="button" class="weekday-btn" data-day="mon">月</button>
-          <button type="button" class="weekday-btn" data-day="tue">火</button>
-          <button type="button" class="weekday-btn" data-day="wed">水</button>
-          <button type="button" class="weekday-btn" data-day="thu">木</button>
-          <button type="button" class="weekday-btn" data-day="fri">金</button>
-          <button type="button" class="weekday-btn" data-day="sat">土</button>
-          <button type="button" class="weekday-btn" data-day="sun">日</button>
+          <button type="button" class="weekday-btn" data-day="mon">Mon</button>
+          <button type="button" class="weekday-btn" data-day="tue">Tue</button>
+          <button type="button" class="weekday-btn" data-day="wed">Wed</button>
+          <button type="button" class="weekday-btn" data-day="thu">Thu</button>
+          <button type="button" class="weekday-btn" data-day="fri">Fri</button>
+          <button type="button" class="weekday-btn" data-day="sat">Sat</button>
+          <button type="button" class="weekday-btn" data-day="sun">Sun</button>
         </div>
-        <input type="date" id="event-recurrence-until" placeholder="繰り返し終了日(任意)">
-        <textarea id="event-note" rows="3" placeholder="メモ(任意)"></textarea>
-        <button type="submit">+ 追加</button>
+        <input type="date" id="event-recurrence-until" placeholder="Recurrence end date (optional)">
+        <textarea id="event-note" rows="3" placeholder="Note (optional)"></textarea>
+        <button type="submit">+ Add</button>
       </form>
     </div>
 
     <div id="event-detail-backdrop" class="backdrop hidden"></div>
     <div id="event-detail-panel" class="add-panel hidden">
       <div class="panel-header">
-        <h3>予定を編集</h3>
-        <button type="button" id="event-detail-close" class="panel-close" aria-label="閉じる">×</button>
+        <h3>Edit Event</h3>
+        <button type="button" id="event-detail-close" class="panel-close" aria-label="Close">×</button>
       </div>
       <form id="event-detail-form" class="add-form">
-        <input type="text" id="event-detail-title" placeholder="予定のタイトル" required>
+        <input type="text" id="event-detail-title" placeholder="Event title" required>
         <select id="event-detail-category">
-          <option value="">カテゴリ: なし</option>
+          <option value="">Category: None</option>
         </select>
         <div class="form-row">
           <input type="date" id="event-detail-date" required>
@@ -480,29 +480,29 @@
           <input type="time" id="event-detail-end-time" required>
         </div>
         <select id="event-detail-notify">
-          <option value="">通知しない</option>
-          <option value="0">開始時刻に通知</option>
-          <option value="10">10分前に通知</option>
-          <option value="30">30分前に通知</option>
-          <option value="60">1時間前に通知</option>
+          <option value="">No notification</option>
+          <option value="0">Notify at start time</option>
+          <option value="10">Notify 10 min before</option>
+          <option value="30">Notify 30 min before</option>
+          <option value="60">Notify 1 hr before</option>
         </select>
         <div class="due-row">
-          <button type="button" class="quick-date-btn" data-recur-preset="daily">毎日</button>
-          <button type="button" class="quick-date-btn" data-recur-preset="weekdays">平日</button>
-          <button type="button" class="quick-date-btn" data-recur-preset="clear">クリア</button>
+          <button type="button" class="quick-date-btn" data-recur-preset="daily">Daily</button>
+          <button type="button" class="quick-date-btn" data-recur-preset="weekdays">Weekdays</button>
+          <button type="button" class="quick-date-btn" data-recur-preset="clear">Clear</button>
         </div>
         <div class="weekday-picker" id="event-detail-recurrence-picker">
-          <button type="button" class="weekday-btn" data-day="mon">月</button>
-          <button type="button" class="weekday-btn" data-day="tue">火</button>
-          <button type="button" class="weekday-btn" data-day="wed">水</button>
-          <button type="button" class="weekday-btn" data-day="thu">木</button>
-          <button type="button" class="weekday-btn" data-day="fri">金</button>
-          <button type="button" class="weekday-btn" data-day="sat">土</button>
-          <button type="button" class="weekday-btn" data-day="sun">日</button>
+          <button type="button" class="weekday-btn" data-day="mon">Mon</button>
+          <button type="button" class="weekday-btn" data-day="tue">Tue</button>
+          <button type="button" class="weekday-btn" data-day="wed">Wed</button>
+          <button type="button" class="weekday-btn" data-day="thu">Thu</button>
+          <button type="button" class="weekday-btn" data-day="fri">Fri</button>
+          <button type="button" class="weekday-btn" data-day="sat">Sat</button>
+          <button type="button" class="weekday-btn" data-day="sun">Sun</button>
         </div>
-        <input type="date" id="event-detail-recurrence-until" placeholder="繰り返し終了日(任意)">
-        <textarea id="event-detail-note" rows="3" placeholder="メモ(任意)"></textarea>
-        <button type="submit">保存</button>
+        <input type="date" id="event-detail-recurrence-until" placeholder="Recurrence end date (optional)">
+        <textarea id="event-detail-note" rows="3" placeholder="Note (optional)"></textarea>
+        <button type="submit">Save</button>
       </form>
       <span class="meta" id="event-detail-status"></span>
     </div>
@@ -511,7 +511,7 @@
 </main>
 
 <div id="focus-overlay" class="focus-overlay hidden">
-  <button type="button" id="focus-minimize-btn" class="focus-minimize" aria-label="ToDoなど他の画面に戻る">‹ 戻る</button>
+  <button type="button" id="focus-minimize-btn" class="focus-minimize" aria-label="Back to ToDo and other screens">‹ Back</button>
   <div class="focus-subject">
     <span class="rec-dot"></span>
     <span id="focus-subject-name"></span>
@@ -521,7 +521,7 @@
         <rect x="4" y="11" width="16" height="10" rx="2"/>
         <path d="M8 11V7a4 4 0 0 1 8 0v4"/>
       </svg>
-      時計だけモード
+      Clock-only mode
     </span>
     <span id="focus-keepawake-badge" class="clockonly-badge hidden">
       <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor"
@@ -536,7 +536,7 @@
         <line x1="4.2" y1="19.8" x2="6.3" y2="17.7"/>
         <line x1="17.7" y1="6.3" x2="19.8" y2="4.2"/>
       </svg>
-      画面スリープ防止
+      Keep screen awake
     </span>
   </div>
   <div class="focus-ring-wrap">
@@ -547,9 +547,9 @@
     <div class="focus-timer" id="focus-timer">00:00</div>
   </div>
   <div class="focus-controls">
-    <button type="button" id="focus-pause-btn" class="secondary">一時停止</button>
-    <button type="button" id="focus-discard-btn" class="danger-outline">破棄</button>
-    <button type="button" id="focus-stop-btn">記録して停止</button>
+    <button type="button" id="focus-pause-btn" class="secondary">Pause</button>
+    <button type="button" id="focus-discard-btn" class="danger-outline">Discard</button>
+    <button type="button" id="focus-stop-btn">Save and stop</button>
   </div>
 </div>
 
@@ -558,8 +558,8 @@
   <span id="mini-timer-subject" class="mini-timer-subject"></span>
   <span id="mini-timer-time" class="mini-timer-time">00:00</span>
   <span id="mini-timer-status" class="mini-timer-status"></span>
-  <button type="button" id="mini-pause-btn" class="icon-btn" aria-label="一時停止/再開">⏸</button>
-  <button type="button" id="mini-discard-btn" class="icon-btn danger-text" aria-label="破棄">
+  <button type="button" id="mini-pause-btn" class="icon-btn" aria-label="Pause/Resume">⏸</button>
+  <button type="button" id="mini-discard-btn" class="icon-btn danger-text" aria-label="Discard">
     <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor"
          stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
       <polyline points="3 6 5 6 21 6"/>
@@ -568,132 +568,132 @@
       <line x1="14" y1="11" x2="14" y2="17"/>
     </svg>
   </button>
-  <button type="button" id="mini-stop-btn" class="icon-btn" aria-label="記録して停止">⏹</button>
+  <button type="button" id="mini-stop-btn" class="icon-btn" aria-label="Save and stop">⏹</button>
 </div>
 
 <div id="start-backdrop" class="backdrop hidden"></div>
 <div id="start-panel" class="add-panel start-panel hidden">
   <div class="panel-header">
-    <h3 id="start-subject-name">科目</h3>
-    <button type="button" id="start-close" class="panel-close" aria-label="閉じる">×</button>
+    <h3 id="start-subject-name">Subject</h3>
+    <button type="button" id="start-close" class="panel-close" aria-label="Close">×</button>
   </div>
   <div class="period-toggle" id="start-mode-toggle">
-    <button type="button" class="period-btn active" data-mode="countup">タイマー</button>
-    <button type="button" class="period-btn" data-mode="countdown">カウントダウン</button>
+    <button type="button" class="period-btn active" data-mode="countup">Timer</button>
+    <button type="button" class="period-btn" data-mode="countdown">Countdown</button>
   </div>
   <div class="due-row hidden" id="start-duration-row">
-    <button type="button" class="quick-date-btn" data-minutes="15">15分</button>
-    <button type="button" class="quick-date-btn" data-minutes="25">25分</button>
-    <button type="button" class="quick-date-btn" data-minutes="45">45分</button>
-    <button type="button" class="quick-date-btn" data-minutes="60">60分</button>
+    <button type="button" class="quick-date-btn" data-minutes="15">15 min</button>
+    <button type="button" class="quick-date-btn" data-minutes="25">25 min</button>
+    <button type="button" class="quick-date-btn" data-minutes="45">45 min</button>
+    <button type="button" class="quick-date-btn" data-minutes="60">60 min</button>
     <input type="number" id="start-duration-input" min="1" value="25" style="max-width:100px;">
   </div>
   <label class="checkbox-label start-clockonly-label">
-    <input type="checkbox" id="start-clockonly"> 時計だけモード(画面から離れると一時停止)
+    <input type="checkbox" id="start-clockonly"> Clock-only mode (pauses if you leave the screen)
   </label>
   <label class="checkbox-label start-clockonly-label">
-    <input type="checkbox" id="start-keep-awake"> 画面をスリープさせない
+    <input type="checkbox" id="start-keep-awake"> Keep screen awake
   </label>
   <div class="mood-reason-picker" id="start-trigger-picker">
-    <button type="button" class="reason-btn" data-trigger="決めていた時間だから">決めていた時間だから</button>
-    <button type="button" class="reason-btn" data-trigger="やる気があったから">やる気があったから</button>
-    <button type="button" class="reason-btn" data-trigger="前の勉強の続き">前の勉強の続き</button>
-    <button type="button" class="reason-btn" data-trigger="義務感">義務感</button>
-    <button type="button" class="reason-btn" data-trigger="なんとなく">なんとなく</button>
+    <button type="button" class="reason-btn" data-trigger="Scheduled time">Scheduled time</button>
+    <button type="button" class="reason-btn" data-trigger="Felt motivated">Felt motivated</button>
+    <button type="button" class="reason-btn" data-trigger="Continuing previous study">Continuing previous study</button>
+    <button type="button" class="reason-btn" data-trigger="Sense of obligation">Sense of obligation</button>
+    <button type="button" class="reason-btn" data-trigger="No particular reason">No particular reason</button>
   </div>
-  <button type="button" id="start-begin-btn">開始</button>
+  <button type="button" id="start-begin-btn">Start</button>
 </div>
 
 <div id="settings-backdrop" class="backdrop hidden"></div>
 <div id="settings-panel" class="add-panel hidden">
   <div class="panel-header">
-    <h3>設定</h3>
-    <button type="button" id="settings-close" class="panel-close" aria-label="閉じる">×</button>
+    <h3>Settings</h3>
+    <button type="button" id="settings-close" class="panel-close" aria-label="Close">×</button>
   </div>
 
   <div class="settings-group">
-    <h3>発動ログ</h3>
-    <p class="meta" id="settings-activation-status">発動中ではありません</p>
-    <button type="button" id="settings-activation-return-btn" class="hidden">復帰する</button>
+    <h3>Activation Log</h3>
+    <p class="meta" id="settings-activation-status">Not currently active</p>
+    <button type="button" id="settings-activation-return-btn" class="hidden">Log return</button>
   </div>
 
   <div class="settings-group">
-    <h3>睡眠記録</h3>
-    <p class="meta" id="settings-sleep-status">就寝中ではありません</p>
-    <button type="button" id="settings-sleep-wake-btn" class="hidden">起床する</button>
+    <h3>Sleep Log</h3>
+    <p class="meta" id="settings-sleep-status">Not currently sleeping</p>
+    <button type="button" id="settings-sleep-wake-btn" class="hidden">Wake up</button>
   </div>
 
   <div class="settings-group">
-    <h3>カテゴリ管理</h3>
+    <h3>Category Management</h3>
     <ul id="category-list" class="list"></ul>
     <form id="category-form" class="add-form">
-      <input type="text" id="category-name" placeholder="新しいカテゴリ名" required>
-      <button type="submit">+ 追加</button>
+      <input type="text" id="category-name" placeholder="New category name" required>
+      <button type="submit">+ Add</button>
     </form>
   </div>
 
   <div class="settings-group">
-    <h3>通知</h3>
-    <p class="meta" id="push-status">確認中...</p>
-    <button type="button" id="push-toggle-btn">通知を有効にする</button>
+    <h3>Notifications</h3>
+    <p class="meta" id="push-status">Checking...</p>
+    <button type="button" id="push-toggle-btn">Turn on notifications</button>
   </div>
 
   <div class="settings-group">
-    <h3>データ</h3>
-    <p class="meta">ToDoと学習ログをCSVでエクスポートします(zip形式)</p>
-    <button type="button" id="export-data-btn" class="secondary">データをエクスポート</button>
+    <h3>Data</h3>
+    <p class="meta">Export ToDos and study logs as CSV (zip file)</p>
+    <button type="button" id="export-data-btn" class="secondary">Export data</button>
   </div>
 
   <div class="settings-group">
-    <h3>アプリ情報</h3>
-    <p class="meta" id="settings-last-updated">確認中...</p>
+    <h3>App Info</h3>
+    <p class="meta" id="settings-last-updated">Checking...</p>
   </div>
 </div>
 
 <div id="activation-backdrop" class="backdrop hidden"></div>
 <div id="activation-panel" class="add-panel hidden">
   <div class="panel-header">
-    <h3>発動を記録</h3>
-    <button type="button" id="activation-close" class="panel-close" aria-label="閉じる">×</button>
+    <h3>Log Activation</h3>
+    <button type="button" id="activation-close" class="panel-close" aria-label="Close">×</button>
   </div>
   <form id="activation-form" class="add-form">
     <p class="meta" id="activation-time-preview"></p>
-    <textarea id="activation-note" rows="3" placeholder="きっかけ(任意)"></textarea>
+    <textarea id="activation-note" rows="3" placeholder="Trigger (optional)"></textarea>
     <div class="mood-picker" id="activation-mood-picker">
-      <button type="button" class="mood-btn" data-mood="good">絶好調</button>
-      <button type="button" class="mood-btn" data-mood="normal">普通</button>
-      <button type="button" class="mood-btn" data-mood="heavy">重い</button>
+      <button type="button" class="mood-btn" data-mood="good">Great</button>
+      <button type="button" class="mood-btn" data-mood="normal">Normal</button>
+      <button type="button" class="mood-btn" data-mood="heavy">Heavy</button>
     </div>
     <div class="mood-reason-picker hidden" id="activation-reason-picker">
-      <button type="button" class="reason-btn" data-reason="寝不足">寝不足</button>
-      <button type="button" class="reason-btn" data-reason="前日の遅れ">前日の遅れ</button>
-      <button type="button" class="reason-btn" data-reason="タスク過多">タスク過多</button>
-      <button type="button" class="reason-btn" data-reason="特になし">特になし</button>
+      <button type="button" class="reason-btn" data-reason="Lack of sleep">Lack of sleep</button>
+      <button type="button" class="reason-btn" data-reason="Fell behind yesterday">Fell behind yesterday</button>
+      <button type="button" class="reason-btn" data-reason="Too many tasks">Too many tasks</button>
+      <button type="button" class="reason-btn" data-reason="Nothing in particular">Nothing in particular</button>
     </div>
-    <button type="submit">記録</button>
+    <button type="submit">Log</button>
   </form>
 </div>
 
 <div id="bedtime-backdrop" class="backdrop hidden"></div>
 <div id="bedtime-panel" class="add-panel hidden">
   <div class="panel-header">
-    <h3>おやすみ前に</h3>
-    <button type="button" id="bedtime-close" class="panel-close" aria-label="閉じる">×</button>
+    <h3>Before Bed</h3>
+    <button type="button" id="bedtime-close" class="panel-close" aria-label="Close">×</button>
   </div>
   <div id="bedtime-step1">
-    <h4>今日期限の未完了タスク</h4>
+    <h4>Tasks due today, still open</h4>
     <ul id="bedtime-carryover-list" class="list"></ul>
-    <p class="meta hidden" id="bedtime-carryover-empty">残っているタスクはありません</p>
-    <button type="button" id="bedtime-step1-next">次へ</button>
+    <p class="meta hidden" id="bedtime-carryover-empty">No tasks left</p>
+    <button type="button" id="bedtime-step1-next">Next</button>
   </div>
   <div id="bedtime-step2" class="hidden">
-    <h4>明日やること</h4>
+    <h4>Tomorrow's tasks</h4>
     <form id="bedtime-add-form" class="add-form">
-      <input type="text" id="bedtime-add-title" placeholder="タイトル">
-      <button type="submit">+ 追加</button>
+      <input type="text" id="bedtime-add-title" placeholder="Title">
+      <button type="submit">+ Add</button>
     </form>
     <ul id="bedtime-added-list" class="list"></ul>
-    <button type="button" id="bedtime-step2-done">完了</button>
+    <button type="button" id="bedtime-step2-done">Done</button>
   </div>
 </div>
 
@@ -711,28 +711,28 @@
          stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
       <rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>
     </svg>
-    <span>予定</span>
+    <span>Calendar</span>
   </button>
   <button class="tab-btn" data-tab="tab-study">
     <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor"
          stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
       <circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15.5 14"/>
     </svg>
-    <span>学習ログ</span>
+    <span>Study</span>
   </button>
   <button class="tab-btn" data-tab="tab-mood">
     <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor"
          stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
       <circle cx="12" cy="12" r="9"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/>
     </svg>
-    <span>気持ち</span>
+    <span>Mood</span>
   </button>
   <button class="tab-btn" data-tab="tab-goal">
     <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor"
          stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
       <circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1"/>
     </svg>
-    <span>目標</span>
+    <span>Goal</span>
   </button>
 </nav>
 
