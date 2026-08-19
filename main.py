@@ -1,10 +1,9 @@
 import calendar
 import csv
-import hashlib
+import html
 import io
 import json
 import os
-import secrets
 import zipfile
 from datetime import date, datetime, timedelta
 from urllib.parse import quote
@@ -39,16 +38,18 @@ CRON_SECRET = _env_token("CRON_SECRET")
 # JpBlocker(Androidネイティブの連携アプリ)からの通信を認証するための共有トークン。
 # CRON_SECRETとは用途が別(外部cronサービス vs 自分のAndroid端末)なので分けている。
 DEVICE_TOKEN = _env_token("DEVICE_TOKEN")
-# PIN第三者管理ページ(/pin-setup)専用のトークン。DEVICE_TOKENと分けているのは信頼境界が
+# 美緒専用の承認ページ(/approve)のトークン。DEVICE_TOKENと分けているのは信頼境界が
 # 違うため(こちらは美緒だけが使う想定で、とっつーのAndroid端末は使わない)。
+# 環境変数名は移行前の PIN_CUSTODY_TOKEN のまま据え置いている(Render側の値を
+# 再設定する手間・事故を避けるため。中身の意味は「PIN管理者」から「承認者」に変わった)。
 # 注意: このトークンはとっつー自身もRenderの環境変数として見える/設定できる。
-# 「PINの値そのものを本人に見せない」ことがこの仕組みの目的であり、
+# 「承認操作そのものを本人にさせない」ことがこの仕組みの目的であり、
 # 「本人が絶対に上書きできない」ことは目的にしていない(教訓: 自分がインフラの所有者である
 # 以上、本気で上書きしようとすれば技術的には可能。ここは意図的な操作への抑止力ではなく、
 # 衝動的な自己解除への摩擦として設計している)。
-PIN_CUSTODY_TOKEN = _env_token("PIN_CUSTODY_TOKEN")
-# 設定変更がPIN通過後も即反映されない猶予時間。PINが正しくてもここはスキップしない
-# (「エスケープなし」方針をPINガード全体にも適用する)。
+APPROVAL_TOKEN = _env_token("PIN_CUSTODY_TOKEN")
+# 設定変更が承認ウィンドウ内に申請されても即反映されない猶予時間。ここはスキップしない
+# (「エスケープなし」方針を承認ガード全体にも適用する)。
 PENDING_CHANGE_DELAY_HOURS = 24
 
 
@@ -198,14 +199,8 @@ class ScreenTimeUpsert(BaseModel):
     by_app: str | None = None  # optional JSON文字列(アプリ別内訳、パッケージ名→分)
 
 
-class PinSetIn(BaseModel):
+class ApproveIn(BaseModel):
     token: str
-    pin: str
-    pin_confirm: str
-
-
-class PinVerifyIn(BaseModel):
-    pin: str
 
 
 class PendingChangeCreate(BaseModel):
@@ -1084,25 +1079,33 @@ def screen_time_mood_correlation(days: int = 30):
     }
 
 
-# ---------- PIN第三者管理 + 設定変更の時間遅延(JpBlocker連携) ----------
+# ---------- 設定変更の遠隔承認(美緒)+ 設定変更の時間遅延(JpBlocker連携) ----------
 #
-# 背景: JpBlockerの設定変更ガードは元々「自分でPINを決めて自分で入力する」方式だった。
-# それだと衝動的な自己解除に対して無力(自分で決めたPINは自分で思い出せる)なので、
-# PINの保管を美緒(第三者)に委ね、さらに正しいPINを通っても即座には反映されない
-# 時間遅延を挟む二段構えにした。
+# 背景: 最初はPINを美緒(第三者)に預ける方式だった。しかしとっつーが実際に設定を解除したい
+# 場面では、美緒がPINを口頭かメッセージで教えるしかなく、一度でも教えた時点で「本人がPINを
+# 知らない」という前提そのものが崩れてしまう欠陥があった(2026-08-19、とっつー本人が指摘)。
 #
-# PINの値そのものはこのサーバーだけが保持する(salt付きSHA-256ハッシュ、settingsテーブルに
-# pin_hash/pin_saltとして保存)。平文はどのレスポンス・ログにも一切含めない。
-# とっつーはこのコードをレビューできるが、実行時に美緒が入力した値そのものを読み取る
-# 正規の経路はない(サーバーの環境変数やDBに直接アクセスすれば別だが、それは
-# 「自分がインフラの所有者である以上、本気を出せば技術的には可能」という
-# 別レイヤーの限界であり、この仕組みはそこまでは守らない)。
+# そこでPINという「共有される秘密」自体を廃止し、美緒が専用ページ(/approve)で
+# 「承認する」ボタンを押すだけで15分間の変更申請ウィンドウが開く方式に置き換えた。
+# 値のやり取りは一切発生しない(美緒の専用URLに含まれるトークンだけが認証情報で、
+# これは一度発行されたら誰かに読み上げたり入力したりする必要がない)。
+#
+# 承認ウィンドウが開いていても、実際の設定反映はこれまで通りPENDING_CHANGE_DELAY_HOURS
+# (24時間)後(「エスケープなし」方針、開発の教訓43/48)。承認は「変更を申請できる入口」を
+# 開けるだけで、反映タイミングまでは早めない。
+#
+# ウィンドウの状態はsettingsテーブルにunlock_expires_atとして保存する(単一の値なので
+# 新規テーブルは作らず、PIN時代のpin_hash/pin_saltと同じくsettingsに間借りする)。
 
-PIN_HASH_ITERATIONS = 200_000  # PBKDF2-HMAC-SHA256の反復回数
+UNLOCK_WINDOW_MINUTES = 15
 
-
-def _hash_pin(pin: str, salt: bytes) -> str:
-    return hashlib.pbkdf2_hmac("sha256", pin.encode("utf-8"), salt, PIN_HASH_ITERATIONS).hex()
+ACTION_TYPE_LABELS = {
+    "mode": "検知後の挙動",
+    "limit": "1日の利用上限(分)",
+    "youtube_lockout": "YouTubeロック時間(分)",
+    "block_list": "study-tracker連携ブロックリスト",
+    "open_limits": "起動回数上限",
+}
 
 
 def _require_device_token(token: str | None):
@@ -1110,116 +1113,162 @@ def _require_device_token(token: str | None):
         raise HTTPException(status_code=403, detail="invalid token")
 
 
-PIN_SETUP_PAGE_TEMPLATE = """<!DOCTYPE html>
+def _unlock_status(conn) -> dict:
+    row = conn.execute("SELECT value FROM settings WHERE key = 'unlock_expires_at'").fetchone()
+    if row is None:
+        return {"active": False, "expires_at": None}
+    expires_at = row[0]
+    active = datetime.fromisoformat(expires_at) > datetime.now()
+    return {"active": active, "expires_at": expires_at if active else None}
+
+
+def _render_pending_html(pending: list[dict]) -> str:
+    if not pending:
+        return '<p class="empty">なし</p>'
+    items = []
+    for row in pending:
+        label = ACTION_TYPE_LABELS.get(row["action_type"], row["action_type"])
+        items.append(
+            '<div class="pending-item">'
+            f'<div class="type">{html.escape(label)}</div>'
+            f'<div>内容: {html.escape(row["payload"])}</div>'
+            f'<div>申請 {html.escape(row["created_at"])} / 反映予定 {html.escape(row["apply_after"])}</div>'
+            f'<button class="cancel" data-id="{row["id"]}">この変更を取り消す</button>'
+            '</div>'
+        )
+    return "".join(items)
+
+
+APPROVE_PAGE_TEMPLATE = """<!DOCTYPE html>
 <html lang="ja">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>JpBlocker PIN設定</title>
+<title>JpBlocker 設定変更の承認</title>
 <style>
-  body {{ font-family: system-ui, sans-serif; max-width: 420px; margin: 40px auto; padding: 0 16px; color: #222; }}
+  body {{ font-family: system-ui, sans-serif; max-width: 480px; margin: 40px auto; padding: 0 16px; color: #222; }}
   h1 {{ font-size: 1.2rem; }}
-  p.note {{ color: #666; font-size: 0.85rem; line-height: 1.5; }}
-  input {{ width: 100%; box-sizing: border-box; padding: 10px; margin: 6px 0 14px; font-size: 1rem; }}
-  button {{ width: 100%; padding: 12px; font-size: 1rem; }}
-  .msg {{ padding: 10px; margin-bottom: 14px; border-radius: 6px; }}
-  .msg.ok {{ background: #e6f4ea; color: #1e7e34; }}
-  .msg.error {{ background: #fdecea; color: #c62828; }}
+  h2 {{ font-size: 1rem; margin-top: 28px; }}
+  p.note {{ color: #666; font-size: 0.85rem; line-height: 1.6; }}
+  .status {{ padding: 14px; margin: 14px 0; border-radius: 8px; font-size: 0.95rem; }}
+  .status.locked {{ background: #fdecea; color: #c62828; }}
+  .status.active {{ background: #e6f4ea; color: #1e7e34; }}
+  button {{ width: 100%; padding: 14px; font-size: 1.05rem; border: none; border-radius: 8px; background: #1a73e8; color: white; }}
+  button.cancel {{ width: auto; padding: 8px 12px; font-size: 0.8rem; background: #c62828; margin-top: 8px; }}
+  .pending-item {{ border: 1px solid #ddd; border-radius: 8px; padding: 10px 12px; margin-bottom: 10px; font-size: 0.85rem; }}
+  .pending-item .type {{ font-weight: bold; margin-bottom: 4px; }}
+  .empty {{ color: #999; font-size: 0.85rem; }}
 </style>
 </head>
 <body>
-<h1>JpBlocker PINの設定</h1>
-<p class="note">ここで設定したPINは、とっつーのJpBlockerアプリで設定を変更するときに必要になります。
-このページの内容はとっつーには共有しないでください。{status_line}</p>
-{message}
-<form id="f">
-  <label>新しいPIN(4桁以上)<input type="password" id="pin" inputmode="numeric" required></label>
-  <label>確認のため再入力<input type="password" id="pinConfirm" inputmode="numeric" required></label>
-  <button type="submit">保存</button>
-</form>
+<h1>JpBlocker 設定変更の承認</h1>
+<p class="note">とっつーが端末の設定を変更したいときに使うページです。「承認する」を押すと15分間だけ変更の申請を受け付けられるようになります(実際に反映されるのはそこからさらに24時間後です)。このページのURLはとっつーには教えないでください。</p>
+<div class="status {status_class}">{status_text}</div>
+<button id="approveBtn">承認する(15分間)</button>
+<h2>反映待ちの変更</h2>
+{pending_html}
 <script>
-document.getElementById('f').addEventListener('submit', async (e) => {{
-  e.preventDefault();
-  const pin = document.getElementById('pin').value;
-  const pinConfirm = document.getElementById('pinConfirm').value;
-  const res = await fetch('/pin-setup', {{
+const TOKEN = {token_json};
+document.getElementById('approveBtn').addEventListener('click', async () => {{
+  const res = await fetch('/approve', {{
     method: 'POST',
     headers: {{'Content-Type': 'application/json'}},
-    body: JSON.stringify({{token: {token_json}, pin, pin_confirm: pinConfirm}}),
+    body: JSON.stringify({{token: TOKEN}}),
   }});
-  const data = await res.json();
-  document.body.innerHTML = '<h1>JpBlocker PINの設定</h1><p class="msg ' + (data.ok ? 'ok' : 'error') + '">' +
-    (data.ok ? 'PINを保存しました。' : (data.detail || '保存に失敗しました')) + '</p>';
+  if (res.ok) {{ location.reload(); }} else {{ alert('承認に失敗しました'); }}
+}});
+document.querySelectorAll('.cancel').forEach((btn) => {{
+  btn.addEventListener('click', async () => {{
+    const id = btn.dataset.id;
+    const res = await fetch('/approve/pending-changes/' + id + '?token=' + encodeURIComponent(TOKEN), {{ method: 'DELETE' }});
+    if (res.ok) {{ location.reload(); }} else {{ alert('取り消しに失敗しました'); }}
+  }});
 }});
 </script>
 </body>
 </html>"""
 
 
-@app.get("/pin-setup")
-def pin_setup_page(token: str | None = None):
-    if not PIN_CUSTODY_TOKEN or token != PIN_CUSTODY_TOKEN:
+@app.get("/approve")
+def approve_page(token: str | None = None):
+    if not APPROVAL_TOKEN or token != APPROVAL_TOKEN:
         raise HTTPException(status_code=403, detail="invalid token")
     conn = get_connection()
-    is_set = conn.execute("SELECT 1 FROM settings WHERE key = 'pin_hash'").fetchone() is not None
+    status = _unlock_status(conn)
+    pending = rows_to_dicts(conn.execute(
+        "SELECT id, action_type, payload, created_at, apply_after FROM pending_changes "
+        "WHERE applied = 0 ORDER BY created_at ASC"
+    ))
     conn.close()
-    status_line = "現在PINは設定済みです。新しく入力すると上書きされます。" if is_set else "現在PINは未設定です。"
+    if status["active"]:
+        remaining_min = max(
+            0,
+            int((datetime.fromisoformat(status["expires_at"]) - datetime.now()).total_seconds() // 60) + 1,
+        )
+        status_class = "active"
+        status_text = f"承認中(残り約{remaining_min}分、{status['expires_at']}まで申請を受け付けます)"
+    else:
+        status_class = "locked"
+        status_text = "現在は変更を申請できません(承認が必要です)"
     return HTMLResponse(
-        PIN_SETUP_PAGE_TEMPLATE.format(
-            status_line=status_line, message="", token_json=json.dumps(token)
+        APPROVE_PAGE_TEMPLATE.format(
+            status_class=status_class,
+            status_text=status_text,
+            pending_html=_render_pending_html(pending),
+            token_json=json.dumps(token),
         )
     )
 
 
-@app.post("/pin-setup")
-def pin_setup_submit(payload: PinSetIn):
-    if not PIN_CUSTODY_TOKEN or payload.token != PIN_CUSTODY_TOKEN:
+@app.post("/approve")
+def approve_submit(payload: ApproveIn):
+    if not APPROVAL_TOKEN or payload.token != APPROVAL_TOKEN:
         raise HTTPException(status_code=403, detail="invalid token")
-    if len(payload.pin) < 4 or payload.pin != payload.pin_confirm:
-        raise HTTPException(status_code=400, detail="PINが一致しないか短すぎます")
-    salt = secrets.token_bytes(16)
-    pin_hash = _hash_pin(payload.pin, salt)
+    expires_at = (datetime.now() + timedelta(minutes=UNLOCK_WINDOW_MINUTES)).isoformat(sep=" ", timespec="seconds")
     conn = get_connection()
-    for key, value in (("pin_hash", pin_hash), ("pin_salt", salt.hex())):
-        conn.execute(
-            "INSERT INTO settings (key, value) VALUES (?, ?) "
-            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-            (key, value),
-        )
+    conn.execute(
+        "INSERT INTO settings (key, value) VALUES ('unlock_expires_at', ?) "
+        "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        (expires_at,),
+    )
     conn.commit()
     conn.close()
-    # 平文(payload.pin)はここでスコープを抜けて破棄される。以降どこにも残らない。
+    return {"ok": True, "expires_at": expires_at}
+
+
+@app.delete("/approve/pending-changes/{change_id}")
+def approve_cancel_pending_change(change_id: int, token: str | None = None):
+    # デバイストークンではなく承認トークンでガードする(美緒がこのページから直接取り消せるように。
+    # 「何が申請されているか見えるだけで取り消せない」のでは実効的な監督にならないため)。
+    if not APPROVAL_TOKEN or token != APPROVAL_TOKEN:
+        raise HTTPException(status_code=403, detail="invalid token")
+    conn = get_connection()
+    conn.execute("DELETE FROM pending_changes WHERE id = ? AND applied = 0", (change_id,))
+    conn.commit()
+    conn.close()
     return {"ok": True}
 
 
-@app.get("/api/pin/is-set")
-def pin_is_set(token: str | None = None):
+@app.get("/api/unlock/status")
+def unlock_status_endpoint(token: str | None = None):
     _require_device_token(token)
     conn = get_connection()
-    is_set = conn.execute("SELECT 1 FROM settings WHERE key = 'pin_hash'").fetchone() is not None
+    status = _unlock_status(conn)
     conn.close()
-    return {"is_set": is_set}
-
-
-@app.post("/api/pin/verify")
-def pin_verify(payload: PinVerifyIn, token: str | None = None):
-    _require_device_token(token)
-    conn = get_connection()
-    rows = dict(conn.execute("SELECT key, value FROM settings WHERE key IN ('pin_hash', 'pin_salt')").fetchall())
-    conn.close()
-    if "pin_hash" not in rows or "pin_salt" not in rows:
-        # PIN未設定ならガードする意味がないので素通りさせる(fail-open、JpBlockerの
-        # 従来のローカルPINと同じ挙動)
-        return {"valid": True}
-    salt = bytes.fromhex(rows["pin_salt"])
-    return {"valid": _hash_pin(payload.pin, salt) == rows["pin_hash"]}
+    return status
 
 
 @app.post("/api/pending-changes")
 def create_pending_change(payload: PendingChangeCreate, token: str | None = None):
     _require_device_token(token)
-    apply_after = (datetime.now() + timedelta(hours=PENDING_CHANGE_DELAY_HOURS)).isoformat(sep=" ", timespec="seconds")
     conn = get_connection()
+    if not _unlock_status(conn)["active"]:
+        conn.close()
+        # 端末側のUIも承認ウィンドウを見て出し分けているはずだが、ここはサーバー側の最終防衛線
+        # (端末のUIをいじって直接POSTすればすり抜けられてしまうのを塞ぐ。教訓43/48と同じ、
+        # エスケープなし方針をここにも適用する)。
+        raise HTTPException(status_code=403, detail="unlock window not active")
+    apply_after = (datetime.now() + timedelta(hours=PENDING_CHANGE_DELAY_HOURS)).isoformat(sep=" ", timespec="seconds")
     cur = conn.execute(
         "INSERT INTO pending_changes (action_type, payload, apply_after) VALUES (?, ?, ?)",
         (payload.action_type, payload.payload, apply_after),
