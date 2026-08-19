@@ -19,3 +19,5 @@ services:
         sync: false
       - key: DEVICE_TOKEN
         sync: false
+      - key: PIN_CUSTODY_TOKEN
+        sync: false

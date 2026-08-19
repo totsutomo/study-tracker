@@ -106,6 +106,19 @@ CREATE TABLE IF NOT EXISTS screen_time_logs (
     updated_at TEXT DEFAULT (datetime('now'))
 );
 
+-- JpBlocker(Android)のPIN第三者管理+時間遅延ガード用。
+-- PINの実体(pin_hash/pin_saltキー)はsettingsテーブルに間借りする。ここは
+-- 「保留中の設定変更」だけを扱う(action_type/payloadはJpBlocker側のPendingActionと1:1対応)。
+CREATE TABLE IF NOT EXISTS pending_changes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    action_type TEXT NOT NULL,
+    payload TEXT NOT NULL,
+    created_at TEXT DEFAULT (datetime('now')),
+    apply_after TEXT NOT NULL,
+    applied INTEGER DEFAULT 0,
+    applied_at TEXT
+);
+
 """
 
 DEFAULT_CATEGORIES = ("英語", "数学", "世界史", "その他")

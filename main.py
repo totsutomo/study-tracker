@@ -1,8 +1,10 @@
 import calendar
 import csv
+import hashlib
 import io
 import json
 import os
+import secrets
 import zipfile
 from datetime import date, datetime, timedelta
 from urllib.parse import quote
@@ -26,6 +28,17 @@ CRON_SECRET = os.environ.get("CRON_SECRET")
 # JpBlocker(Androidネイティブの連携アプリ)からの通信を認証するための共有トークン。
 # CRON_SECRETとは用途が別(外部cronサービス vs 自分のAndroid端末)なので分けている。
 DEVICE_TOKEN = os.environ.get("DEVICE_TOKEN")
+# PIN第三者管理ページ(/pin-setup)専用のトークン。DEVICE_TOKENと分けているのは信頼境界が
+# 違うため(こちらは美緒だけが使う想定で、とっつーのAndroid端末は使わない)。
+# 注意: このトークンはとっつー自身もRenderの環境変数として見える/設定できる。
+# 「PINの値そのものを本人に見せない」ことがこの仕組みの目的であり、
+# 「本人が絶対に上書きできない」ことは目的にしていない(教訓: 自分がインフラの所有者である
+# 以上、本気で上書きしようとすれば技術的には可能。ここは意図的な操作への抑止力ではなく、
+# 衝動的な自己解除への摩擦として設計している)。
+PIN_CUSTODY_TOKEN = os.environ.get("PIN_CUSTODY_TOKEN")
+# 設定変更がPIN通過後も即反映されない猶予時間。PINが正しくてもここはスキップしない
+# (「エスケープなし」方針をPINガード全体にも適用する)。
+PENDING_CHANGE_DELAY_HOURS = 24
 
 
 def _load_last_updated() -> str:
@@ -172,6 +185,21 @@ class ScreenTimeUpsert(BaseModel):
     date: str  # "YYYY-MM-DD", client(JpBlocker)local date
     total_minutes: int
     by_app: str | None = None  # optional JSON文字列(アプリ別内訳、パッケージ名→分)
+
+
+class PinSetIn(BaseModel):
+    token: str
+    pin: str
+    pin_confirm: str
+
+
+class PinVerifyIn(BaseModel):
+    pin: str
+
+
+class PendingChangeCreate(BaseModel):
+    action_type: str
+    payload: str  # JSON文字列。中身はJpBlocker側のPendingActionと1:1対応、サーバーはパースしない
 
 
 WEEKDAY_CODES = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]  # index matches date.weekday()
@@ -1043,6 +1071,203 @@ def screen_time_mood_correlation(days: int = 30):
         "high_screen_time_avg_minutes": round(sum(m for m, _ in high_half) / len(high_half)),
         "high_screen_time_avg_mood": round(sum(s for _, s in high_half) / len(high_half), 1),
     }
+
+
+# ---------- PIN第三者管理 + 設定変更の時間遅延(JpBlocker連携) ----------
+#
+# 背景: JpBlockerの設定変更ガードは元々「自分でPINを決めて自分で入力する」方式だった。
+# それだと衝動的な自己解除に対して無力(自分で決めたPINは自分で思い出せる)なので、
+# PINの保管を美緒(第三者)に委ね、さらに正しいPINを通っても即座には反映されない
+# 時間遅延を挟む二段構えにした。
+#
+# PINの値そのものはこのサーバーだけが保持する(salt付きSHA-256ハッシュ、settingsテーブルに
+# pin_hash/pin_saltとして保存)。平文はどのレスポンス・ログにも一切含めない。
+# とっつーはこのコードをレビューできるが、実行時に美緒が入力した値そのものを読み取る
+# 正規の経路はない(サーバーの環境変数やDBに直接アクセスすれば別だが、それは
+# 「自分がインフラの所有者である以上、本気を出せば技術的には可能」という
+# 別レイヤーの限界であり、この仕組みはそこまでは守らない)。
+
+PIN_HASH_ITERATIONS = 200_000  # PBKDF2-HMAC-SHA256の反復回数
+
+
+def _hash_pin(pin: str, salt: bytes) -> str:
+    return hashlib.pbkdf2_hmac("sha256", pin.encode("utf-8"), salt, PIN_HASH_ITERATIONS).hex()
+
+
+def _require_device_token(token: str | None):
+    if not DEVICE_TOKEN or token != DEVICE_TOKEN:
+        raise HTTPException(status_code=403, detail="invalid token")
+
+
+PIN_SETUP_PAGE_TEMPLATE = """<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>JpBlocker PIN設定</title>
+<style>
+  body {{ font-family: system-ui, sans-serif; max-width: 420px; margin: 40px auto; padding: 0 16px; color: #222; }}
+  h1 {{ font-size: 1.2rem; }}
+  p.note {{ color: #666; font-size: 0.85rem; line-height: 1.5; }}
+  input {{ width: 100%; box-sizing: border-box; padding: 10px; margin: 6px 0 14px; font-size: 1rem; }}
+  button {{ width: 100%; padding: 12px; font-size: 1rem; }}
+  .msg {{ padding: 10px; margin-bottom: 14px; border-radius: 6px; }}
+  .msg.ok {{ background: #e6f4ea; color: #1e7e34; }}
+  .msg.error {{ background: #fdecea; color: #c62828; }}
+</style>
+</head>
+<body>
+<h1>JpBlocker PINの設定</h1>
+<p class="note">ここで設定したPINは、とっつーのJpBlockerアプリで設定を変更するときに必要になります。
+このページの内容はとっつーには共有しないでください。{status_line}</p>
+{message}
+<form id="f">
+  <label>新しいPIN(4桁以上)<input type="password" id="pin" inputmode="numeric" required></label>
+  <label>確認のため再入力<input type="password" id="pinConfirm" inputmode="numeric" required></label>
+  <button type="submit">保存</button>
+</form>
+<script>
+document.getElementById('f').addEventListener('submit', async (e) => {{
+  e.preventDefault();
+  const pin = document.getElementById('pin').value;
+  const pinConfirm = document.getElementById('pinConfirm').value;
+  const res = await fetch('/pin-setup', {{
+    method: 'POST',
+    headers: {{'Content-Type': 'application/json'}},
+    body: JSON.stringify({{token: {token_json}, pin, pin_confirm: pinConfirm}}),
+  }});
+  const data = await res.json();
+  document.body.innerHTML = '<h1>JpBlocker PINの設定</h1><p class="msg ' + (data.ok ? 'ok' : 'error') + '">' +
+    (data.ok ? 'PINを保存しました。' : (data.detail || '保存に失敗しました')) + '</p>';
+}});
+</script>
+</body>
+</html>"""
+
+
+@app.get("/pin-setup")
+def pin_setup_page(token: str | None = None):
+    if not PIN_CUSTODY_TOKEN or token != PIN_CUSTODY_TOKEN:
+        raise HTTPException(status_code=403, detail="invalid token")
+    conn = get_connection()
+    is_set = conn.execute("SELECT 1 FROM settings WHERE key = 'pin_hash'").fetchone() is not None
+    conn.close()
+    status_line = "現在PINは設定済みです。新しく入力すると上書きされます。" if is_set else "現在PINは未設定です。"
+    return HTMLResponse(
+        PIN_SETUP_PAGE_TEMPLATE.format(
+            status_line=status_line, message="", token_json=json.dumps(token)
+        )
+    )
+
+
+@app.post("/pin-setup")
+def pin_setup_submit(payload: PinSetIn):
+    if not PIN_CUSTODY_TOKEN or payload.token != PIN_CUSTODY_TOKEN:
+        raise HTTPException(status_code=403, detail="invalid token")
+    if len(payload.pin) < 4 or payload.pin != payload.pin_confirm:
+        raise HTTPException(status_code=400, detail="PINが一致しないか短すぎます")
+    salt = secrets.token_bytes(16)
+    pin_hash = _hash_pin(payload.pin, salt)
+    conn = get_connection()
+    for key, value in (("pin_hash", pin_hash), ("pin_salt", salt.hex())):
+        conn.execute(
+            "INSERT INTO settings (key, value) VALUES (?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (key, value),
+        )
+    conn.commit()
+    conn.close()
+    # 平文(payload.pin)はここでスコープを抜けて破棄される。以降どこにも残らない。
+    return {"ok": True}
+
+
+@app.get("/api/pin/is-set")
+def pin_is_set(token: str | None = None):
+    _require_device_token(token)
+    conn = get_connection()
+    is_set = conn.execute("SELECT 1 FROM settings WHERE key = 'pin_hash'").fetchone() is not None
+    conn.close()
+    return {"is_set": is_set}
+
+
+@app.post("/api/pin/verify")
+def pin_verify(payload: PinVerifyIn, token: str | None = None):
+    _require_device_token(token)
+    conn = get_connection()
+    rows = dict(conn.execute("SELECT key, value FROM settings WHERE key IN ('pin_hash', 'pin_salt')").fetchall())
+    conn.close()
+    if "pin_hash" not in rows or "pin_salt" not in rows:
+        # PIN未設定ならガードする意味がないので素通りさせる(fail-open、JpBlockerの
+        # 従来のローカルPINと同じ挙動)
+        return {"valid": True}
+    salt = bytes.fromhex(rows["pin_salt"])
+    return {"valid": _hash_pin(payload.pin, salt) == rows["pin_hash"]}
+
+
+@app.post("/api/pending-changes")
+def create_pending_change(payload: PendingChangeCreate, token: str | None = None):
+    _require_device_token(token)
+    apply_after = (datetime.now() + timedelta(hours=PENDING_CHANGE_DELAY_HOURS)).isoformat(sep=" ", timespec="seconds")
+    conn = get_connection()
+    cur = conn.execute(
+        "INSERT INTO pending_changes (action_type, payload, apply_after) VALUES (?, ?, ?)",
+        (payload.action_type, payload.payload, apply_after),
+    )
+    conn.commit()
+    new_id = cur.lastrowid
+    conn.close()
+    return {"id": new_id, "apply_after": apply_after}
+
+
+@app.get("/api/pending-changes")
+def list_pending_changes(token: str | None = None):
+    _require_device_token(token)
+    conn = get_connection()
+    result = rows_to_dicts(conn.execute(
+        "SELECT id, action_type, payload, created_at, apply_after FROM pending_changes "
+        "WHERE applied = 0 ORDER BY created_at ASC"
+    ))
+    conn.close()
+    return result
+
+
+@app.get("/api/pending-changes/due")
+def list_due_pending_changes(token: str | None = None):
+    _require_device_token(token)
+    conn = get_connection()
+    # apply_afterはPythonのdatetime.now()(サーバーのローカル時刻)由来の文字列。
+    # SQLite側のdatetime('now')はUTCなので、SQL側で比較するとサーバーのタイムゾーンが
+    # UTCでない環境ではズレる。他の期限判定(todo/eventのnotify_at等)と同じく、
+    # Python側でdatetime.now()と比較する。
+    rows = rows_to_dicts(conn.execute(
+        "SELECT id, action_type, payload, created_at, apply_after FROM pending_changes WHERE applied = 0"
+    ))
+    conn.close()
+    now = datetime.now()
+    return [row for row in rows if datetime.fromisoformat(row["apply_after"]) <= now]
+
+
+@app.post("/api/pending-changes/{change_id}/applied")
+def mark_pending_change_applied(change_id: int, token: str | None = None):
+    _require_device_token(token)
+    conn = get_connection()
+    conn.execute(
+        "UPDATE pending_changes SET applied = 1, applied_at = datetime('now') WHERE id = ?",
+        (change_id,),
+    )
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+@app.delete("/api/pending-changes/{change_id}")
+def cancel_pending_change(change_id: int, token: str | None = None):
+    _require_device_token(token)
+    conn = get_connection()
+    conn.execute("DELETE FROM pending_changes WHERE id = ? AND applied = 0", (change_id,))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
 
 
 # ---------- goals ----------
