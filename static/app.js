@@ -229,6 +229,8 @@ const ICONS = {
     '<svg class="inline-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>',
   moon:
     '<svg class="inline-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>',
+  clock:
+    '<svg class="inline-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>',
   // 再生/削除ボタン用。.inline-iconの既定色(muted寄り)は使わず、ボタン自身のcolorをそのまま継承させる
   play: '<svg viewBox="0 0 24 24" fill="currentColor"><polygon points="7 4 20 12 7 20 7 4"/></svg>',
   trash:
@@ -1128,6 +1130,42 @@ function syncSessionActiveFlag(active, subject) {
   }).catch(() => {});
 }
 
+// 「今フォーカスタイマーが動いている状態」自体をもう一方のデバイス(スマホ⇄PC)へリアルタイムに
+// 同期表示するのは難しい(タイマーはローカルのJS変数+localStorageのみで管理、共有DBには
+// syncSessionActiveFlag()が送るsession_active等のフラグしかない)ため、代わりに上記フラグを
+// 定期ポーリングして「今どこかのデバイスでセッション中か」だけを控えめに表示する。
+// このデバイス自身がタイマーを動かしている間はミニバー/オーバーレイで既に見えているので出さない。
+let peerSessionPollInterval = null;
+
+async function checkPeerSession() {
+  const banner = document.getElementById("peer-session-banner");
+  const label = document.getElementById("peer-session-banner-label");
+  if (timerSubject) {
+    banner.classList.add("hidden");
+    return;
+  }
+  let status;
+  try {
+    status = await api("/api/focus-session/current");
+  } catch {
+    return; // best-effort; leave the banner as it was on a network hiccup
+  }
+  if (status && status.active) {
+    const subjectText = status.subject ? ` · ${status.subject}` : "";
+    label.innerHTML = `${ICONS.clock}Studying now${subjectText}`;
+    banner.classList.remove("hidden");
+  } else {
+    banner.classList.add("hidden");
+  }
+}
+
+function startPeerSessionPolling() {
+  checkPeerSession();
+  if (!peerSessionPollInterval) {
+    peerSessionPollInterval = setInterval(checkPeerSession, 30000);
+  }
+}
+
 // timer state lives in plain JS vars, which a page reload (manual refresh, PWA relaunch,
 // server cold-start forcing a reconnect) wipes out; persist it so restoreSession() can rebuild
 // the running clock from wall-clock timestamps instead of losing it silently.
@@ -1219,6 +1257,7 @@ function beginSession(subject, todoId, mode, targetMs, clockOnly, trigger, keepA
     syncFocusSessionServer(Math.round(targetMs / 1000), subject);
   }
   syncSessionActiveFlag(true, subject);
+  checkPeerSession(); // this device now has its own timer showing; hide the peer banner immediately
 }
 
 function updateFocusDisplay() {
@@ -3561,6 +3600,7 @@ async function hydrateFromCache() {
 
   await loadCategories(); // study-buttons and the chart's subject list depend on categories being loaded first
   restoreSession();
+  startPeerSessionPolling(); // "studying on another device" banner; own timer (if any) already restored above
 
   // 起動画面は「最初に表示されるToDoタブに必要な分」+「起動画面自体に出す目標カウントダウン」
   // だけ待って閉じる。残り12件は起動画面の裏でバックグラウンド読み込みを続け、届き次第

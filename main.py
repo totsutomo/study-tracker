@@ -1282,18 +1282,13 @@ def focus_session_active(payload: SessionActiveSync):
 FOCUS_SESSION_MAX_AGE_HOURS = 4
 
 
-@app.get("/api/focus-session/status")
-def focus_session_status(token: str | None = None):
-    if not DEVICE_TOKEN or token != DEVICE_TOKEN:
-        raise HTTPException(status_code=403, detail="invalid token")
-    conn = get_connection()
+def _focus_session_status(conn) -> dict:
     rows = conn.execute(
         "SELECT key, value FROM settings WHERE key IN "
         "('session_active', 'session_subject', 'session_started_at')"
     ).fetchall()
     values = dict(rows)
     if values.get("session_active") != "1":
-        conn.close()
         return {"active": False}
 
     started_at = values.get("session_started_at")
@@ -1310,15 +1305,35 @@ def focus_session_status(token: str | None = None):
             "('session_active', 'session_subject', 'session_started_at')"
         )
         conn.commit()
-        conn.close()
         return {"active": False}
 
-    conn.close()
     return {
         "active": True,
         "subject": values.get("session_subject") or None,
         "started_at": started_at,
     }
+
+
+@app.get("/api/focus-session/status")
+def focus_session_status(token: str | None = None):
+    if not DEVICE_TOKEN or token != DEVICE_TOKEN:
+        raise HTTPException(status_code=403, detail="invalid token")
+    conn = get_connection()
+    result = _focus_session_status(conn)
+    conn.close()
+    return result
+
+
+# 上のstatus()はJpBlocker(Android)専用でDEVICE_TOKEN必須。こちらはWebフロント(PWA)が
+# 「今どちらかのデバイスでセッション中か」を軽くポーリングしてバナー表示するための公開版。
+# このアプリは個人利用でユーザー認証自体が存在せず、他の読み取り系(/api/screen-time/daily等)
+# も同様に無認証で公開している方針に揃え、書き込み系のみDEVICE_TOKENを要求する既存の線引きは崩さない。
+@app.get("/api/focus-session/current")
+def focus_session_current():
+    conn = get_connection()
+    result = _focus_session_status(conn)
+    conn.close()
+    return result
 
 
 def _send_push_to_all(conn, payload: dict) -> int:

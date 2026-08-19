@@ -321,6 +321,35 @@ header h1 {
   box-shadow: 0 0 6px var(--accent-dim);
 }
 
+/* もう一方のデバイス(スマホ/PC)で今フォーカスタイマーが動いている時のFYI表示。
+   活動を要求するactivation/sleep-bannerと違い、ただの状況共有なので控えめ(パルスなし・
+   card背景)にしてdaily-min-bannerと同じトーンに揃える。クリックしても遷移先がないので
+   cursorはdefaultのまま。 */
+.peer-session-banner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 16px;
+  background: var(--card);
+  border-bottom: 1px solid var(--border);
+}
+
+.peer-session-banner.hidden {
+  display: none;
+}
+
+.peer-session-banner span {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
 #settings-activation-status {
   margin-bottom: 8px;
 }
