@@ -1,9 +1,11 @@
 import calendar
 import csv
+import hashlib
 import html
 import io
 import json
 import os
+import secrets
 import zipfile
 from datetime import date, datetime, timedelta
 from urllib.parse import quote
@@ -201,6 +203,13 @@ class ScreenTimeUpsert(BaseModel):
 
 class ApproveIn(BaseModel):
     token: str
+    pin: str
+
+
+class PinSetIn(BaseModel):
+    token: str
+    pin: str
+    current_pin: str | None = None
 
 
 class PendingChangeCreate(BaseModel):
@@ -1079,25 +1088,41 @@ def screen_time_mood_correlation(days: int = 30):
     }
 
 
-# ---------- 設定変更の遠隔承認(美緒)+ 設定変更の時間遅延(JpBlocker連携) ----------
+# ---------- 設定変更の遠隔承認(美緒)+ PIN + 設定変更の時間遅延(JpBlocker連携) ----------
 #
-# 背景: 最初はPINを美緒(第三者)に預ける方式だった。しかしとっつーが実際に設定を解除したい
+# 経緯(2026-08-19):
+# 第1版はPINを美緒(第三者)に預ける方式だった。しかしとっつーが実際に設定を解除したい
 # 場面では、美緒がPINを口頭かメッセージで教えるしかなく、一度でも教えた時点で「本人がPINを
-# 知らない」という前提そのものが崩れてしまう欠陥があった(2026-08-19、とっつー本人が指摘)。
+# 知らない」という前提そのものが崩れてしまう欠陥があった。
 #
-# そこでPINという「共有される秘密」自体を廃止し、美緒が専用ページ(/approve)で
-# 「承認する」ボタンを押すだけで15分間の変更申請ウィンドウが開く方式に置き換えた。
-# 値のやり取りは一切発生しない(美緒の専用URLに含まれるトークンだけが認証情報で、
-# これは一度発行されたら誰かに読み上げたり入力したりする必要がない)。
+# そこで第2版としてPINという「共有される秘密」自体を廃止し、美緒が専用ページ(/approve)で
+# ボタンを押すだけで15分間のウィンドウが開く方式に置き換えたが、これにはさらに別の欠陥が
+# あった。認証情報が「URLに含まれるトークン」だけになってしまい、そのトークンは
+# インフラの所有者であるとっつー自身も(Renderの環境変数として)見える/知り得る。つまり
+# 「美緒が承認した」ことは何も保証されず、とっつーが別端末でそのURLを開いて自分で
+# 承認ボタンを押すことも技術的には可能だった(とっつー本人が指摘して発覚)。
+#
+# 第3版(現在)はPINを復活させ、承認ボタンを押す操作そのものにPIN入力を必須にする。
+# トークン(URL)は「そもそも他人に見つからない」ための外側の壁に過ぎず、実質的な認証は
+# PIN(美緒だけが知り、とっつーには一度も開示されない値)が担う。PINは/approveページの中で
+# 美緒のブラウザ上でだけ入力され、とっつーの端末には一切降りてこない(=第1版の「口頭で
+# 教える羽目になる」問題は解決したまま)。トークンだけを知っていてもPINを知らなければ
+# 承認できないので、第2版の欠陥(=とっつーが自分で承認できてしまう)も塞がれる。
+#
+# PIN変更時は「現在のPINを知っている」ことを要求する(トークンだけを持つ人物が勝手に
+# 上書きできてしまうと、この仕組み全体の前提が崩れるため)。ただし初回設定だけは
+# トークンのみで可能(まだPINが存在しないので他に検証しようがない、既知の限界)。
 #
 # 承認ウィンドウが開いていても、実際の設定反映はこれまで通りPENDING_CHANGE_DELAY_HOURS
 # (24時間)後(「エスケープなし」方針、開発の教訓43/48)。承認は「変更を申請できる入口」を
 # 開けるだけで、反映タイミングまでは早めない。
 #
-# ウィンドウの状態はsettingsテーブルにunlock_expires_atとして保存する(単一の値なので
-# 新規テーブルは作らず、PIN時代のpin_hash/pin_saltと同じくsettingsに間借りする)。
+# ウィンドウの状態・PINのハッシュ/saltはいずれもsettingsテーブルに間借りする
+# (単一の値なので新規テーブルは作らない)。
 
 UNLOCK_WINDOW_MINUTES = 15
+PIN_HASH_ITERATIONS = 260_000
+PIN_MIN_LENGTH = 4
 
 ACTION_TYPE_LABELS = {
     "mode": "検知後の挙動",
@@ -1111,6 +1136,44 @@ ACTION_TYPE_LABELS = {
 def _require_device_token(token: str | None):
     if not DEVICE_TOKEN or token != DEVICE_TOKEN:
         raise HTTPException(status_code=403, detail="invalid token")
+
+
+def _hash_pin(pin: str, salt: bytes) -> str:
+    return hashlib.pbkdf2_hmac("sha256", pin.encode("utf-8"), salt, PIN_HASH_ITERATIONS).hex()
+
+
+def _read_pin(conn) -> tuple[str, str] | None:
+    rows = conn.execute(
+        "SELECT key, value FROM settings WHERE key IN ('pin_hash', 'pin_salt')"
+    ).fetchall()
+    d = {k: v for k, v in rows}
+    if "pin_hash" not in d or "pin_salt" not in d:
+        return None
+    return d["pin_hash"], d["pin_salt"]
+
+
+def _verify_pin(conn, pin: str) -> bool:
+    stored = _read_pin(conn)
+    if stored is None:
+        return False
+    pin_hash, salt_hex = stored
+    candidate = _hash_pin(pin, bytes.fromhex(salt_hex))
+    return secrets.compare_digest(candidate, pin_hash)
+
+
+def _set_pin(conn, pin: str):
+    salt = secrets.token_bytes(16)
+    pin_hash = _hash_pin(pin, salt)
+    conn.execute(
+        "INSERT INTO settings (key, value) VALUES ('pin_salt', ?) "
+        "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        (salt.hex(),),
+    )
+    conn.execute(
+        "INSERT INTO settings (key, value) VALUES ('pin_hash', ?) "
+        "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        (pin_hash,),
+    )
 
 
 def _unlock_status(conn) -> dict:
@@ -1139,67 +1202,41 @@ def _render_pending_html(pending: list[dict]) -> str:
     return "".join(items)
 
 
-APPROVE_PAGE_TEMPLATE = """<!DOCTYPE html>
+# __BODY__だけをプレースホルダにして、CSS/JS中の{}をformat()のエスケープ対象にしない
+# (このページはPIN設定/変更フォームの有無で中身が分岐するため、迂闊にformat()を使うと
+# 二重波括弧だらけになって事故りやすい。単純なreplace()で組み立てる)。
+APPROVE_PAGE_SHELL = """<!DOCTYPE html>
 <html lang="ja">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>JpBlocker 設定変更の承認</title>
 <style>
-  body {{ font-family: system-ui, sans-serif; max-width: 480px; margin: 40px auto; padding: 0 16px; color: #222; }}
-  h1 {{ font-size: 1.2rem; }}
-  h2 {{ font-size: 1rem; margin-top: 28px; }}
-  p.note {{ color: #666; font-size: 0.85rem; line-height: 1.6; }}
-  .status {{ padding: 14px; margin: 14px 0; border-radius: 8px; font-size: 0.95rem; }}
-  .status.locked {{ background: #fdecea; color: #c62828; }}
-  .status.active {{ background: #e6f4ea; color: #1e7e34; }}
-  button {{ width: 100%; padding: 14px; font-size: 1.05rem; border: none; border-radius: 8px; background: #1a73e8; color: white; }}
-  button.cancel {{ width: auto; padding: 8px 12px; font-size: 0.8rem; background: #c62828; margin-top: 8px; }}
-  .pending-item {{ border: 1px solid #ddd; border-radius: 8px; padding: 10px 12px; margin-bottom: 10px; font-size: 0.85rem; }}
-  .pending-item .type {{ font-weight: bold; margin-bottom: 4px; }}
-  .empty {{ color: #999; font-size: 0.85rem; }}
+  body { font-family: system-ui, sans-serif; max-width: 480px; margin: 40px auto; padding: 0 16px; color: #222; }
+  h1 { font-size: 1.2rem; }
+  h2 { font-size: 1rem; margin-top: 28px; }
+  p.note { color: #666; font-size: 0.85rem; line-height: 1.6; }
+  .status { padding: 14px; margin: 14px 0; border-radius: 8px; font-size: 0.95rem; }
+  .status.locked { background: #fdecea; color: #c62828; }
+  .status.active { background: #e6f4ea; color: #1e7e34; }
+  input { width: 100%; box-sizing: border-box; padding: 10px; font-size: 1rem; margin-bottom: 8px; border: 1px solid #ccc; border-radius: 6px; }
+  button { width: 100%; padding: 14px; font-size: 1.05rem; border: none; border-radius: 8px; background: #1a73e8; color: white; margin-top: 4px; }
+  button.secondary { background: #555; }
+  button.cancel { width: auto; padding: 8px 12px; font-size: 0.8rem; background: #c62828; margin-top: 8px; }
+  .pending-item { border: 1px solid #ddd; border-radius: 8px; padding: 10px 12px; margin-bottom: 10px; font-size: 0.85rem; }
+  .pending-item .type { font-weight: bold; margin-bottom: 4px; }
+  .empty { color: #999; font-size: 0.85rem; }
 </style>
 </head>
 <body>
 <h1>JpBlocker 設定変更の承認</h1>
-<p class="note">とっつーが端末の設定を変更したいときに使うページです。「承認する」を押すと15分間だけ変更の申請を受け付けられるようになります(実際に反映されるのはそこからさらに24時間後です)。このページのURLはとっつーには教えないでください。</p>
-<div class="status {status_class}">{status_text}</div>
-<button id="approveBtn">承認する(15分間)</button>
-<h2>反映待ちの変更</h2>
-{pending_html}
-<script>
-const TOKEN = {token_json};
-document.getElementById('approveBtn').addEventListener('click', async () => {{
-  const res = await fetch('/approve', {{
-    method: 'POST',
-    headers: {{'Content-Type': 'application/json'}},
-    body: JSON.stringify({{token: TOKEN}}),
-  }});
-  if (res.ok) {{ location.reload(); }} else {{ alert('承認に失敗しました'); }}
-}});
-document.querySelectorAll('.cancel').forEach((btn) => {{
-  btn.addEventListener('click', async () => {{
-    const id = btn.dataset.id;
-    const res = await fetch('/approve/pending-changes/' + id + '?token=' + encodeURIComponent(TOKEN), {{ method: 'DELETE' }});
-    if (res.ok) {{ location.reload(); }} else {{ alert('取り消しに失敗しました'); }}
-  }});
-}});
-</script>
+<p class="note">とっつーが端末の設定を変更したいときに使うページです。PINは美緒だけが知っている状態を保ってください(とっつーには教えない)。「承認する」を押すと15分間だけ変更の申請を受け付けられるようになります(実際に反映されるのはそこからさらに24時間後です)。</p>
+__BODY__
 </body>
 </html>"""
 
 
-@app.get("/approve")
-def approve_page(token: str | None = None):
-    if not APPROVAL_TOKEN or token != APPROVAL_TOKEN:
-        raise HTTPException(status_code=403, detail="invalid token")
-    conn = get_connection()
-    status = _unlock_status(conn)
-    pending = rows_to_dicts(conn.execute(
-        "SELECT id, action_type, payload, created_at, apply_after FROM pending_changes "
-        "WHERE applied = 0 ORDER BY created_at ASC"
-    ))
-    conn.close()
+def _render_approve_page(status: dict, pin_is_set: bool, pending: list[dict], token: str | None) -> str:
     if status["active"]:
         remaining_min = max(
             0,
@@ -1210,22 +1247,116 @@ def approve_page(token: str | None = None):
     else:
         status_class = "locked"
         status_text = "現在は変更を申請できません(承認が必要です)"
-    return HTMLResponse(
-        APPROVE_PAGE_TEMPLATE.format(
-            status_class=status_class,
-            status_text=status_text,
-            pending_html=_render_pending_html(pending),
-            token_json=json.dumps(token),
+
+    if pin_is_set:
+        approve_html = (
+            '<div class="status ' + status_class + '">' + status_text + '</div>'
+            '<input type="password" id="approvePin" placeholder="PIN" autocomplete="off">'
+            '<button id="approveBtn">承認する(15分間)</button>'
         )
+        approve_script = """
+document.getElementById('approveBtn').addEventListener('click', async () => {
+  const pin = document.getElementById('approvePin').value;
+  const res = await fetch('/approve', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({token: TOKEN, pin: pin}),
+  });
+  if (res.ok) { location.reload(); } else { alert('承認に失敗しました(PINを確認してください)'); }
+});
+"""
+        pin_manage_html = (
+            '<h2>PINを変更</h2>'
+            '<input type="password" id="currentPin" placeholder="現在のPIN" autocomplete="off">'
+            '<input type="password" id="changeNewPin" placeholder="新しいPIN(4桁以上)" autocomplete="off">'
+            '<input type="password" id="changeNewPinConfirm" placeholder="確認のためもう一度" autocomplete="off">'
+            '<button class="secondary" id="changePinBtn">変更する</button>'
+        )
+        pin_manage_script = """
+document.getElementById('changePinBtn').addEventListener('click', async () => {
+  const current = document.getElementById('currentPin').value;
+  const pin = document.getElementById('changeNewPin').value;
+  const confirmPin = document.getElementById('changeNewPinConfirm').value;
+  if (pin.length < 4) { alert('PINは4桁以上にしてください'); return; }
+  if (pin !== confirmPin) { alert('確認用のPINが一致しません'); return; }
+  const res = await fetch('/approve/pin', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({token: TOKEN, pin: pin, current_pin: current}),
+  });
+  if (res.ok) { alert('PINを変更しました'); location.reload(); } else { alert('変更に失敗しました(現在のPINを確認してください)'); }
+});
+"""
+    else:
+        approve_html = '<div class="status locked">PINが未設定です。まず下でPINを決めてください(承認にはこのあと毎回このPINを使います)。</div>'
+        approve_script = ""
+        pin_manage_html = (
+            '<h2>PINの設定(初回のみ)</h2>'
+            '<p class="note">ここで決めたPINは今後、承認のたびに入力します。とっつーには一切教えないでください。</p>'
+            '<input type="password" id="newPin" placeholder="新しいPIN(4桁以上)" autocomplete="off">'
+            '<input type="password" id="newPinConfirm" placeholder="確認のためもう一度" autocomplete="off">'
+            '<button id="setPinBtn">PINを設定する</button>'
+        )
+        pin_manage_script = """
+document.getElementById('setPinBtn').addEventListener('click', async () => {
+  const pin = document.getElementById('newPin').value;
+  const confirmPin = document.getElementById('newPinConfirm').value;
+  if (pin.length < 4) { alert('PINは4桁以上にしてください'); return; }
+  if (pin !== confirmPin) { alert('確認用のPINが一致しません'); return; }
+  const res = await fetch('/approve/pin', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({token: TOKEN, pin: pin}),
+  });
+  if (res.ok) { location.reload(); } else { alert('設定に失敗しました'); }
+});
+"""
+
+    cancel_script = """
+document.querySelectorAll('.cancel').forEach((btn) => {
+  btn.addEventListener('click', async () => {
+    const id = btn.dataset.id;
+    const res = await fetch('/approve/pending-changes/' + id + '?token=' + encodeURIComponent(TOKEN), { method: 'DELETE' });
+    if (res.ok) { location.reload(); } else { alert('取り消しに失敗しました'); }
+  });
+});
+"""
+
+    body = (
+        '<script>const TOKEN = ' + json.dumps(token) + ';</script>'
+        + approve_html
+        + pin_manage_html
+        + '<h2>反映待ちの変更</h2>'
+        + _render_pending_html(pending)
+        + '<script>' + approve_script + pin_manage_script + cancel_script + '</script>'
     )
+    return APPROVE_PAGE_SHELL.replace("__BODY__", body)
+
+
+@app.get("/approve")
+def approve_page(token: str | None = None):
+    if not APPROVAL_TOKEN or token != APPROVAL_TOKEN:
+        raise HTTPException(status_code=403, detail="invalid token")
+    conn = get_connection()
+    status = _unlock_status(conn)
+    pin_is_set = _read_pin(conn) is not None
+    pending = rows_to_dicts(conn.execute(
+        "SELECT id, action_type, payload, created_at, apply_after FROM pending_changes "
+        "WHERE applied = 0 ORDER BY created_at ASC"
+    ))
+    conn.close()
+    return HTMLResponse(_render_approve_page(status, pin_is_set, pending, token))
 
 
 @app.post("/approve")
 def approve_submit(payload: ApproveIn):
     if not APPROVAL_TOKEN or payload.token != APPROVAL_TOKEN:
         raise HTTPException(status_code=403, detail="invalid token")
-    expires_at = (datetime.now() + timedelta(minutes=UNLOCK_WINDOW_MINUTES)).isoformat(sep=" ", timespec="seconds")
     conn = get_connection()
+    if not _verify_pin(conn, payload.pin):
+        conn.close()
+        raise HTTPException(status_code=403, detail="invalid pin")
+    expires_at = (datetime.now() + timedelta(minutes=UNLOCK_WINDOW_MINUTES)).isoformat(sep=" ", timespec="seconds")
     conn.execute(
         "INSERT INTO settings (key, value) VALUES ('unlock_expires_at', ?) "
         "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
@@ -1234,6 +1365,26 @@ def approve_submit(payload: ApproveIn):
     conn.commit()
     conn.close()
     return {"ok": True, "expires_at": expires_at}
+
+
+@app.post("/approve/pin")
+def approve_set_pin(payload: PinSetIn):
+    if not APPROVAL_TOKEN or payload.token != APPROVAL_TOKEN:
+        raise HTTPException(status_code=403, detail="invalid token")
+    if len(payload.pin) < PIN_MIN_LENGTH:
+        raise HTTPException(status_code=400, detail="pin too short")
+    conn = get_connection()
+    if _read_pin(conn) is not None:
+        # 既にPINが設定済みなら、現在のPINを知っている場合だけ上書きを許す。
+        # トークンだけを持つ人物(=とっつーもここに含まれ得る)が勝手にPINを差し替えられて
+        # しまうと、「PINは美緒だけが知っている」という前提そのものが崩れるため。
+        if not payload.current_pin or not _verify_pin(conn, payload.current_pin):
+            conn.close()
+            raise HTTPException(status_code=403, detail="current pin mismatch")
+    _set_pin(conn, payload.pin)
+    conn.commit()
+    conn.close()
+    return {"ok": True}
 
 
 @app.delete("/approve/pending-changes/{change_id}")
