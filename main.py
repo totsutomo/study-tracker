@@ -21,13 +21,24 @@ app = FastAPI(title="Compass")
 
 init_db()
 
+def _env_token(name: str) -> str | None:
+    # Renderの環境変数入力欄は複数行テキストエリアで、コピペ時に先頭/末尾へ改行や空白が
+    # 紛れ込んでも見た目では気づきにくい。トークン比較はここで一度だけstripしておき、
+    # 「画面上は正しく見えるのに一致しない」事故を防ぐ。
+    value = os.environ.get(name)
+    if value is None:
+        return None
+    stripped = value.strip()
+    return stripped or None
+
+
 VAPID_PUBLIC_KEY = os.environ.get("VAPID_PUBLIC_KEY")
 VAPID_PRIVATE_KEY = os.environ.get("VAPID_PRIVATE_KEY")
 VAPID_CLAIMS_EMAIL = os.environ.get("VAPID_CLAIMS_EMAIL", "example@example.com")
-CRON_SECRET = os.environ.get("CRON_SECRET")
+CRON_SECRET = _env_token("CRON_SECRET")
 # JpBlocker(Androidネイティブの連携アプリ)からの通信を認証するための共有トークン。
 # CRON_SECRETとは用途が別(外部cronサービス vs 自分のAndroid端末)なので分けている。
-DEVICE_TOKEN = os.environ.get("DEVICE_TOKEN")
+DEVICE_TOKEN = _env_token("DEVICE_TOKEN")
 # PIN第三者管理ページ(/pin-setup)専用のトークン。DEVICE_TOKENと分けているのは信頼境界が
 # 違うため(こちらは美緒だけが使う想定で、とっつーのAndroid端末は使わない)。
 # 注意: このトークンはとっつー自身もRenderの環境変数として見える/設定できる。
@@ -35,7 +46,7 @@ DEVICE_TOKEN = os.environ.get("DEVICE_TOKEN")
 # 「本人が絶対に上書きできない」ことは目的にしていない(教訓: 自分がインフラの所有者である
 # 以上、本気で上書きしようとすれば技術的には可能。ここは意図的な操作への抑止力ではなく、
 # 衝動的な自己解除への摩擦として設計している)。
-PIN_CUSTODY_TOKEN = os.environ.get("PIN_CUSTODY_TOKEN")
+PIN_CUSTODY_TOKEN = _env_token("PIN_CUSTODY_TOKEN")
 # 設定変更がPIN通過後も即反映されない猶予時間。PINが正しくてもここはスキップしない
 # (「エスケープなし」方針をPINガード全体にも適用する)。
 PENDING_CHANGE_DELAY_HOURS = 24
