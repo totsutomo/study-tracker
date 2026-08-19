@@ -322,16 +322,18 @@ header h1 {
 }
 
 /* もう一方のデバイス(スマホ/PC)で今フォーカスタイマーが動いている時のFYI表示。
-   活動を要求するactivation/sleep-bannerと違い、ただの状況共有なので控えめ(パルスなし・
-   card背景)にしてdaily-min-bannerと同じトーンに揃える。クリックしても遷移先がないので
-   cursorはdefaultのまま。 */
+   行動を要求するactivation(赤)/sleep(青)ほど緊急ではないが、気付いてもらう必要はあるため
+   daily-min-bannerの控えめな見た目からは離し、sleep-bannerと同格(色付き背景+パルス)にした
+   上で色だけ変えて区別する(勉強中=ポジティブな状態としてaccent-secondaryの緑を使用)。
+   クリックしても遷移先がないのでcursorはdefaultのまま。 */
 .peer-session-banner {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 8px 16px;
-  background: var(--card);
+  padding: 10px 16px;
+  background: var(--accent-secondary);
   border-bottom: 1px solid var(--border);
+  animation: peer-session-banner-pulse 3s ease-in-out infinite;
 }
 
 .peer-session-banner.hidden {
@@ -339,15 +341,26 @@ header h1 {
 }
 
 .peer-session-banner span {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--on-accent);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   display: flex;
   align-items: center;
   gap: 5px;
+}
+
+/* .inline-icon の既定色(text-muted寄り)は自身に直接colorを持つため祖先のcolorを継承しない。
+   緑背景の上で薄く沈んで見えないよう、ここだけ明示的にテキストと同じon-accentへ揃える。 */
+.peer-session-banner .inline-icon {
+  color: var(--on-accent);
+}
+
+@keyframes peer-session-banner-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.85; }
 }
 
 #settings-activation-status {

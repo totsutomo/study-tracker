@@ -1133,15 +1133,37 @@ function syncSessionActiveFlag(active, subject) {
 // 「今フォーカスタイマーが動いている状態」自体をもう一方のデバイス(スマホ⇄PC)へリアルタイムに
 // 同期表示するのは難しい(タイマーはローカルのJS変数+localStorageのみで管理、共有DBには
 // syncSessionActiveFlag()が送るsession_active等のフラグしかない)ため、代わりに上記フラグを
-// 定期ポーリングして「今どこかのデバイスでセッション中か」だけを控えめに表示する。
+// 定期ポーリングして「今どこかのデバイスでセッション中か+経過時間」を分かりやすく表示する。
 // このデバイス自身がタイマーを動かしている間はミニバー/オーバーレイで既に見えているので出さない。
+// 経過時間の表示・更新はupdateActivationBanner()と同じ構成(ポーリングは重い呼び出しなので粗く、
+// 見た目のtickはローカル計算で細かく)。
 let peerSessionPollInterval = null;
+let peerSessionTickInterval = null;
+let peerSessionSubject = null;
+let peerSessionStartedAt = null; // Date | null
 
-async function checkPeerSession() {
+function updatePeerSessionBanner() {
   const banner = document.getElementById("peer-session-banner");
   const label = document.getElementById("peer-session-banner-label");
-  if (timerSubject) {
+  if (!peerSessionStartedAt) {
     banner.classList.add("hidden");
+    return;
+  }
+  const elapsedMin = Math.max(0, Math.floor((Date.now() - peerSessionStartedAt.getTime()) / 60000));
+  const subjectText = peerSessionSubject ? ` · ${peerSessionSubject}` : "";
+  label.innerHTML = `${ICONS.clock}Studying now${subjectText} · ${formatLogDuration(elapsedMin)}`;
+  banner.classList.remove("hidden");
+}
+
+async function checkPeerSession() {
+  if (timerSubject) {
+    // this device already has its own timer showing; don't also poll/display the peer banner
+    peerSessionStartedAt = null;
+    if (peerSessionTickInterval) {
+      clearInterval(peerSessionTickInterval);
+      peerSessionTickInterval = null;
+    }
+    updatePeerSessionBanner();
     return;
   }
   let status;
@@ -1151,12 +1173,19 @@ async function checkPeerSession() {
     return; // best-effort; leave the banner as it was on a network hiccup
   }
   if (status && status.active) {
-    const subjectText = status.subject ? ` · ${status.subject}` : "";
-    label.innerHTML = `${ICONS.clock}Studying now${subjectText}`;
-    banner.classList.remove("hidden");
+    peerSessionSubject = status.subject || null;
+    peerSessionStartedAt = status.started_at ? new Date(status.started_at.replace(" ", "T")) : new Date();
+    if (!peerSessionTickInterval) {
+      peerSessionTickInterval = setInterval(updatePeerSessionBanner, 30000);
+    }
   } else {
-    banner.classList.add("hidden");
+    peerSessionStartedAt = null;
+    if (peerSessionTickInterval) {
+      clearInterval(peerSessionTickInterval);
+      peerSessionTickInterval = null;
+    }
   }
+  updatePeerSessionBanner();
 }
 
 function startPeerSessionPolling() {
