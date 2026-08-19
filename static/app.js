@@ -1174,7 +1174,13 @@ async function checkPeerSession() {
   }
   if (status && status.active) {
     peerSessionSubject = status.subject || null;
-    peerSessionStartedAt = status.started_at ? new Date(status.started_at.replace(" ", "T")) : new Date();
+    // Unlike other timestamps in this app (which the client writes in its own local time via
+    // nowLocalTimestamp()), session_started_at is written server-side by main.py's datetime.now()
+    // - i.e. the server's (UTC) clock, not this device's local time. Parsing it the same way as
+    // those client-local strings double-counted this device's UTC offset as elapsed time (e.g.
+    // NZ's UTC+12 showed up as a phantom +12h on top of the real elapsed minutes). Appending "Z"
+    // tells Date() to parse it as UTC instead of local time.
+    peerSessionStartedAt = status.started_at ? new Date(status.started_at.replace(" ", "T") + "Z") : new Date();
     if (!peerSessionTickInterval) {
       peerSessionTickInterval = setInterval(updatePeerSessionBanner, 30000);
     }
