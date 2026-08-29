@@ -1997,6 +1997,16 @@ body.focus-open #tabbar {
   display: none;
 }
 
+/* Mood: PC版だけ追加する「理由内訳」の見出しと「Daily log」一覧(2026-08-29)。
+   モバイルでは今まで通りタップしないと個々のエントリが出ない挙動のまま変えない。 */
+.mood-chart-side-heading {
+  display: none;
+}
+
+.mood-log-card {
+  display: none;
+}
+
 /* ---------- desktop layout (md+) ----------
    PC表示だとモバイル用レイアウトのまま余白だけ増えて、グラフはつまり、カレンダーの予定/ToDoは
    1件+「+N件」に丸められて見えない、という問題への対応(2026-08-29)。
@@ -2103,6 +2113,52 @@ body.focus-open #tabbar {
   .study-history-row > div {
     flex: 1;
     min-width: 0;
+  }
+
+  /* ---- Mood: グラフを拡大するのではなく、モバイルでは「タップしないと出ない」
+     情報を常設パネル化して空きスペースを埋める(2026-08-29)。
+     右に理由別の平均スコア、下に個々のエントリを新しい順に並べたDaily logを追加。 */
+  .mood-chart-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 20px;
+  }
+
+  .mood-chart-main {
+    /* Studyのchart-cardと同じ理由(SVGが幅に比例して縦にも伸びる)で頭打ちにする */
+    max-width: 640px;
+    margin-bottom: 0;
+  }
+
+  .mood-chart-side {
+    width: 280px;
+    flex-shrink: 0;
+  }
+
+  .mood-chart-side-heading {
+    display: block;
+    margin: 0 0 8px;
+    font-size: 15px;
+  }
+
+  .mood-log-card {
+    display: block;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-card);
+    padding: 16px 20px;
+    margin-bottom: 12px;
+    max-width: 640px;
+  }
+
+  .mood-log-card h3 {
+    margin: 0 0 10px;
+  }
+
+  .mood-log-card .list {
+    max-height: 420px;
+    overflow-y: auto;
   }
 
   /* ---- Calendar: グリッドと選択日の詳細(予定・ToDo)を横並びに(以前は縦積みで

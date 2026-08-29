@@ -1899,6 +1899,33 @@ function formatMoodEntryLine(entry) {
   return `${time} Mood ${entry.score}${tags ? `(${tags})` : ""}`;
 }
 
+// PC版のDaily log(mood-log-list)用。直近14日分の個別エントリを新しい順に並べる。
+function renderMoodLogList(rows) {
+  const list = document.getElementById("mood-log-list");
+  if (!list) return;
+  list.innerHTML = "";
+  if (rows.length === 0) {
+    list.innerHTML = "<li>No records yet</li>";
+    return;
+  }
+  rows
+    .slice()
+    .reverse()
+    .forEach((e) => {
+      const li = document.createElement("li");
+      const time = (e.logged_at || "").slice(11, 16);
+      const detail = [e.reason, e.note].filter(Boolean).map(escapeHtml).join(" / ") || "-";
+      li.innerHTML = `
+        <span class="log-info">
+          <span class="log-subject">${e.date.slice(5)} ${time}</span>
+          <span class="log-time">${detail}</span>
+        </span>
+        <span class="log-duration">${e.score}/10</span>
+      `;
+      list.appendChild(li);
+    });
+}
+
 async function loadMoodPanel() {
   const rows = await api("/api/mood-logs?days=14");
   const today = todayStr();
@@ -1913,6 +1940,10 @@ async function loadMoodPanel() {
     status.textContent = "Not recorded";
     listEl.innerHTML = "";
   }
+
+  // PC(md+)では余白を埋めるため、モバイルでは「点をタップ」しないと出ない
+  // 個々のエントリをDaily logとして常時一覧表示する(CSS側でmd+のみ表示)。
+  renderMoodLogList(rows);
 
   const dates = last14Dates();
   const entriesByDate = {};

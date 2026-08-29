@@ -382,16 +382,25 @@
       <div class="stat-cell"><span class="stat-label">Mood avg by screen time</span><span class="stat-value" id="mood-stat-screen-time-correlation"></span></div>
     </div>
 
-    <div class="goal-progress-card">
-      <div class="goal-progress-row">
-        <span>Mood trend (last 14 days)</span>
+    <div class="mood-chart-row">
+      <div class="goal-progress-card mood-chart-main">
+        <div class="goal-progress-row">
+          <span>Mood trend (last 14 days)</span>
+        </div>
+        <div id="mood-chart"></div>
+        <p class="meta">Background bars are study time for that day; the dashed line is screen time (JpBlocker) for reference</p>
+        <p class="meta" id="mood-chart-detail">Tap a point for details</p>
       </div>
-      <div id="mood-chart"></div>
-      <p class="meta">Background bars are study time for that day; the dashed line is screen time (JpBlocker) for reference</p>
-      <p class="meta" id="mood-chart-detail">Tap a point for details</p>
+      <div class="mood-chart-side">
+        <h3 class="mood-chart-side-heading">Reason breakdown (30d)</h3>
+        <ul id="mood-reason-stats" class="mood-reason-list hidden"></ul>
+      </div>
     </div>
 
-    <ul id="mood-reason-stats" class="mood-reason-list hidden"></ul>
+    <div class="mood-log-card">
+      <h3>Daily log</h3>
+      <ul id="mood-log-list" class="list"></ul>
+    </div>
 
     <h2>Activation Log</h2>
     <p class="meta" id="activation-current-status"></p>
