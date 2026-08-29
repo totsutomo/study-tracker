@@ -2040,6 +2040,13 @@ body.focus-open #tabbar {
     background: var(--card);
     border-right: 1px solid var(--border);
     padding: 20px 12px;
+    /* 各タブの中身が縦に長くなるとページ全体がスクロールし、それに引きずられて
+       サイドバーの項目も一緒に流れて消えてしまっていた(2026-08-29指摘)。
+       sticky+固定高さでビューポート上端に常に固定する */
+    position: sticky;
+    top: 0;
+    height: 100dvh;
+    overflow-y: auto;
   }
 
   .sidebar-nav .tab-btn {
@@ -2185,10 +2192,18 @@ body.focus-open #tabbar {
     padding: 14px 16px;
   }
 
+  /* 月グリッド(5〜6週分)の高さはapp.js側(updateCalGridHeight)がビューポートに収まるよう
+     .cal-gridに直接pxで設定する。grid-auto-rows:1frで週の行にその高さを均等分配するため、
+     セル側は幅からの逆算(aspect-ratio)をやめて行の高さいっぱいに引き伸ばす(2026-08-29)。
+     これにより週数(5/6週)や画面の縦幅が変わっても、月表示が常にスクロール無しで収まる。 */
+  .cal-grid {
+    grid-auto-rows: 1fr;
+  }
+
   /* セルが広がる分、イベント名も1件+「+N件」表記から最大3件まで表示できる
      (実際に何件描画するかはapp.js側でビューポート幅を見て決めている) */
   .cal-day {
-    aspect-ratio: 1.1;
+    aspect-ratio: auto;
   }
 
   .cal-event-label {

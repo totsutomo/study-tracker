@@ -9,6 +9,10 @@ function switchTab(tabId) {
   if (typeof timerSubject !== "undefined" && timerSubject && !overlayMinimized) {
     minimizeFocusOverlay();
   }
+  // タブが非表示(display:none)の間はグリッドの位置が測れないため、Calendarタブが
+  // 表示された瞬間に高さを再計算する(updateCalGridHeightはapp.js後方で定義、
+  // switchTab自体はクリック時にしか呼ばれないのでhoisting上の問題はない)
+  if (tabId === "tab-calendar" && typeof updateCalGridHeight === "function") updateCalGridHeight();
 }
 
 tabButtons.forEach((btn) => {
@@ -3022,6 +3026,28 @@ CAL_EVENT_MEDIA_QUERY.addEventListener("change", () => {
   if (document.getElementById("tab-calendar").classList.contains("active")) renderCalGrid();
 });
 
+// PC(md+)では月グリッド(5〜6週分)がビューポートより縦に長くなり、下端を見るのに
+// スクロールが必要になる問題への対応(2026-08-29)。header/バナー等の高さは可変で
+// 固定値を引き算できないため、実際にグリッドが始まる位置を都度測ってビューポート内に
+// 収まる高さを算出し、.cal-gridに直接セットする(CSS側はgrid-auto-rows:1frで行に均等分配)。
+function updateCalGridHeight() {
+  const grid = document.getElementById("cal-grid");
+  if (!grid) return;
+  if (!CAL_EVENT_MEDIA_QUERY.matches) {
+    grid.style.height = ""; // モバイルは従来通りaspect-ratio任せ(この関数は何もしない)
+    return;
+  }
+  const top = grid.getBoundingClientRect().top;
+  if (top <= 0) return; // タブが非表示(display:none)でまだ測れない場合はスキップ
+  // 40pxは.cal-boardの下padding(10px)+margin(18px)+少し余裕、を差し引いてぴったり収める
+  const available = window.innerHeight - top - 40;
+  grid.style.height = `${Math.max(available, 420)}px`;
+}
+
+window.addEventListener("resize", () => {
+  if (document.getElementById("tab-calendar").classList.contains("active")) updateCalGridHeight();
+});
+
 function renderCalGrid() {
   const grid = document.getElementById("cal-grid");
   const firstOfMonth = new Date(calYear, calMonth - 1, 1);
@@ -3093,6 +3119,8 @@ function renderCalGrid() {
       renderCalDayDetail();
     });
   });
+
+  updateCalGridHeight();
 }
 
 function layoutDayEvents(events) {
