@@ -2033,6 +2033,10 @@ body.focus-open #tabbar {
   }
 
   .sidebar-nav .tab-btn {
+    /* 基本の.tab-btnは下部タブバー(横並び)用にflex:1を持っており、それをそのまま
+       縦並びのsidebar-navに持ち込むと各ボタンが縦方向に均等に引き伸ばされて
+       (activeの背景が縦に間延びした巨大な箱になる)しまうため、ここで打ち消す */
+    flex: none;
     flex-direction: row;
     justify-content: flex-start;
     align-items: center;
@@ -2078,8 +2082,9 @@ body.focus-open #tabbar {
     margin-bottom: 0;
   }
 
-  /* グラフはカードで囲って幅いっぱいに。study-svg-chart側は元々width:100%/height:autoで
-     viewBoxの比率を保ったまま伸びるので、カードを広くするだけでグラフ自体が大きく見やすくなる */
+  /* グラフはカードで囲うが、幅いっぱいに伸ばすと(SVGはviewBoxの比率を保ったまま
+     width:100%で伸びるため)横だけでなく縦にも間延びしてバランスが崩れる。
+     他のカード類とサイズ感を揃えるため、ここで幅を頭打ちにする */
   .chart-card {
     background: var(--card);
     border: 1px solid var(--border);
@@ -2087,6 +2092,7 @@ body.focus-open #tabbar {
     box-shadow: var(--shadow-card);
     padding: 16px 20px;
     margin-bottom: 12px;
+    max-width: 820px;
   }
 
   .study-history-row {
