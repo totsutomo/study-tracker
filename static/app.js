@@ -2980,6 +2980,17 @@ async function loadCalendar() {
   renderCalendarView();
 }
 
+// セル幅に余裕のあるPC(md+)では、1件+「+N件」に丸めず何件かそのまま表示できる。
+// styleのbreakpoint(768px)と合わせておく。
+const CAL_EVENT_MEDIA_QUERY = window.matchMedia("(min-width: 768px)");
+function calEventDisplayCap() {
+  return CAL_EVENT_MEDIA_QUERY.matches ? 3 : 1;
+}
+// ウィンドウ幅がbreakpointをまたいだ場合に再描画(タブレット回転・ウィンドウリサイズ対応)
+CAL_EVENT_MEDIA_QUERY.addEventListener("change", () => {
+  if (document.getElementById("tab-calendar").classList.contains("active")) renderCalGrid();
+});
+
 function renderCalGrid() {
   const grid = document.getElementById("cal-grid");
   const firstOfMonth = new Date(calYear, calMonth - 1, 1);
@@ -3011,16 +3022,18 @@ function renderCalGrid() {
       // 予定(events)は「何日に何があるか」がドットだと分からないという指摘を受け、
       // 名前をそのまま短縮テキストで表示する。ToDoの期限は件数が多く/カレンダー上では
       // ToDo画面ほど重要でないため、従来通りドットのまま(2026-08-16)。
+      // セル幅に余裕のあるPC(md+)では1件+「+N件」に丸めず最大3件まで表示する(2026-08-29)。
+      const eventCap = calEventDisplayCap();
       let eventMark = "";
-      if (dayEvents.length === 1) {
-        const e = dayEvents[0];
-        eventMark = `<span class="cal-event-label" style="color:${colorFor(e.category || "")}">${escapeHtml(e.title)}</span>`;
-      } else if (dayEvents.length > 1) {
-        const e = dayEvents[0];
-        eventMark = `
-          <span class="cal-event-label" style="color:${colorFor(e.category || "")}">${escapeHtml(e.title)}</span>
-          <span class="cal-event-more">+${dayEvents.length - 1} more</span>
-        `;
+      if (dayEvents.length > 0) {
+        const shown = dayEvents.slice(0, eventCap);
+        const restCount = dayEvents.length - shown.length;
+        eventMark = `<div class="cal-events">${shown
+          .map(
+            (e) =>
+              `<span class="cal-event-label" style="color:${colorFor(e.category || "")}">${escapeHtml(e.title)}</span>`,
+          )
+          .join("")}${restCount > 0 ? `<span class="cal-event-more">+${restCount} more</span>` : ""}</div>`;
       }
       const todoMark = dayTodos.length ? `<span class="cal-todo-dot"></span>` : "";
       const studyMark = calStudyDaysCache.has(c.date) ? `<span class="cal-log-dot"></span>` : "";

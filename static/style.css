@@ -405,6 +405,15 @@ main {
   margin: 0 auto;
 }
 
+/* PC(md+)ではsidebar-navが横に付く分、mainはモバイル用の480px幅キャップを外して
+   残り幅いっぱいまで使う(#app-shellの分割方法は「デスクトップレイアウト(md+)」セクション参照) */
+@media (min-width: 768px) {
+  main {
+    max-width: none;
+    margin: 0;
+  }
+}
+
 .tab-panel { display: none; }
 .tab-panel.active { display: block; }
 
@@ -1695,7 +1704,15 @@ body.focus-open #tabbar {
 }
 
 /* 予定(events)の中身をドットではなく短縮テキストで見せる。1件なら名前をそのまま、
-   2件以上は先頭の1件+「+N件」に丸めて、狭いマスでの潰れを防ぐ(2026-08-16)。 */
+   2件以上は先頭の1件+「+N件」に丸めて、狭いマスでの潰れを防ぐ(2026-08-16)。
+   セルに余裕があるPC(md+)では複数件そのまま並べられるよう、ラベルは.cal-eventsでまとめて
+   囲む(セル自体はflexでalign-items:centerのため、幅いっぱいに広げるにはwidth指定が要る)。 */
+.cal-events {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+}
+
 .cal-event-label {
   display: block;
   width: 100%;
@@ -1973,4 +1990,146 @@ body.focus-open #tabbar {
 .tab-btn.active {
   color: var(--accent);
   font-weight: 700;
+}
+
+/* モバイルではsidebar-navではなく従来通り下部#tabbarを使う(md+側で表示を入れ替える) */
+.sidebar-nav {
+  display: none;
+}
+
+/* ---------- desktop layout (md+) ----------
+   PC表示だとモバイル用レイアウトのまま余白だけ増えて、グラフはつまり、カレンダーの予定/ToDoは
+   1件+「+N件」に丸められて見えない、という問題への対応(2026-08-29)。
+   モバイル(768px未満)の見た目・挙動はここでは一切変えず、768px以上でのみ:
+   - 下部タブバーの代わりに左サイドバーnavへ切り替え
+   - main側のmax-width制限を外して幅を使い切る(main本体の解除は↑main規則側)
+   - Study/Calendar/ToDoの各タブで、縦積みだったカードを横並びにして空きスペースを埋める */
+
+@media (min-width: 768px) {
+  body {
+    padding-bottom: 0;
+  }
+
+  .app-shell {
+    display: flex;
+    align-items: stretch;
+    min-height: 100dvh;
+  }
+
+  .app-main-col {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .sidebar-nav {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    width: 216px;
+    flex-shrink: 0;
+    background: var(--card);
+    border-right: 1px solid var(--border);
+    padding: 20px 12px;
+  }
+
+  .sidebar-nav .tab-btn {
+    flex-direction: row;
+    justify-content: flex-start;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 12px;
+    border-radius: var(--radius-sm);
+    font-size: 14px;
+  }
+
+  .sidebar-nav .tab-btn.active {
+    background: var(--card-hover);
+  }
+
+  #tabbar {
+    display: none;
+  }
+
+  /* ---- ToDo: 一覧はそのまま、右に「Completed」統計を常設(以前は下にスクロールしないと見えなかった) ---- */
+  .todo-split {
+    display: flex;
+    align-items: flex-start;
+    gap: 20px;
+  }
+
+  .todo-main {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .todo-side {
+    width: 280px;
+    flex-shrink: 0;
+  }
+
+  /* ---- Study: 目標カードとグラフ・履歴を横並びにして空きスペースを埋める ---- */
+  .goal-cards-row {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+  }
+
+  .goal-cards-row .goal-progress-card {
+    margin-bottom: 0;
+  }
+
+  /* グラフはカードで囲って幅いっぱいに。study-svg-chart側は元々width:100%/height:autoで
+     viewBoxの比率を保ったまま伸びるので、カードを広くするだけでグラフ自体が大きく見やすくなる */
+  .chart-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-card);
+    padding: 16px 20px;
+    margin-bottom: 12px;
+  }
+
+  .study-history-row {
+    display: flex;
+    gap: 20px;
+  }
+
+  .study-history-row > div {
+    flex: 1;
+    min-width: 0;
+  }
+
+  /* ---- Calendar: グリッドと選択日の詳細(予定・ToDo)を横並びに(以前は縦積みで
+     詳細を見るのに下までスクロールが必要だった) ---- */
+  .cal-split {
+    display: flex;
+    align-items: flex-start;
+    gap: 20px;
+  }
+
+  .cal-board {
+    flex: 1;
+    min-width: 0;
+    margin: 0 0 18px;
+  }
+
+  .cal-day-detail {
+    width: 320px;
+    flex-shrink: 0;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-card);
+    padding: 14px 16px;
+  }
+
+  /* セルが広がる分、イベント名も1件+「+N件」表記から最大3件まで表示できる
+     (実際に何件描画するかはapp.js側でビューポート幅を見て決めている) */
+  .cal-day {
+    aspect-ratio: 1.1;
+  }
+
+  .cal-event-label {
+    font-size: 10px;
+  }
 }
