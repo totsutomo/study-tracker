@@ -1023,6 +1023,14 @@ def delete_sleep_log(log_id: int):
 def upsert_screen_time(payload: ScreenTimeUpsert, token: str | None = None):
     if not DEVICE_TOKEN or token != DEVICE_TOKEN:
         raise HTTPException(status_code=403, detail="invalid token")
+    # 2026-08-30に発覚した異常値(1003分・1100分・990分・2327分)の再発防止。
+    # JpBlocker側の画面ロック未検知バグは修正済みだが、1日の物理上限(1440分)を
+    # 超える値をサーバー側でも弾いておき、クライアント側の不具合が再発してもDBを汚さない。
+    if not (0 <= payload.total_minutes <= 1440):
+        raise HTTPException(
+            status_code=400,
+            detail=f"total_minutes out of range (0-1440): {payload.total_minutes}",
+        )
     conn = get_connection()
     conn.execute(
         "INSERT INTO screen_time_logs (date, total_minutes, by_app, updated_at) "
