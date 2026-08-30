@@ -12,7 +12,7 @@ from urllib.parse import quote
 
 from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel
 from pywebpush import WebPushException, webpush
 
@@ -40,6 +40,14 @@ CRON_SECRET = _env_token("CRON_SECRET")
 # JpBlocker(Androidネイティブの連携アプリ)からの通信を認証するための共有トークン。
 # CRON_SECRETとは用途が別(外部cronサービス vs 自分のAndroid端末)なので分けている。
 DEVICE_TOKEN = _env_token("DEVICE_TOKEN")
+# vocab-app(Vercel、別オリジン)からの復習セッション自動記録を認証する共有トークン。
+# DEVICE_TOKEN/CRON_SECRETとも用途が別(ブラウザから直接叩かれる、かつ発行元がAnthropicキー
+# と同じくクライアントバンドルに埋め込まれる=「見えても仕方ない」前提)なので分けている。
+VOCAB_APP_TOKEN = _env_token("VOCAB_APP_TOKEN")
+# CORSはこのエンドポイント1本にだけ手動でヘッダーを付与する方式にしている(CORSMiddlewareで
+# 全体に許可すると、todos/events/pending-changes等トークンなしの既存エンドポイントまで
+# 一括でvocab-appの生JSから読み書き可能になってしまうため、意図的にグローバル許可はしない)。
+VOCAB_APP_ORIGIN = os.environ.get("VOCAB_APP_ORIGIN", "https://vocab-app-blue-xi.vercel.app")
 # 美緒専用の承認ページ(/approve)のトークン。DEVICE_TOKENと分けているのは信頼境界が
 # 違うため(こちらは美緒だけが使う想定で、とっつーのAndroid端末は使わない)。
 # 環境変数名は移行前の PIN_CUSTODY_TOKEN のまま据え置いている(Render側の値を
@@ -132,6 +140,15 @@ class StudyLogCreate(BaseModel):
     note: str | None = None
     logged_at: str | None = None  # "YYYY-MM-DD HH:MM:SS", optional; defaults to now
     start_trigger: str | None = None
+
+
+class VocabAppStudyLogCreate(BaseModel):
+    mode: str  # "review" | "reading" | "news" などvocab-app側のタブ名。start_triggerにvocab-app:{mode}として記録
+    subject: str = "英語"
+    minutes: int
+    count: int | None = None  # 例: 復習した単語数
+    unit: str | None = None  # "words" | "pages" | "articles"
+    logged_at: str | None = None  # "YYYY-MM-DD HH:MM:SS", client(vocab-app)local time
 
 
 class GoalCreate(BaseModel):
@@ -488,6 +505,61 @@ def create_study_log(log: StudyLogCreate):
     new_id = cur.lastrowid
     conn.close()
     return {"id": new_id}
+
+
+# vocab-app(別オリジン)からの復習セッション自動記録。CORSはこの2ルートにだけ手動で許可する
+# (理由は上のVOCAB_APP_ORIGIN定義のコメント参照)。ブラウザは非simple request(Content-Type:
+# application/json)だとPOST前にOPTIONSでpreflightを送るため、両方に同じCORSヘッダーを付ける。
+MAX_VOCAB_SESSION_MINUTES = 240  # 復習セッション1回として物理的にあり得ない値の上限(screen-timeと同じ考え方)
+MAX_VOCAB_SESSION_COUNT = 2000
+
+
+def _vocab_cors_headers() -> dict[str, str]:
+    return {
+        "Access-Control-Allow-Origin": VOCAB_APP_ORIGIN,
+        "Access-Control-Allow-Methods": "POST, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type",
+    }
+
+
+@app.options("/api/study-logs/vocab-sync")
+def vocab_sync_preflight():
+    return JSONResponse(content=None, headers=_vocab_cors_headers())
+
+
+@app.post("/api/study-logs/vocab-sync")
+def create_vocab_study_log(log: VocabAppStudyLogCreate, token: str | None = None):
+    if not VOCAB_APP_TOKEN or token != VOCAB_APP_TOKEN:
+        raise HTTPException(status_code=403, detail="invalid token", headers=_vocab_cors_headers())
+    if not (0 <= log.minutes <= MAX_VOCAB_SESSION_MINUTES):
+        raise HTTPException(
+            status_code=400,
+            detail=f"minutes out of range (0-{MAX_VOCAB_SESSION_MINUTES}): {log.minutes}",
+            headers=_vocab_cors_headers(),
+        )
+    if log.count is not None and not (0 <= log.count <= MAX_VOCAB_SESSION_COUNT):
+        raise HTTPException(
+            status_code=400,
+            detail=f"count out of range (0-{MAX_VOCAB_SESSION_COUNT}): {log.count}",
+            headers=_vocab_cors_headers(),
+        )
+    start_trigger = f"vocab-app:{log.mode}"
+    conn = get_connection()
+    if log.logged_at:
+        cur = conn.execute(
+            "INSERT INTO study_logs (subject, minutes, start_trigger, count, unit, logged_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (log.subject, log.minutes, start_trigger, log.count, log.unit, log.logged_at),
+        )
+    else:
+        cur = conn.execute(
+            "INSERT INTO study_logs (subject, minutes, start_trigger, count, unit) VALUES (?, ?, ?, ?, ?)",
+            (log.subject, log.minutes, start_trigger, log.count, log.unit),
+        )
+    conn.commit()
+    new_id = cur.lastrowid
+    conn.close()
+    return JSONResponse(content={"id": new_id}, headers=_vocab_cors_headers())
 
 
 @app.delete("/api/study-logs/{log_id}")

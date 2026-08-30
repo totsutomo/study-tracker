@@ -272,6 +272,12 @@ def _migrate(conn):
     study_log_cols = [row[1] for row in conn.execute("PRAGMA table_info(study_logs)").fetchall()]
     if "start_trigger" not in study_log_cols:
         conn.execute("ALTER TABLE study_logs ADD COLUMN start_trigger TEXT")
+    # vocab-app連携(復習セッションの自動記録)用。件数の単位はunitで区別する("words"等)。
+    # 既存のタイマー/手動入力レコードはcount/unitとも常にNULLのまま。
+    if "count" not in study_log_cols:
+        conn.execute("ALTER TABLE study_logs ADD COLUMN count INTEGER")
+    if "unit" not in study_log_cols:
+        conn.execute("ALTER TABLE study_logs ADD COLUMN unit TEXT")
 
     # 犬育成機能を廃止したため、既存環境(ローカルdata.db・本番Turso)に残っているテーブル・設定を掃除する
     conn.execute("DROP TABLE IF EXISTS pet_feedings")

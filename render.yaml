@@ -21,3 +21,7 @@ services:
         sync: false
       - key: PIN_CUSTODY_TOKEN
         sync: false
+      - key: VOCAB_APP_TOKEN
+        sync: false
+      - key: VOCAB_APP_ORIGIN
+        sync: false
