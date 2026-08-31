@@ -1116,6 +1116,20 @@ def upsert_screen_time(payload: ScreenTimeUpsert, token: str | None = None):
     return {"ok": True}
 
 
+@app.get("/api/screen-time/{date}/by-app")
+def screen_time_by_app(date: str):
+    # ランチャー除外修正(2026-08-31)後もDigital Wellbeingとの乖離が残っていないか、
+    # アプリ別内訳を見て原因を切り分けるためのデバッグ用エンドポイント。
+    conn = get_connection()
+    row = conn.execute(
+        "SELECT by_app FROM screen_time_logs WHERE date = ?", (date,)
+    ).fetchone()
+    conn.close()
+    if row is None or row[0] is None:
+        return {}
+    return json.loads(row[0])
+
+
 @app.get("/api/screen-time/daily")
 def screen_time_daily(days: int = 14):
     # mood-logsチャートの重ね合わせ表示用。study-logs/dailyと同じ「範囲内は気分記録の有無を問わず返す」流儀
