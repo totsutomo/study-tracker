@@ -1122,12 +1122,19 @@ def screen_time_by_app(date: str):
     # アプリ別内訳を見て原因を切り分けるためのデバッグ用エンドポイント。
     conn = get_connection()
     row = conn.execute(
-        "SELECT by_app FROM screen_time_logs WHERE date = ?", (date,)
+        "SELECT total_minutes, by_app, updated_at FROM screen_time_logs WHERE date = ?", (date,)
     ).fetchone()
     conn.close()
-    if row is None or row[0] is None:
-        return {}
-    return json.loads(row[0])
+    if row is None:
+        return {"found": False}
+    total_minutes, by_app_raw, updated_at = row
+    return {
+        "found": True,
+        "total_minutes": total_minutes,
+        "updated_at": updated_at,
+        "by_app_raw": by_app_raw,
+        "by_app_parsed": json.loads(by_app_raw) if by_app_raw else None,
+    }
 
 
 @app.get("/api/screen-time/daily")
