@@ -1466,6 +1466,11 @@ body.focus-open #tabbar {
   color: var(--text-muted);
 }
 
+.log-detail {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
 .log-duration {
   margin-left: auto;
   font-weight: 600;

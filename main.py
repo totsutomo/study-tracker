@@ -149,6 +149,10 @@ class VocabAppStudyLogCreate(BaseModel):
     count: int | None = None  # 例: 復習した単語数
     unit: str | None = None  # "words" | "pages" | "articles"
     logged_at: str | None = None  # "YYYY-MM-DD HH:MM:SS", client(vocab-app)local time
+    # unit="pages"の時だけ使う。ログ一覧で「count(差分ページ数)」ではなく「p.120–148」の
+    # ような開始〜終了ページ範囲を表示するため(2026-08-31)
+    page_start: int | None = None
+    page_end: int | None = None
 
 
 class GoalCreate(BaseModel):
@@ -543,18 +547,26 @@ def create_vocab_study_log(log: VocabAppStudyLogCreate, token: str | None = None
             detail=f"count out of range (0-{MAX_VOCAB_SESSION_COUNT}): {log.count}",
             headers=_vocab_cors_headers(),
         )
+    for field_name, value in (("page_start", log.page_start), ("page_end", log.page_end)):
+        if value is not None and not (0 <= value <= MAX_VOCAB_SESSION_COUNT):
+            raise HTTPException(
+                status_code=400,
+                detail=f"{field_name} out of range (0-{MAX_VOCAB_SESSION_COUNT}): {value}",
+                headers=_vocab_cors_headers(),
+            )
     start_trigger = f"vocab-app:{log.mode}"
     conn = get_connection()
     if log.logged_at:
         cur = conn.execute(
-            "INSERT INTO study_logs (subject, minutes, start_trigger, count, unit, logged_at) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            (log.subject, log.minutes, start_trigger, log.count, log.unit, log.logged_at),
+            "INSERT INTO study_logs (subject, minutes, start_trigger, count, unit, logged_at, page_start, page_end) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (log.subject, log.minutes, start_trigger, log.count, log.unit, log.logged_at, log.page_start, log.page_end),
         )
     else:
         cur = conn.execute(
-            "INSERT INTO study_logs (subject, minutes, start_trigger, count, unit) VALUES (?, ?, ?, ?, ?)",
-            (log.subject, log.minutes, start_trigger, log.count, log.unit),
+            "INSERT INTO study_logs (subject, minutes, start_trigger, count, unit, page_start, page_end) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (log.subject, log.minutes, start_trigger, log.count, log.unit, log.page_start, log.page_end),
         )
     conn.commit()
     new_id = cur.lastrowid

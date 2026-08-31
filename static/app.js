@@ -2204,6 +2204,17 @@ function vocabAppModeLabel(startTrigger) {
   return startTrigger.slice("vocab-app:".length) || null;
 }
 
+// vocab-app連携ログのcount/unitを補足行として表示するためのテキストを作る。
+// pagesはcount(差分)ではなくpage_start/page_endがあれば「p.120–148」の範囲表示を優先する
+// (差分だけだと同じ28ページでもp.1–28なのかp.500–528なのか分からないため)。
+function vocabAppDetailText(log) {
+  if (log.unit === "pages" && log.page_start != null && log.page_end != null) {
+    return `p.${log.page_start}–${log.page_end}`;
+  }
+  if (log.count == null || !log.unit) return null;
+  return `${log.count} ${log.unit}`;
+}
+
 async function loadStudyLogList() {
   const logs = await api("/api/study-logs");
   const list = document.getElementById("study-log-list");
@@ -2212,11 +2223,13 @@ async function loadStudyLogList() {
   logs.slice(0, 20).forEach((l) => {
     const li = document.createElement("li");
     const modeLabel = vocabAppModeLabel(l.start_trigger);
+    const detailText = vocabAppDetailText(l);
     li.innerHTML = `
       <span class="log-icon" style="background:${colorFor(l.subject)}"></span>
       <span class="log-info">
         <span class="log-subject">${escapeHtml(l.subject)}${modeLabel ? ` <span class="log-mode">· ${escapeHtml(modeLabel)}</span>` : ""}</span>
         <span class="log-time">${formatLoggedAt(l.logged_at)}</span>
+        ${detailText ? `<span class="log-detail">${escapeHtml(detailText)}</span>` : ""}
       </span>
       <span class="log-duration">${formatLogDuration(l.minutes)}</span>
       <button class="delete-btn" title="Delete">×</button>

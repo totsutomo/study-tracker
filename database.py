@@ -278,6 +278,12 @@ def _migrate(conn):
         conn.execute("ALTER TABLE study_logs ADD COLUMN count INTEGER")
     if "unit" not in study_log_cols:
         conn.execute("ALTER TABLE study_logs ADD COLUMN unit TEXT")
+    # unit="pages"の時だけ使う、Readセッションの開始/終了ページ番号(vocab-app側BookReader)。
+    # ログ一覧で「count(差分)」ではなく「p.120–148」のような範囲表示をするために別カラムで持つ
+    if "page_start" not in study_log_cols:
+        conn.execute("ALTER TABLE study_logs ADD COLUMN page_start INTEGER")
+    if "page_end" not in study_log_cols:
+        conn.execute("ALTER TABLE study_logs ADD COLUMN page_end INTEGER")
 
     # 犬育成機能を廃止したため、既存環境(ローカルdata.db・本番Turso)に残っているテーブル・設定を掃除する
     conn.execute("DROP TABLE IF EXISTS pet_feedings")
