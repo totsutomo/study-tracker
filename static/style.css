@@ -1455,6 +1455,12 @@ body.focus-open #tabbar {
   font-weight: 600;
 }
 
+.log-mode {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--text-muted);
+}
+
 .log-time {
   font-size: 12px;
   color: var(--text-muted);

@@ -2197,6 +2197,13 @@ function formatLoggedAt(s) {
   return `${parseInt(mo, 10)}/${parseInt(da, 10)} ${hh}:${mm}`;
 }
 
+// vocab-app由来のログはstart_triggerが"vocab-app:review"のような形式で入っている
+// (main.pyのcreate_vocab_study_log参照)。ここからreview/reading/newsのタブ名を取り出す。
+function vocabAppModeLabel(startTrigger) {
+  if (!startTrigger || !startTrigger.startsWith("vocab-app:")) return null;
+  return startTrigger.slice("vocab-app:".length) || null;
+}
+
 async function loadStudyLogList() {
   const logs = await api("/api/study-logs");
   const list = document.getElementById("study-log-list");
@@ -2204,10 +2211,11 @@ async function loadStudyLogList() {
   updateStudyLogHeader(logs.length);
   logs.slice(0, 20).forEach((l) => {
     const li = document.createElement("li");
+    const modeLabel = vocabAppModeLabel(l.start_trigger);
     li.innerHTML = `
       <span class="log-icon" style="background:${colorFor(l.subject)}"></span>
       <span class="log-info">
-        <span class="log-subject">${escapeHtml(l.subject)}</span>
+        <span class="log-subject">${escapeHtml(l.subject)}${modeLabel ? ` <span class="log-mode">· ${escapeHtml(modeLabel)}</span>` : ""}</span>
         <span class="log-time">${formatLoggedAt(l.logged_at)}</span>
       </span>
       <span class="log-duration">${formatLogDuration(l.minutes)}</span>

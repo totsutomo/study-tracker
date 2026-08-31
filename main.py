@@ -144,7 +144,7 @@ class StudyLogCreate(BaseModel):
 
 class VocabAppStudyLogCreate(BaseModel):
     mode: str  # "review" | "reading" | "news" などvocab-app側のタブ名。start_triggerにvocab-app:{mode}として記録
-    subject: str = "英語"
+    subject: str = "English"  # study-tracker側の既存カテゴリ名に合わせる(2026-08-31: "英語"から変更)
     minutes: int
     count: int | None = None  # 例: 復習した単語数
     unit: str | None = None  # "words" | "pages" | "articles"
