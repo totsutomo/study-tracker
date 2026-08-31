@@ -287,13 +287,6 @@ def _migrate(conn):
         "('pet_last_client_date', 'pet_hunger_notified_date', 'pet_critical_notified_date')"
     )
 
-    # JpBlocker側の2つの不具合(画面ロック時にBACKGROUNDイベントが来ないケース未対応/
-    # ホームランチャーの計上漏れ、いずれも2026-08-30〜31に発覚・修正済み)により、これまでの
-    # screen_time_logsは全期間にわたって信頼できる値ではなかった。最低保証時間などを今後
-    # 正しいデータから逆算するため、記録を全削除してクリーンな状態から再収集する
-    # (とっつーの指示、2026-08-31)。
-    conn.execute("DELETE FROM screen_time_logs")
-
     conn.commit()
 
 
