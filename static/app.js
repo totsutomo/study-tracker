@@ -2228,8 +2228,7 @@ async function loadStudyLogList() {
       <span class="log-icon" style="background:${colorFor(l.subject)}"></span>
       <span class="log-info">
         <span class="log-subject">${escapeHtml(l.subject)}${modeLabel ? ` <span class="log-mode">· ${escapeHtml(modeLabel)}</span>` : ""}</span>
-        <span class="log-time">${formatLoggedAt(l.logged_at)}</span>
-        ${detailText ? `<span class="log-detail">${escapeHtml(detailText)}</span>` : ""}
+        <span class="log-time">${formatLoggedAt(l.logged_at)}${detailText ? ` · ${escapeHtml(detailText)}` : ""}</span>
       </span>
       <span class="log-duration">${formatLogDuration(l.minutes)}</span>
       <button class="delete-btn" title="Delete">×</button>
