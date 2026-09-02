@@ -455,6 +455,7 @@
           <button type="button" class="cal-view-btn active" data-view="month">Month</button>
           <button type="button" class="cal-view-btn" data-view="week">Week</button>
         </div>
+        <button type="button" id="cal-copy-week-btn" class="secondary copyweek-trigger-btn hidden">Copy last week's schedule</button>
         <div class="month-nav">
           <button type="button" id="cal-prev" class="icon-btn" aria-label="Previous">‹</button>
           <span id="cal-month-label"></span>
@@ -760,6 +761,7 @@
   </div>
   <div id="bedtime-step2" class="hidden">
     <h4>Tomorrow's tasks</h4>
+    <button type="button" id="bedtime-copy-week-btn" class="secondary copyweek-trigger-btn">Copy last week's study blocks</button>
     <form id="bedtime-add-form" class="add-form">
       <input type="text" id="bedtime-add-title" placeholder="Title">
       <button type="submit">+ Add</button>
@@ -767,6 +769,19 @@
     <ul id="bedtime-added-list" class="list"></ul>
     <button type="button" id="bedtime-step2-done">Done</button>
   </div>
+</div>
+
+<div id="copyweek-backdrop" class="backdrop hidden"></div>
+<div id="copyweek-panel" class="add-panel hidden">
+  <div class="panel-header">
+    <h3>Copy Last Week's Schedule</h3>
+    <button type="button" id="copyweek-close" class="panel-close" aria-label="Close">×</button>
+  </div>
+  <p class="meta" id="copyweek-range"></p>
+  <p class="meta hidden" id="copyweek-empty">No copyable events found in the recent weeks.</p>
+  <p class="meta hidden" id="copyweek-conflict-note"></p>
+  <ul id="copyweek-list" class="list"></ul>
+  <button type="button" id="copyweek-commit" class="hidden">Copy These Events</button>
 </div>
 
 <nav id="tabbar">

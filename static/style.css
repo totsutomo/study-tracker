@@ -710,6 +710,41 @@ button.secondary {
   border: 1px solid var(--border);
 }
 
+/* 「先週の予定をコピー」ボタン+プレビュー行(2026-09-02新設)。
+   週表示の時だけ出す/就寝前パネルにも同じ導線を置くハイブリッド配置。 */
+.copyweek-trigger-btn {
+  width: 100%;
+  margin-top: 10px;
+  margin-bottom: 4px;
+}
+
+.copyweek-row {
+  align-items: center;
+  gap: 10px;
+}
+
+.copyweek-row-fields {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+}
+
+.copyweek-row-fields input[type="text"] {
+  flex: 1 1 160px;
+  min-width: 120px;
+}
+
+.copyweek-row-fields input[type="time"] {
+  flex: 0 0 auto;
+}
+
+.copyweek-row.conflict {
+  border-color: var(--danger);
+  background: var(--danger-dim);
+}
+
 /* ToDoカードの再生/削除ボタン。円のアウトライン+裸のxで重さが不揃いだったのを、
    同じ淡色チップ(角丸・15%濃度の背景)に揃えた(2026-08-16)。 */
 .delete-btn {

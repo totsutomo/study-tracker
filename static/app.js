@@ -2971,6 +2971,7 @@ function renderCalendarView() {
   document.getElementById("cal-weekday-row").classList.toggle("hidden", isWeek);
   document.getElementById("cal-grid").classList.toggle("hidden", isWeek);
   document.getElementById("cal-week-view").classList.toggle("hidden", !isWeek);
+  document.getElementById("cal-copy-week-btn").classList.toggle("hidden", !isWeek);
 
   if (isWeek) {
     renderWeekTimeGrid();
@@ -3547,6 +3548,241 @@ guardedSubmit(document.getElementById("event-form"), async (e) => {
   setEventRecurrenceDays([]);
   closeEventAddPanel();
   loadCalendar();
+});
+
+// ---------- copy last week's schedule ----------
+// 2026-09-02に設計を確定した「先週の予定を来週にコピー」機能。バックエンドは変更せず、
+// 既存の/api/eventsだけを使って(1)直近にコピー対象イベントがある週を自動でさかのぼって探し、
+// (2)日付を+7日ずらし世界史の動画番号を採番し直したプレビューを出し、(3)確認・編集後に
+// 1件ずつPOSTする、という構成。コピー対象はこの5種類の固定ブロックだけ(ELSA/アウトプット/
+// 週1回枠は対象外、構成が変わった週は自動検出せず手動でstudy-tracker-planを使う前提)。
+const COPYWEEK_FIXED_TITLES = new Set([
+  "英語シャドーイング",
+  "世界史復習",
+  "vocab-app review mode",
+  "vocab-app reading mode",
+  "日記",
+]);
+const COPYWEEK_WORLD_VIDEO_RE = /^世界史(\d+)$/;
+
+function isCopyweekScopeEvent(ev) {
+  return COPYWEEK_FIXED_TITLES.has(ev.title) || COPYWEEK_WORLD_VIDEO_RE.test(ev.title);
+}
+
+function diffDays(a, b) {
+  return Math.round((new Date(a + "T00:00:00") - new Date(b + "T00:00:00")) / 86400000);
+}
+
+// 週またぎ検索のたびに同じ月を何度も叩かないための簡易キャッシュ(パネルを開くたびにクリア)。
+let copyweekMonthCache = new Map();
+
+async function copyweekFetchMonth(y, m) {
+  const key = `${y}-${m}`;
+  if (copyweekMonthCache.has(key)) return copyweekMonthCache.get(key);
+  const promise = api(`/api/events?year=${y}&month=${m}`);
+  copyweekMonthCache.set(key, promise);
+  return promise;
+}
+
+async function copyweekFetchWeek(weekStart) {
+  const weekEnd = addDaysToDate(weekStart, 6);
+  const startD = new Date(weekStart + "T00:00:00");
+  const endD = new Date(weekEnd + "T00:00:00");
+  const keys = new Set([
+    `${startD.getFullYear()}-${startD.getMonth() + 1}`,
+    `${endD.getFullYear()}-${endD.getMonth() + 1}`,
+  ]);
+  const lists = await Promise.all(
+    [...keys].map((k) => {
+      const [y, m] = k.split("-").map(Number);
+      return copyweekFetchMonth(y, m);
+    })
+  );
+  return lists.flat().filter((e) => e.occurrence_date >= weekStart && e.occurrence_date <= weekEnd);
+}
+
+// targetWeekStartの前の週から最大12週さかのぼり、コピー対象イベントが1件でもある
+// 直近の週を探す(「直近に予定が入っている週を自動選択」、2026-09-02決定)。
+async function copyweekFindSourceWeek(targetWeekStart) {
+  let cursor = addDaysToDate(targetWeekStart, -7);
+  for (let i = 0; i < 12; i++) {
+    const weekEvents = await copyweekFetchWeek(cursor);
+    const scoped = weekEvents.filter(isCopyweekScopeEvent);
+    if (scoped.length > 0) return { weekStart: cursor, events: scoped };
+    cursor = addDaysToDate(cursor, -7);
+  }
+  return null;
+}
+
+// 世界史の動画番号は「検出できた最大値+1」から連番で振る(固定オフセットではなく、
+// 2026-09-02決定)。直近3ヶ月分をスキャン対象にする。
+async function copyweekMaxWorldNumber(aroundDate) {
+  const anchor = new Date(aroundDate + "T00:00:00");
+  const keys = [0, -1, -2].map((delta) => {
+    const d = new Date(anchor.getFullYear(), anchor.getMonth() + delta, 1);
+    return [d.getFullYear(), d.getMonth() + 1];
+  });
+  const lists = await Promise.all(keys.map(([y, m]) => copyweekFetchMonth(y, m)));
+  let max = 0;
+  lists.flat().forEach((ev) => {
+    const m = COPYWEEK_WORLD_VIDEO_RE.exec(ev.title);
+    if (m) max = Math.max(max, Number(m[1]));
+  });
+  return max;
+}
+
+let copyweekRows = []; // { title, category, date, start_time, end_time, note, conflict }
+
+// 開始時刻は「先週の値をそのまま初期値にし、違う時だけ編集する」ハイブリッド方式
+// (学習プラン.mdの「開始時刻は推測せず必ず確認する」ルールとの折衷、2026-09-02決定)。
+// 日付は曜日オフセットで固定(構成変更の自動検出はしない=編集対象外)、
+// 世界史の動画番号だけタイトルごと採番し直して編集可能にする。
+function copyweekBuildRows(sourceWeekStart, targetWeekStart, sourceEvents, maxWorldNum) {
+  let nextWorldNum = maxWorldNum + 1;
+  return [...sourceEvents]
+    .sort((a, b) => (a.occurrence_date + a.start_time).localeCompare(b.occurrence_date + b.start_time))
+    .map((ev) => {
+      const offset = diffDays(ev.occurrence_date, sourceWeekStart);
+      let title = ev.title;
+      if (COPYWEEK_WORLD_VIDEO_RE.test(ev.title)) {
+        title = "世界史" + nextWorldNum;
+        nextWorldNum += 1;
+      }
+      return {
+        title,
+        category: ev.category,
+        date: addDaysToDate(targetWeekStart, offset),
+        start_time: ev.start_time,
+        end_time: ev.end_time,
+        note: ev.note || null,
+        conflict: null,
+      };
+    });
+}
+
+// コピー先の週に既存の予定と時間が重なるものがないかを調べ、行に警告を付ける
+// (「警告して確認を求める」方式、2026-09-02決定。コミット時にconfirm()でも再確認する)。
+async function copyweekAnnotateConflicts(rows, targetWeekStart) {
+  const targetWeekEvents = await copyweekFetchWeek(targetWeekStart);
+  rows.forEach((row) => {
+    const hit = targetWeekEvents.find(
+      (e) => e.occurrence_date === row.date && e.start_time < row.end_time && row.start_time < e.end_time
+    );
+    row.conflict = hit ? hit.title : null;
+  });
+}
+
+function renderCopyweekList() {
+  const list = document.getElementById("copyweek-list");
+  const commitBtn = document.getElementById("copyweek-commit");
+  const emptyMsg = document.getElementById("copyweek-empty");
+  const conflictNote = document.getElementById("copyweek-conflict-note");
+
+  emptyMsg.classList.toggle("hidden", copyweekRows.length > 0);
+  commitBtn.classList.toggle("hidden", copyweekRows.length === 0);
+
+  const conflictCount = copyweekRows.filter((r) => r.conflict).length;
+  conflictNote.classList.toggle("hidden", conflictCount === 0);
+  if (conflictCount > 0) {
+    conflictNote.textContent = `⚠ ${conflictCount} event(s) overlap with an existing schedule on that day. Adjust the time, or confirm to create them alongside the existing ones.`;
+  }
+
+  list.innerHTML = copyweekRows
+    .map(
+      (row, i) => `
+      <li class="copyweek-row${row.conflict ? " conflict" : ""}">
+        <span class="log-icon" style="background:${colorFor(row.category || "")}"></span>
+        <div class="copyweek-row-fields">
+          <input type="text" data-i="${i}" data-field="title" value="${escapeHtml(row.title)}">
+          <span class="meta">${row.date}</span>
+          <input type="time" data-i="${i}" data-field="start_time" value="${row.start_time}">
+          <input type="time" data-i="${i}" data-field="end_time" value="${row.end_time}">
+        </div>
+      </li>
+    `
+    )
+    .join("");
+
+  list.querySelectorAll("input").forEach((input) => {
+    input.addEventListener("input", () => {
+      copyweekRows[Number(input.dataset.i)][input.dataset.field] = input.value;
+    });
+  });
+}
+
+async function openCopyweekPanel(targetWeekStart) {
+  copyweekMonthCache = new Map();
+  document.getElementById("copyweek-backdrop").classList.remove("hidden");
+  document.getElementById("copyweek-panel").classList.remove("hidden");
+  document.getElementById("copyweek-range").textContent = "Searching for the most recent week with a schedule…";
+  document.getElementById("copyweek-list").innerHTML = "";
+  document.getElementById("copyweek-empty").classList.add("hidden");
+  document.getElementById("copyweek-conflict-note").classList.add("hidden");
+  document.getElementById("copyweek-commit").classList.add("hidden");
+
+  const targetWeekEnd = addDaysToDate(targetWeekStart, 6);
+  const found = await copyweekFindSourceWeek(targetWeekStart);
+  if (!found) {
+    copyweekRows = [];
+    document.getElementById("copyweek-range").textContent = `Target: ${targetWeekStart} 〜 ${targetWeekEnd}`;
+    document.getElementById("copyweek-empty").classList.remove("hidden");
+    return;
+  }
+
+  const maxWorldNum = await copyweekMaxWorldNumber(targetWeekStart);
+  copyweekRows = copyweekBuildRows(found.weekStart, targetWeekStart, found.events, maxWorldNum);
+  await copyweekAnnotateConflicts(copyweekRows, targetWeekStart);
+
+  document.getElementById("copyweek-range").textContent =
+    `Copying ${found.weekStart} 〜 ${addDaysToDate(found.weekStart, 6)} → ${targetWeekStart} 〜 ${targetWeekEnd}`;
+  renderCopyweekList();
+}
+
+function closeCopyweekPanel() {
+  document.getElementById("copyweek-backdrop").classList.add("hidden");
+  document.getElementById("copyweek-panel").classList.add("hidden");
+}
+
+document.getElementById("copyweek-close").addEventListener("click", closeCopyweekPanel);
+document.getElementById("copyweek-backdrop").addEventListener("click", closeCopyweekPanel);
+
+guardedClick(document.getElementById("copyweek-commit"), async () => {
+  if (copyweekRows.length === 0) return;
+  const conflictCount = copyweekRows.filter((r) => r.conflict).length;
+  if (conflictCount > 0 && !confirm(`${conflictCount} event(s) overlap with an existing schedule. Copy anyway?`)) {
+    return;
+  }
+  for (const row of copyweekRows) {
+    await api("/api/events", {
+      method: "POST",
+      body: JSON.stringify({
+        title: row.title,
+        category: row.category,
+        date: row.date,
+        start_time: row.start_time,
+        end_time: row.end_time,
+        recurrence: null,
+        recurrence_until: null,
+        notify_offset_minutes: 0,
+        note: row.note,
+      }),
+    });
+  }
+  const copiedCount = copyweekRows.length;
+  closeCopyweekPanel();
+  alert(`Copied ${copiedCount} event(s).`);
+  if (document.getElementById("tab-calendar").classList.contains("active")) loadCalendar();
+});
+
+document.getElementById("cal-copy-week-btn").addEventListener("click", () => {
+  openCopyweekPanel(calWeekStart);
+});
+
+// 就寝前パネルからも同じ導線を開けるようにする(ハイブリッド配置、2026-09-02決定)。
+// 対象は「明日を含む週」(明日が週をまたぐ場合はその翌週)。
+document.getElementById("bedtime-copy-week-btn").addEventListener("click", () => {
+  closeBedtimePanel();
+  openCopyweekPanel(mondayOf(addDaysToDate(todayStr(), 1)));
 });
 
 // ---------- event detail panel ----------
