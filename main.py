@@ -155,6 +155,16 @@ class VocabAppStudyLogCreate(BaseModel):
     page_end: int | None = None
 
 
+class VocabSessionActiveSync(BaseModel):
+    # FocusGuard(PC)向けの「今vocab-appのreview/reading/newsが進行中か」フラグ。
+    # Compass本体のsession_active(SessionActiveSync)とは意図的に別管理——同じフラグを
+    # 使い回すと、Compassで実際に走っている別科目のセッションをvocab-app側の開始/終了で
+    # 上書き・巻き添え終了させてしまう(単一グローバル状態のため)。_focus_session_status()
+    # 側でOR条件として合成する。
+    active: bool
+    mode: str | None = None  # "review" | "reading" | "news"。バッジ表示用、記録には使わない
+
+
 class GoalCreate(BaseModel):
     title: str
 
@@ -572,6 +582,41 @@ def create_vocab_study_log(log: VocabAppStudyLogCreate, token: str | None = None
     new_id = cur.lastrowid
     conn.close()
     return JSONResponse(content={"id": new_id}, headers=_vocab_cors_headers())
+
+
+@app.options("/api/vocab-session/active")
+def vocab_session_active_preflight():
+    return JSONResponse(content=None, headers=_vocab_cors_headers())
+
+
+# vocab-appのreview/reading/newsモード中、FocusGuard(PC)にもCompass本体のセッションと
+# 同じようにブロック/通知抑制を効かせるためのフラグ(2026-09-02)。書き込むのは
+# vocab_session_*という別キー(session_active等には触らない、上のVocabSessionActiveSync参照)。
+@app.post("/api/vocab-session/active")
+def vocab_session_active(payload: VocabSessionActiveSync, token: str | None = None):
+    if not VOCAB_APP_TOKEN or token != VOCAB_APP_TOKEN:
+        raise HTTPException(status_code=403, detail="invalid token", headers=_vocab_cors_headers())
+    conn = get_connection()
+    if payload.active:
+        started_at = datetime.now().isoformat(sep=" ", timespec="seconds")
+        for key, value in (
+            ("vocab_session_active", "1"),
+            ("vocab_session_mode", payload.mode or ""),
+            ("vocab_session_started_at", started_at),
+        ):
+            conn.execute(
+                "INSERT INTO settings (key, value) VALUES (?, ?) "
+                "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                (key, value),
+            )
+    else:
+        conn.execute(
+            "DELETE FROM settings WHERE key IN "
+            "('vocab_session_active', 'vocab_session_mode', 'vocab_session_started_at')"
+        )
+    conn.commit()
+    conn.close()
+    return JSONResponse(content={"ok": True}, headers=_vocab_cors_headers())
 
 
 @app.delete("/api/study-logs/{log_id}")
@@ -1831,16 +1876,23 @@ def focus_session_active(payload: SessionActiveSync):
 FOCUS_SESSION_MAX_AGE_HOURS = 4
 
 
-def _focus_session_status(conn) -> dict:
+def _read_session_flag(
+    conn, active_key: str, label_key: str, started_at_key: str
+) -> tuple[bool, str | None, str | None]:
+    """Reads one (active, label, started_at) triplet from `settings` and applies
+    the same staleness auto-heal as before (see FOCUS_SESSION_MAX_AGE_HOURS above):
+    a comms failure on the "session ended" call must never leave active=1 stuck
+    forever. Returns (False, None, None) when inactive or expired (deleting the
+    stale rows as a side effect), else (True, label, started_at)."""
     rows = conn.execute(
-        "SELECT key, value FROM settings WHERE key IN "
-        "('session_active', 'session_subject', 'session_started_at')"
+        "SELECT key, value FROM settings WHERE key IN (?, ?, ?)",
+        (active_key, label_key, started_at_key),
     ).fetchall()
     values = dict(rows)
-    if values.get("session_active") != "1":
-        return {"active": False}
+    if values.get(active_key) != "1":
+        return False, None, None
 
-    started_at = values.get("session_started_at")
+    started_at = values.get(started_at_key)
     stale = False
     if started_at:
         try:
@@ -1850,17 +1902,32 @@ def _focus_session_status(conn) -> dict:
             pass
     if stale:
         conn.execute(
-            "DELETE FROM settings WHERE key IN "
-            "('session_active', 'session_subject', 'session_started_at')"
+            "DELETE FROM settings WHERE key IN (?, ?, ?)",
+            (active_key, label_key, started_at_key),
         )
         conn.commit()
-        return {"active": False}
+        return False, None, None
 
-    return {
-        "active": True,
-        "subject": values.get("session_subject") or None,
-        "started_at": started_at,
-    }
+    return True, values.get(label_key) or None, started_at
+
+
+def _focus_session_status(conn) -> dict:
+    active, subject, started_at = _read_session_flag(
+        conn, "session_active", "session_subject", "session_started_at"
+    )
+    if active:
+        return {"active": True, "subject": subject, "started_at": started_at}
+
+    # vocab-appのreview/reading/newsモード(2026-09-02〜)。Compass本体のsession_activeとは
+    # 別フラグ(vocab_session_*, POST /api/vocab-session/active参照)なので、ここでOR条件と
+    # して合成しているだけ——Compass側で実際に走っている別科目のセッションを上書きすることはない。
+    vocab_active, _vocab_mode, vocab_started_at = _read_session_flag(
+        conn, "vocab_session_active", "vocab_session_mode", "vocab_session_started_at"
+    )
+    if vocab_active:
+        return {"active": True, "subject": "English", "started_at": vocab_started_at}
+
+    return {"active": False}
 
 
 @app.get("/api/focus-session/status")
