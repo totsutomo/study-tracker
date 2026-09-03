@@ -1134,6 +1134,17 @@ function syncSessionActiveFlag(active, subject) {
   }).catch(() => {});
 }
 
+// pause/resumeを別デバイス側の表示(下のpeer-session-banner、およびFocusGuardの常駐バッジ)に
+// 伝える。syncSessionActiveFlag()のactiveはpause中もtrueのまま保つ(ブロック維持のため)ので、
+// 「pause中かどうか」自体はこちらで別に送る。elapsedMsはpause/resumeを押した瞬間の
+// currentElapsedMs()(pause中はaccumulatedMsそのもの)。
+function syncFocusSessionPause(paused, elapsedMs) {
+  api("/api/focus-session/pause", {
+    method: "POST",
+    body: JSON.stringify({ paused, elapsed_ms: Math.round(elapsedMs) }),
+  }).catch(() => {});
+}
+
 // 「今フォーカスタイマーが動いている状態」自体をもう一方のデバイス(スマホ⇄PC)へリアルタイムに
 // 同期表示するのは難しい(タイマーはローカルのJS変数+localStorageのみで管理、共有DBには
 // syncSessionActiveFlag()が送るsession_active等のフラグしかない)ため、代わりに上記フラグを
@@ -1145,6 +1156,7 @@ let peerSessionPollInterval = null;
 let peerSessionTickInterval = null;
 let peerSessionSubject = null;
 let peerSessionStartedAt = null; // Date | null
+let peerSessionPaused = false;
 
 function updatePeerSessionBanner() {
   const banner = document.getElementById("peer-session-banner");
@@ -1153,8 +1165,17 @@ function updatePeerSessionBanner() {
     banner.classList.add("hidden");
     return;
   }
-  const elapsedMin = Math.max(0, Math.floor((Date.now() - peerSessionStartedAt.getTime()) / 60000));
   const subjectText = peerSessionSubject ? ` · ${peerSessionSubject}` : "";
+  // paused中はstarted_atからの単純経過計算が実時間とズレていく(pause中も時計が動き続ける
+  // ため)ので、経過分数を出さず止まっていることが分かる表示に切り替える。resumeされると
+  // サーバー側がstarted_atを巻き戻してくれる(main.py focus_session_pause参照)ので、次の
+  // ポーリングで元の経過分数表示に自然に戻る。
+  if (peerSessionPaused) {
+    label.innerHTML = `${ICONS.clock}Studying now${subjectText} · Paused`;
+    banner.classList.remove("hidden");
+    return;
+  }
+  const elapsedMin = Math.max(0, Math.floor((Date.now() - peerSessionStartedAt.getTime()) / 60000));
   label.innerHTML = `${ICONS.clock}Studying now${subjectText} · ${formatLogDuration(elapsedMin)}`;
   banner.classList.remove("hidden");
 }
@@ -1178,6 +1199,7 @@ async function checkPeerSession() {
   }
   if (status && status.active) {
     peerSessionSubject = status.subject || null;
+    peerSessionPaused = !!status.paused;
     // Unlike other timestamps in this app (which the client writes in its own local time via
     // nowLocalTimestamp()), session_started_at is written server-side by main.py's datetime.now()
     // - i.e. the server's (UTC) clock, not this device's local time. Parsing it the same way as
@@ -1190,6 +1212,7 @@ async function checkPeerSession() {
     }
   } else {
     peerSessionStartedAt = null;
+    peerSessionPaused = false;
     if (peerSessionTickInterval) {
       clearInterval(peerSessionTickInterval);
       peerSessionTickInterval = null;
@@ -1440,6 +1463,9 @@ function pauseSession() {
   releaseWakeLock();
   updatePauseUI();
   persistSession();
+  // let other devices (peer banner / FocusGuard badge) know this session is paused, since
+  // session_active itself intentionally stays "on" through a pause (see syncSessionActiveFlag).
+  syncFocusSessionPause(true, accumulatedMs);
   // stop server-side tracking while paused, since the countdown isn't actually progressing;
   // resumeSession() re-arms it with the recomputed remaining time.
   if (sessionMode === "countdown" && !sessionCompleted) {
@@ -1449,6 +1475,10 @@ function pauseSession() {
 
 function resumeSession() {
   if (!timerSubject || !isPaused) return;
+  // accumulatedMs is still the correct total elapsed time here (segmentStart is null while
+  // paused, so nothing needs to be added) - tell other devices' displays to catch up before
+  // flipping segmentStart back on below.
+  syncFocusSessionPause(false, accumulatedMs);
   segmentStart = Date.now();
   isPaused = false;
   startTimerTick();

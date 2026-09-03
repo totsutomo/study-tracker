@@ -134,6 +134,11 @@ class SessionActiveSync(BaseModel):
     subject: str | None = None
 
 
+class SessionPauseSync(BaseModel):
+    paused: bool
+    elapsed_ms: int  # currentElapsedMs() at the moment of the pause/resume click
+
+
 class StudyLogCreate(BaseModel):
     subject: str
     minutes: int
@@ -1858,11 +1863,44 @@ def focus_session_active(payload: SessionActiveSync):
                 "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
                 (key, value),
             )
+        # a fresh session always starts unpaused; clear any leftover flag from a previous
+        # session that ended without going through the else-branch below (e.g. the
+        # FOCUS_SESSION_MAX_AGE_HOURS staleness auto-heal in _read_session_flag(), which only
+        # ever clears the three active/subject/started_at keys, not this one).
+        conn.execute("DELETE FROM settings WHERE key = 'session_paused'")
     else:
         conn.execute(
             "DELETE FROM settings WHERE key IN "
-            "('session_active', 'session_subject', 'session_started_at')"
+            "('session_active', 'session_subject', 'session_started_at', 'session_paused')"
         )
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+# pause/resumeを別デバイス側の表示(ピア間バナー・FocusGuardの常駐バッジ)に反映するための同期。
+# session_active自体はpause中もtrueのまま維持する(上のfocus_session_active参照、JpBlockerの
+# ブロック維持のため)ので、"pause中かどうか"はここで別に持つ。resume時はsession_started_atを
+# pause中に経過していた分だけ巻き戻すことで、_focus_session_status()や各表示側の「now - started_at」
+# という既存の単純計算をそのまま使い続けられるようにする(pauseの概念を表示側に持ち込まずに済む)。
+@app.post("/api/focus-session/pause")
+def focus_session_pause(payload: SessionPauseSync):
+    conn = get_connection()
+    if payload.paused:
+        conn.execute(
+            "INSERT INTO settings (key, value) VALUES ('session_paused', '1') "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value"
+        )
+    else:
+        new_started_at = (datetime.now() - timedelta(milliseconds=payload.elapsed_ms)).isoformat(
+            sep=" ", timespec="seconds"
+        )
+        conn.execute(
+            "INSERT INTO settings (key, value) VALUES ('session_started_at', ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (new_started_at,),
+        )
+        conn.execute("DELETE FROM settings WHERE key = 'session_paused'")
     conn.commit()
     conn.close()
     return {"ok": True}
@@ -1916,16 +1954,21 @@ def _focus_session_status(conn) -> dict:
         conn, "session_active", "session_subject", "session_started_at"
     )
     if active:
-        return {"active": True, "subject": subject, "started_at": started_at}
+        paused_row = conn.execute(
+            "SELECT value FROM settings WHERE key = 'session_paused'"
+        ).fetchone()
+        paused = bool(paused_row and paused_row[0] == "1")
+        return {"active": True, "subject": subject, "started_at": started_at, "paused": paused}
 
     # vocab-appのreview/reading/newsモード(2026-09-02〜)。Compass本体のsession_activeとは
     # 別フラグ(vocab_session_*, POST /api/vocab-session/active参照)なので、ここでOR条件と
     # して合成しているだけ——Compass側で実際に走っている別科目のセッションを上書きすることはない。
+    # pauseの概念自体がまだ無いので常にfalse。
     vocab_active, _vocab_mode, vocab_started_at = _read_session_flag(
         conn, "vocab_session_active", "vocab_session_mode", "vocab_session_started_at"
     )
     if vocab_active:
-        return {"active": True, "subject": "English", "started_at": vocab_started_at}
+        return {"active": True, "subject": "English", "started_at": vocab_started_at, "paused": False}
 
     return {"active": False}
 
