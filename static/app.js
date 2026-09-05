@@ -464,10 +464,13 @@ function renderTodoItem(t, list) {
       openStartPanel(t.category, t.id);
     });
   }
-  li.querySelector(".skip-btn").addEventListener("click", (e) => {
-    e.stopPropagation();
-    toggleTodoSkip(t);
-  });
+  const skipBtn = li.querySelector(".skip-btn");
+  if (skipBtn) {
+    skipBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      toggleTodoSkip(t);
+    });
+  }
   li.querySelector(".delete-btn").addEventListener("click", (e) => {
     e.stopPropagation();
     deleteTodo(t);
