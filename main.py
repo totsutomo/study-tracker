@@ -288,8 +288,11 @@ def list_todos():
 @app.get("/api/todos/stats")
 def todo_stats():
     conn = get_connection()
-    total = conn.execute("SELECT COUNT(*) FROM todos").fetchone()[0]
-    done_count = conn.execute("SELECT COUNT(*) FROM todos WHERE done = 1").fetchone()[0]
+    # skipped(スキップ済み)は「やらないと決めた」ものなので達成率の分母から除外する。
+    # 含めてしまうと消化率が下がり続け、スキップ機能を作った意味(all-or-nothing対策)が薄れる
+    total = conn.execute("SELECT COUNT(*) FROM todos WHERE skipped = 0").fetchone()[0]
+    done_count = conn.execute("SELECT COUNT(*) FROM todos WHERE done = 1 AND skipped = 0").fetchone()[0]
+    skipped_count = conn.execute("SELECT COUNT(*) FROM todos WHERE skipped = 1").fetchone()[0]
     cur = conn.execute(
         """
         SELECT date(completed_at) AS d, COUNT(*) AS c
@@ -302,7 +305,7 @@ def todo_stats():
     daily = rows_to_dicts(cur)
     conn.close()
     rate = round(done_count / total * 100) if total else 0
-    return {"total": total, "done": done_count, "rate": rate, "daily": daily}
+    return {"total": total, "done": done_count, "skipped": skipped_count, "rate": rate, "daily": daily}
 
 
 @app.post("/api/todos")
@@ -381,8 +384,10 @@ def toggle_todo(todo_id: int):
     done, title, category, priority, due_date, due_time, recurrence, notify_offset_minutes, note = row
     new_done = 0 if done else 1
     completed_at = "datetime('now')" if new_done else "NULL"
+    # done/skippedは同時に立たない状態にする(完了させたら「スキップ扱い」は解除する)
+    skipped_clause = ", skipped = 0, skipped_at = NULL" if new_done else ""
     conn.execute(
-        f"UPDATE todos SET done = ?, completed_at = {completed_at} WHERE id = ?",
+        f"UPDATE todos SET done = ?, completed_at = {completed_at}{skipped_clause} WHERE id = ?",
         (new_done, todo_id),
     )
     if new_done and recurrence:
@@ -398,6 +403,43 @@ def toggle_todo(todo_id: int):
     conn.commit()
     conn.close()
     return {"id": todo_id, "done": bool(new_done)}
+
+
+@app.post("/api/todos/{todo_id}/skip")
+def skip_todo(todo_id: int):
+    conn = get_connection()
+    row = conn.execute(
+        "SELECT skipped, title, category, priority, due_date, due_time, recurrence, notify_offset_minutes, note "
+        "FROM todos WHERE id = ?",
+        (todo_id,),
+    ).fetchone()
+    if row is None:
+        conn.close()
+        raise HTTPException(status_code=404, detail="todo not found")
+    skipped, title, category, priority, due_date, due_time, recurrence, notify_offset_minutes, note = row
+    new_skipped = 0 if skipped else 1
+    skipped_at = "datetime('now')" if new_skipped else "NULL"
+    # done/skippedは同時に立たない状態にする(スキップしたら「完了扱い」は解除する)
+    done_clause = ", done = 0, completed_at = NULL" if new_skipped else ""
+    conn.execute(
+        f"UPDATE todos SET skipped = ?, skipped_at = {skipped_at}{done_clause} WHERE id = ?",
+        (new_skipped, todo_id),
+    )
+    # 完了(toggle_todo)と同じ扱い: スキップも「この回は終わり」を意味するので、
+    # 繰り返し予定なら次回分を生成する(このtodoを消さずに繰り越さない、というのが要件のため)
+    if new_skipped and recurrence:
+        base = date.fromisoformat(due_date) if due_date else date.today()
+        base = max(base, date.today())
+        next_due = next_occurrence(base, recurrence)
+        if next_due is not None:
+            conn.execute(
+                "INSERT INTO todos (title, category, priority, due_date, due_time, recurrence, notify_offset_minutes, note) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (title, category, priority, next_due.isoformat(), due_time, recurrence, notify_offset_minutes, note),
+            )
+    conn.commit()
+    conn.close()
+    return {"id": todo_id, "skipped": bool(new_skipped)}
 
 
 @app.delete("/api/todos/{todo_id}")
@@ -2030,7 +2072,7 @@ def push_check(token: str | None = None):
     sent_count = 0
 
     todo_rows = rows_to_dicts(conn.execute(
-        "SELECT * FROM todos WHERE done = 0 AND due_date IS NOT NULL AND due_time IS NOT NULL "
+        "SELECT * FROM todos WHERE done = 0 AND skipped = 0 AND due_date IS NOT NULL AND due_time IS NOT NULL "
         "AND notify_offset_minutes IS NOT NULL AND notified_at IS NULL"
     ))
     for todo in todo_rows:
@@ -2248,7 +2290,7 @@ def export_data():
     todos = rows_to_dicts(
         conn.execute(
             "SELECT id, title, category, priority, done, created_at, completed_at, "
-            "due_date, due_time, recurrence, note FROM todos ORDER BY id"
+            "due_date, due_time, recurrence, note, skipped, skipped_at FROM todos ORDER BY id"
         )
     )
     study_logs = rows_to_dicts(

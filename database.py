@@ -217,6 +217,10 @@ def _migrate(conn):
         conn.execute("ALTER TABLE todos ADD COLUMN notified_at TEXT")
     if "note" not in cols:
         conn.execute("ALTER TABLE todos ADD COLUMN note TEXT")
+    if "skipped" not in cols:
+        conn.execute("ALTER TABLE todos ADD COLUMN skipped INTEGER DEFAULT 0")
+    if "skipped_at" not in cols:
+        conn.execute("ALTER TABLE todos ADD COLUMN skipped_at TEXT")
     conn.execute("UPDATE todos SET recurrence = 'mon,tue,wed,thu,fri,sat,sun' WHERE recurrence = 'daily'")
     conn.execute("UPDATE todos SET recurrence = 'mon,tue,wed,thu,fri' WHERE recurrence = 'weekdays'")
 

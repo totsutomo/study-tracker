@@ -18,6 +18,7 @@
   --danger: #e5555c;
   --success: #33b06f;
   --neutral-flag: #7b869c;
+  --neutral-flag-dim: rgba(123, 134, 156, 0.18);
 
   /* UI全体の「ぐちゃぐちゃ」対策(2026-08-15リニューアル): 角丸・影をこの3段階に統一する。
      旧実装は8/9/10/12/14/16/20pxが無秩序に混在していたため、意図的にここへ集約する。 */
@@ -457,6 +458,13 @@ h3 { font-size: 12px; color: var(--text-muted); margin: 20px 0 8px; text-transfo
   text-decoration: line-through;
 }
 
+/* スキップ済み(2026-09-05): 「done」と見た目を混同しないよう、取り消し線ではなく
+   左ボーダー+やや高めの不透明度に留める。「やらなかった」ことを責めるトーンにはしない */
+.list li.skipped {
+  opacity: 0.6;
+  border-left: 3px solid var(--neutral-flag);
+}
+
 .list li.overdue {
   border-left: 3px solid var(--neutral-flag);
 }
@@ -500,6 +508,22 @@ h3 { font-size: 12px; color: var(--text-muted); margin: 20px 0 8px; text-transfo
   background: var(--card-hover);
   color: var(--text-muted);
   justify-content: flex-start;
+}
+
+/* スキップ用の背景は左スワイプで右側から現れるので、ラベルも右寄せにする(2026-09-05) */
+.todo-swipe-bg.skip-bg {
+  justify-content: flex-end;
+  display: none; /* 通常時は非表示。ドラッグ方向に応じてJSがcomplete用bgと排他表示する */
+}
+
+.todo-swipe-bg.skip-bg.skip {
+  background: var(--neutral-flag-dim);
+  color: var(--neutral-flag);
+}
+
+.todo-swipe-bg.skip-bg.unskip {
+  background: var(--card-hover);
+  color: var(--text-muted);
 }
 
 .todo-swipe-content {
@@ -762,6 +786,27 @@ button.secondary {
 }
 
 .delete-btn svg {
+  width: 15px;
+  height: 15px;
+}
+
+/* スキップボタン(2026-09-05): delete-btnと同じチップ形状、色だけneutral-flag
+   (「責めない中立色」)にして、完了(success)・削除(danger)と混同しないようにする */
+.skip-btn {
+  background: var(--neutral-flag-dim);
+  color: var(--neutral-flag);
+  border: none;
+  border-radius: 9px;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.skip-btn svg {
   width: 15px;
   height: 15px;
 }

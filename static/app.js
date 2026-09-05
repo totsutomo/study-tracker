@@ -208,7 +208,7 @@ function nowHHMM() {
 }
 
 function isOverdue(t) {
-  if (t.done || !t.due_date) return false;
+  if (t.done || t.skipped || !t.due_date) return false;
   const today = todayStr();
   if (t.due_date < today) return true;
   if (t.due_date === today && t.due_time) return t.due_time < nowHHMM();
@@ -239,6 +239,9 @@ const ICONS = {
   play: '<svg viewBox="0 0 24 24" fill="currentColor"><polygon points="7 4 20 12 7 20 7 4"/></svg>',
   trash:
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16"/><path d="M9 7V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2"/><path d="M18 7l-.9 12.1a2 2 0 0 1-2 1.9H8.9a2 2 0 0 1-2-1.9L6 7"/></svg>',
+  // スキップ(「翌日に持ち越さないが削除もしない」)用。メディアプレイヤーの「次へ送る」アイコンを流用
+  skip:
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="5 4 15 12 5 20"/><line x1="19" y1="5" x2="19" y2="19"/></svg>',
 };
 
 
@@ -272,12 +275,18 @@ async function toggleTodoDone(t) {
   loadTodoStats();
 }
 
-// スワイプで完了/未完了を切り替えるジェスチャー。ボタン・チェックボックスの上から
-// 始まった操作はドラッグとして扱わない(タップの邪魔をしない)。
-// しきい値を超えたら完了処理を呼び、そうでなければ元の位置へ戻す。
+async function toggleTodoSkip(t) {
+  await api(`/api/todos/${t.id}/skip`, { method: "POST" });
+  loadTodos();
+  loadTodoStats();
+}
+
+// スワイプで完了⇄未完了(右)・スキップ⇄解除(左)を切り替えるジェスチャー。ボタン・チェックボックスの
+// 上から始まった操作はドラッグとして扱わない(タップの邪魔をしない)。
+// しきい値を超えたらそれぞれの処理を呼び、そうでなければ元の位置へ戻す。
 // 一定以上ドラッグした場合は、指を離した直後に発火するclickイベント(詳細パネルを開く処理)を
 // 1回だけ握りつぶす。そうしないとスワイプ操作のたびに詳細パネルも一緒に開いてしまう。
-function attachSwipeToComplete(li, content, t, onTap) {
+function attachSwipeGestures(li, content, completeBg, skipBg, t, onTap) {
   const threshold = 0.32;
   const dragMinDistance = 6;
   let dragging = false;
@@ -296,17 +305,22 @@ function attachSwipeToComplete(li, content, t, onTap) {
   }
   function onMove(e) {
     if (!dragging) return;
-    dx = Math.max(0, e.clientX - startX); // 右方向のスワイプのみ受け付ける
+    dx = e.clientX - startX; // 右=完了トグル、左=スキップトグル
+    completeBg.style.display = dx >= 0 ? "flex" : "none";
+    skipBg.style.display = dx < 0 ? "flex" : "none";
     content.style.transform = `translateX(${dx}px)`;
   }
   function onUp() {
     if (!dragging) return;
     dragging = false;
     content.style.transition = "transform 0.2s ease";
-    if (dx > dragMinDistance) suppressNextClick = true;
+    if (Math.abs(dx) > dragMinDistance) suppressNextClick = true;
     if (dx > width * threshold) {
       content.style.transform = `translateX(${width}px)`;
       setTimeout(() => toggleTodoDone(t), 140);
+    } else if (dx < -width * threshold) {
+      content.style.transform = `translateX(-${width}px)`;
+      setTimeout(() => toggleTodoSkip(t), 140);
     } else {
       content.style.transform = "translateX(0)";
     }
@@ -331,19 +345,23 @@ function attachSwipeToComplete(li, content, t, onTap) {
 function renderTodoItem(t, list) {
   const li = document.createElement("li");
   if (t.done) li.classList.add("done");
+  if (t.skipped) li.classList.add("skipped");
   const overdue = isOverdue(t);
   if (overdue) li.classList.add("overdue");
-  if (!t.done && t.due_date === todayStr() && !overdue) li.classList.add("due-today");
+  if (!t.done && !t.skipped && t.due_date === todayStr() && !overdue) li.classList.add("due-today");
   if (t.priority === "high") li.classList.add("priority-high");
   const dueLabel = t.due_date ? `${ICONS.calendar} ${t.due_date}${t.due_time ? " " + t.due_time : ""}` : "";
   const recurLabel = recurrenceLabel(t.recurrence);
   const priorityLabel = t.priority && t.priority !== "medium" ? `[${PRIORITY_LABEL[t.priority] || t.priority}] ` : "";
   const noteMark = t.note ? ` ${ICONS.note}` : "";
-  const showReschedule = !t.done && t.due_date && (overdue || t.due_date === todayStr());
+  const showReschedule = !t.done && !t.skipped && t.due_date && (overdue || t.due_date === todayStr());
   const dotColor = t.category ? colorFor(t.category) : "var(--border)";
   li.innerHTML = `
     <div class="todo-swipe-bg ${t.done ? "undo" : "complete"}">
       ${t.done ? `${ICONS.repeat} Mark incomplete` : `${ICONS.check} Mark complete`}
+    </div>
+    <div class="todo-swipe-bg skip-bg ${t.skipped ? "unskip" : "skip"}">
+      ${t.skipped ? `${ICONS.repeat} Unskip` : `${ICONS.skip} Skip`}
     </div>
     <div class="todo-swipe-content">
       <div class="todo-card-top">
@@ -351,7 +369,7 @@ function renderTodoItem(t, list) {
         <span class="todo-card-dot" style="background:${dotColor}"></span>
         <div class="todo-card-main">
           <span class="todo-card-title">${priorityLabel}${escapeHtml(t.title)}${noteMark}</span>
-          <span class="todo-card-meta">${t.category || ""} ${dueLabel}${recurLabel}</span>
+          <span class="todo-card-meta">${t.category || ""} ${dueLabel}${recurLabel}${t.skipped ? " · Skipped" : ""}</span>
           ${showReschedule ? `
             <div class="reschedule-row">
               <button type="button" class="reschedule-btn" data-kind="+30">+30 min</button>
@@ -361,7 +379,8 @@ function renderTodoItem(t, list) {
           ` : ""}
         </div>
         <div class="todo-card-actions">
-          ${!t.done && t.category ? `<button class="play-btn" title="Start recording">${ICONS.play}</button>` : ""}
+          ${!t.done && !t.skipped && t.category ? `<button class="play-btn" title="Start recording">${ICONS.play}</button>` : ""}
+          ${!t.done ? `<button class="skip-btn" title="${t.skipped ? "Unskip" : "Skip (don't carry over, keep record)"}">${ICONS.skip}</button>` : ""}
           <button class="delete-btn" title="Delete">${ICONS.trash}</button>
         </div>
       </div>
@@ -378,6 +397,10 @@ function renderTodoItem(t, list) {
       openStartPanel(t.category, t.id);
     });
   }
+  li.querySelector(".skip-btn").addEventListener("click", (e) => {
+    e.stopPropagation();
+    toggleTodoSkip(t);
+  });
   li.querySelector(".delete-btn").addEventListener("click", async (e) => {
     e.stopPropagation();
     await api(`/api/todos/${t.id}`, { method: "DELETE" });
@@ -392,13 +415,21 @@ function renderTodoItem(t, list) {
       loadCalendar();
     });
   });
-  attachSwipeToComplete(li, li.querySelector(".todo-swipe-content"), t, () => openTodoDetail(t));
+  attachSwipeGestures(
+    li,
+    li.querySelector(".todo-swipe-content"),
+    li.querySelector(".todo-swipe-bg:not(.skip-bg)"),
+    li.querySelector(".skip-bg"),
+    t,
+    () => openTodoDetail(t)
+  );
   li.classList.add("clickable");
   list.appendChild(li);
 }
 
 function todoGroupOf(t) {
   if (t.done) return "done";
+  if (t.skipped) return "skipped";
   if (!t.due_date) return "none";
   const today = todayStr();
   if (isOverdue(t)) return "overdue";
@@ -411,6 +442,7 @@ function todoGroupOf(t) {
 
 let allTodos = [];
 let doneExpanded = false;
+let skippedExpanded = false;
 
 function applyTodoFilters(todos) {
   const search = document.getElementById("todo-search").value.trim().toLowerCase();
@@ -430,7 +462,7 @@ function renderTodos() {
   const groupsEl = document.getElementById("todo-groups");
   groupsEl.innerHTML = "";
 
-  const groups = { overdue: [], today: [], week: [], later: [], none: [], done: [] };
+  const groups = { overdue: [], today: [], week: [], later: [], none: [], done: [], skipped: [] };
   todos.forEach((t) => groups[todoGroupOf(t)].push(t));
 
   const sections = [
@@ -440,16 +472,19 @@ function renderTodos() {
     ["later", "Later"],
     ["none", "No due date"],
     ["done", "Done"],
+    ["skipped", "Skipped"],
   ];
+  const collapsedState = { done: doneExpanded, skipped: skippedExpanded };
 
   sections.forEach(([key, label]) => {
     if (groups[key].length === 0) return;
     const h = document.createElement("h3");
-    if (key === "done") {
+    if (key === "done" || key === "skipped") {
       h.classList.add("collapsible");
-      h.textContent = `${doneExpanded ? "▼" : "▶"} ${label}(${groups[key].length})`;
+      h.textContent = `${collapsedState[key] ? "▼" : "▶"} ${label}(${groups[key].length})`;
       h.addEventListener("click", () => {
-        doneExpanded = !doneExpanded;
+        if (key === "done") doneExpanded = !doneExpanded;
+        else skippedExpanded = !skippedExpanded;
         renderTodos();
       });
     } else {
@@ -458,7 +493,7 @@ function renderTodos() {
     groupsEl.appendChild(h);
     const ul = document.createElement("ul");
     ul.className = "list";
-    if (key === "done" && !doneExpanded) ul.style.display = "none";
+    if ((key === "done" || key === "skipped") && !collapsedState[key]) ul.style.display = "none";
     groups[key].forEach((t) => renderTodoItem(t, ul));
     groupsEl.appendChild(ul);
   });
@@ -507,7 +542,7 @@ function renderTodoStats(stats) {
     `)
     .join("");
   el.innerHTML = `
-    <p>Completed: ${stats.done}/${stats.total} (${stats.rate}%)</p>
+    <p>Completed: ${stats.done}/${stats.total} (${stats.rate}%)${stats.skipped ? ` <span class="meta">(${stats.skipped} skipped, excluded)</span>` : ""}</p>
     ${stats.daily.length ? `<p class="meta">Completions in the last 7 days</p>${barsHtml}` : ""}
   `;
 }
