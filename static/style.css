@@ -815,6 +815,32 @@ button.secondary {
   display: none !important;
 }
 
+/* 楽観的更新の保存失敗を知らせる非ブロッキング通知(2026-09-05)。中央下に一瞬出て自動で消える。 */
+#toast-banner {
+  position: fixed;
+  left: 50%;
+  bottom: calc(76px + env(safe-area-inset-bottom));
+  transform: translate(-50%, 8px);
+  background: var(--card);
+  color: var(--text);
+  border: 1px solid var(--danger);
+  border-radius: var(--radius-sm);
+  padding: 10px 16px;
+  font-size: 14px;
+  box-shadow: var(--shadow-pop);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  z-index: 40;
+  max-width: calc(100vw - 40px);
+  text-align: center;
+}
+
+#toast-banner.show {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+
 .fab {
   position: fixed;
   right: 20px;

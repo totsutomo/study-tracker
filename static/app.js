@@ -187,6 +187,37 @@ function guardedClick(el, handler) {
   });
 }
 
+// 保存失敗を知らせる非ブロッキング通知(2026-09-05導入)。楽観的更新の失敗時、
+// alert()だとその瞬間フォーカスを奪って別操作の邪魔になるため、自動で消える控えめな表示にする。
+let toastTimer = null;
+function showToast(message) {
+  let el = document.getElementById("toast-banner");
+  if (!el) {
+    el = document.createElement("div");
+    el.id = "toast-banner";
+    document.body.appendChild(el);
+  }
+  el.textContent = message;
+  el.classList.add("show");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove("show"), 4000);
+}
+
+// 楽観的更新の共通処理(2026-09-05導入): サーバーの応答を待ってから画面を更新するのではなく、
+// 成功する前提でローカル状態を即座に書き換えて再描画し(apply)、保存(request)は裏で進める。
+// 失敗したらrevertで元の状態に戻し、トーストで知らせる。1件のオブジェクトの更新/配列からの
+// 追加・削除など、呼び出し側でapply/revertに必要な情報を閉じ込めて渡す想定。
+async function optimistic(apply, revert, request) {
+  apply();
+  try {
+    return await request();
+  } catch (err) {
+    revert();
+    showToast("保存に失敗しました。もう一度お試しください");
+    throw err;
+  }
+}
+
 function formatLocalDate(d) {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, "0");
@@ -269,16 +300,52 @@ function computeReschedule(t, kind) {
   return { due_date: formatLocalDate(base), due_time: String(base.getHours()).padStart(2, "0") + ":" + String(base.getMinutes()).padStart(2, "0") };
 }
 
+// 完了・スキップは相互排他(サーバー側の仕様に合わせる: [main.py](../main.py)の
+// toggle_todo/skip_todo参照)。楽観的に即時反映し、繰り返しToDoを完了/スキップした時だけ
+// (次回分が1件増えるため)裏でloadTodos()を呼んで拾う。それ以外は再取得しない。
 async function toggleTodoDone(t) {
-  await api(`/api/todos/${t.id}/toggle`, { method: "POST" });
-  loadTodos();
-  loadTodoStats();
+  const prev = { done: t.done, completed_at: t.completed_at, skipped: t.skipped, skipped_at: t.skipped_at };
+  await optimistic(
+    () => {
+      t.done = t.done ? 0 : 1;
+      t.completed_at = t.done ? new Date().toISOString() : null;
+      if (t.done) { t.skipped = 0; t.skipped_at = null; }
+      renderTodos();
+    },
+    () => { Object.assign(t, prev); renderTodos(); },
+    async () => {
+      await api(`/api/todos/${t.id}/toggle`, { method: "POST" });
+      loadTodoStats();
+      if (t.recurrence && t.done) loadTodos();
+    },
+  );
 }
 
 async function toggleTodoSkip(t) {
-  await api(`/api/todos/${t.id}/skip`, { method: "POST" });
-  loadTodos();
-  loadTodoStats();
+  const prev = { done: t.done, completed_at: t.completed_at, skipped: t.skipped, skipped_at: t.skipped_at };
+  await optimistic(
+    () => {
+      t.skipped = t.skipped ? 0 : 1;
+      t.skipped_at = t.skipped ? new Date().toISOString() : null;
+      if (t.skipped) { t.done = 0; t.completed_at = null; }
+      renderTodos();
+    },
+    () => { Object.assign(t, prev); renderTodos(); },
+    async () => {
+      await api(`/api/todos/${t.id}/skip`, { method: "POST" });
+      loadTodoStats();
+      if (t.recurrence && t.skipped) loadTodos();
+    },
+  );
+}
+
+async function deleteTodo(t) {
+  const idx = allTodos.indexOf(t);
+  await optimistic(
+    () => { if (idx !== -1) allTodos.splice(idx, 1); renderTodos(); },
+    () => { if (idx !== -1) allTodos.splice(idx, 0, t); renderTodos(); },
+    async () => { await api(`/api/todos/${t.id}`, { method: "DELETE" }); loadTodoStats(); },
+  );
 }
 
 // スワイプで完了⇄未完了(右)・スキップ⇄解除(左)を切り替えるジェスチャー。ボタン・チェックボックスの
@@ -401,18 +468,23 @@ function renderTodoItem(t, list) {
     e.stopPropagation();
     toggleTodoSkip(t);
   });
-  li.querySelector(".delete-btn").addEventListener("click", async (e) => {
+  li.querySelector(".delete-btn").addEventListener("click", (e) => {
     e.stopPropagation();
-    await api(`/api/todos/${t.id}`, { method: "DELETE" });
-    loadTodos();
+    deleteTodo(t);
   });
   li.querySelectorAll(".reschedule-btn").forEach((btn) => {
     btn.addEventListener("click", async (e) => {
       e.stopPropagation();
       const { due_date, due_time } = computeReschedule(t, btn.dataset.kind);
-      await api(`/api/todos/${t.id}/due`, { method: "PUT", body: JSON.stringify({ due_date, due_time }) });
-      loadTodos();
-      loadCalendar();
+      const prev = { due_date: t.due_date, due_time: t.due_time };
+      await optimistic(
+        () => { t.due_date = due_date; t.due_time = due_time; renderTodos(); },
+        () => { Object.assign(t, prev); renderTodos(); },
+        async () => {
+          await api(`/api/todos/${t.id}/due`, { method: "PUT", body: JSON.stringify({ due_date, due_time }) });
+          loadCalendar();
+        },
+      );
     });
   });
   attachSwipeGestures(
@@ -507,16 +579,22 @@ function renderTodos() {
   deferBtn.classList.toggle("hidden", deferCandidates.length === 0);
   deferBtn.onclick = async () => {
     if (!confirm(`Push ${deferCandidates.length} non-high-priority task(s) to tomorrow?`)) return;
-    await Promise.all(
-      deferCandidates.map((t) =>
-        api(`/api/todos/${t.id}/due`, {
-          method: "PUT",
-          body: JSON.stringify({ due_date: addDaysToDate(todayStr(), 1), due_time: t.due_time || null }),
-        })
-      )
+    const prevList = deferCandidates.map((t) => ({ t, due_date: t.due_date }));
+    await optimistic(
+      () => { deferCandidates.forEach((t) => { t.due_date = addDaysToDate(todayStr(), 1); }); renderTodos(); },
+      () => { prevList.forEach(({ t, due_date }) => { t.due_date = due_date; }); renderTodos(); },
+      async () => {
+        await Promise.all(
+          deferCandidates.map((t) =>
+            api(`/api/todos/${t.id}/due`, {
+              method: "PUT",
+              body: JSON.stringify({ due_date: t.due_date, due_time: t.due_time || null }),
+            })
+          )
+        );
+        loadCalendar();
+      },
     );
-    loadTodos();
-    loadCalendar();
   };
 }
 
@@ -705,16 +783,29 @@ function renderCategoryItem(cat, list) {
       input.value = cat.name;
       return;
     }
-    await api(`/api/categories/${cat.id}`, {
-      method: "PUT",
-      body: JSON.stringify({ name: newName }),
-    });
-    loadCategories();
-    loadTodos();
+    const oldName = cat.name;
+    cat.name = newName; // 体感を即時にする。選択肢(todo-category等)の再構築はfinallyのloadCategoriesに任せる
+    try {
+      await api(`/api/categories/${cat.id}`, { method: "PUT", body: JSON.stringify({ name: newName }) });
+      loadTodos();
+    } catch (err) {
+      cat.name = oldName;
+      showToast("カテゴリ名の変更に失敗しました。もう一度お試しください");
+    } finally {
+      loadCategories();
+    }
   });
   li.querySelector(".delete-btn").addEventListener("click", async () => {
-    await api(`/api/categories/${cat.id}`, { method: "DELETE" });
-    loadCategories();
+    const idx = allCategories.indexOf(cat);
+    li.remove();
+    if (idx !== -1) allCategories.splice(idx, 1);
+    try {
+      await api(`/api/categories/${cat.id}`, { method: "DELETE" });
+    } catch (err) {
+      showToast("削除に失敗しました。もう一度お試しください");
+    } finally {
+      loadCategories();
+    }
   });
   list.appendChild(li);
 }
@@ -722,12 +813,15 @@ function renderCategoryItem(cat, list) {
 guardedSubmit(document.getElementById("category-form"), async (e) => {
   const name = document.getElementById("category-name").value.trim();
   if (!name) return;
-  await api("/api/categories", {
-    method: "POST",
-    body: JSON.stringify({ name }),
-  });
   document.getElementById("category-name").value = "";
-  loadCategories();
+  try {
+    await api("/api/categories", { method: "POST", body: JSON.stringify({ name }) });
+  } catch (err) {
+    document.getElementById("category-name").value = name;
+    showToast(`「${name}」の追加に失敗しました。もう一度お試しください`);
+  } finally {
+    loadCategories();
+  }
 });
 
 // ---------- settings panel ----------
@@ -830,10 +924,8 @@ guardedSubmit(document.getElementById("todo-form"), async (e) => {
     selectedRecurrenceDays.size > 0 ? WEEKDAY_ORDER.filter((d) => selectedRecurrenceDays.has(d)).join(",") : null;
   const note = document.getElementById("todo-note").value.trim() || null;
   if (!title) return;
-  await api("/api/todos", {
-    method: "POST",
-    body: JSON.stringify({ title, category, priority, due_date, due_time, recurrence, notify_offset_minutes, note }),
-  });
+  const payload = { title, category, priority, due_date, due_time, recurrence, notify_offset_minutes, note };
+  // 保存を待たずフォームを閉じる(「受け付けた」感を即座に出す)。保存自体はこの後裏で進む
   document.getElementById("todo-title").value = "";
   document.getElementById("todo-due-date").value = "";
   document.getElementById("todo-due-time").value = "";
@@ -844,7 +936,12 @@ guardedSubmit(document.getElementById("todo-form"), async (e) => {
   document.getElementById("todo-time-toggle").textContent = "+ Add time";
   setRecurrenceDays([]);
   closeTodoAddPanel();
-  loadTodos();
+  try {
+    await api("/api/todos", { method: "POST", body: JSON.stringify(payload) });
+    loadTodos();
+  } catch (err) {
+    showToast(`「${title}」の追加に失敗しました。もう一度お試しください`);
+  }
 });
 
 // ---------- todo detail panel ----------
@@ -904,14 +1001,20 @@ guardedSubmit(document.getElementById("todo-detail-form"), async (e) => {
       : null;
   const note = document.getElementById("todo-detail-note").value.trim() || null;
   if (!title) return;
-  await api(`/api/todos/${currentDetailTodoId}`, {
-    method: "PUT",
-    body: JSON.stringify({ title, category, priority, due_date, due_time, recurrence, notify_offset_minutes, note }),
-  });
+  const payload = { title, category, priority, due_date, due_time, recurrence, notify_offset_minutes, note };
+  const todoId = currentDetailTodoId;
+  const t = allTodos.find((x) => x.id === todoId);
+  const prev = t ? { ...t } : null;
   document.getElementById("todo-detail-status").textContent = "Saved";
-  loadTodos();
-  loadCalendar();
   closeTodoDetail();
+  await optimistic(
+    () => { if (t) { Object.assign(t, payload); renderTodos(); } },
+    () => { if (t && prev) { Object.assign(t, prev); renderTodos(); } },
+    async () => {
+      await api(`/api/todos/${todoId}`, { method: "PUT", body: JSON.stringify(payload) });
+      loadCalendar();
+    },
+  );
 });
 
 function escapeHtml(str) {
@@ -999,21 +1102,25 @@ guardedSubmit(document.getElementById("manual-log-form"), async (e) => {
   const datetimeLocal = document.getElementById("manual-log-datetime").value; // "YYYY-MM-DDTHH:MM"
   const note = document.getElementById("manual-log-note").value.trim() || null;
   if (!subject || !minutes || !datetimeLocal) return;
-  await api("/api/study-logs", {
-    method: "POST",
-    body: JSON.stringify({
-      subject,
-      minutes,
-      note,
-      logged_at: `${datetimeLocal.replace("T", " ")}:00`,
-    }),
-  });
   e.target.reset();
   document.getElementById("manual-log-form").classList.add("hidden");
-  loadStudySummary();
-  loadStudyLogList();
-  loadStudyChart();
-  loadGoalProgress();
+  try {
+    await api("/api/study-logs", {
+      method: "POST",
+      body: JSON.stringify({
+        subject,
+        minutes,
+        note,
+        logged_at: `${datetimeLocal.replace("T", " ")}:00`,
+      }),
+    });
+    loadStudySummary();
+    loadStudyLogList();
+    loadStudyChart();
+    loadGoalProgress();
+  } catch (err) {
+    showToast(`「${subject}」の学習記録の保存に失敗しました。もう一度お試しください`);
+  }
 });
 
 function formatElapsed(ms) {
@@ -1631,7 +1738,8 @@ async function finishSession(elapsedMinutes) {
   const todoId = activeTodoId;
   const startTrigger = sessionStartTrigger;
   resetSessionState();
-  await api("/api/study-logs", {
+  // タイマー画面はresetSessionState()で既に閉じている(体感即時)。ここから先の保存は裏で進める
+  const logPromise = api("/api/study-logs", {
     method: "POST",
     body: JSON.stringify({
       subject,
@@ -1639,12 +1747,16 @@ async function finishSession(elapsedMinutes) {
       logged_at: `${localDatetimeNow().replace("T", " ")}:00`,
       start_trigger: startTrigger,
     }),
-  });
+  }).catch(() => showToast(`「${subject}」の学習記録の保存に失敗しました`));
   if (todoId && confirm("Mark this task complete?")) {
-    await api(`/api/todos/${todoId}/toggle`, { method: "POST" });
-    loadTodos();
-    loadTodoStats();
+    const t = allTodos.find((x) => x.id === todoId);
+    if (t) {
+      toggleTodoDone(t); // 内部で楽観的に即時反映+裏で保存(失敗時は自動でロールバック)
+    } else {
+      api(`/api/todos/${todoId}/toggle`, { method: "POST" }).then(() => { loadTodos(); loadTodoStats(); });
+    }
   }
+  await logPromise;
   loadStudySummary();
   loadStudyLogList();
   loadStudyChart();
@@ -2202,20 +2314,28 @@ document.getElementById("mood-save-btn").addEventListener("click", async () => {
   const score = selectedMoodScore;
   const noteInput = document.getElementById("mood-note");
   const note = noteInput.value.trim();
-  await api("/api/mood-logs", {
-    method: "POST",
-    body: JSON.stringify({
-      date: todayStr(),
-      score,
-      note: note || null,
-      reason: selectedMoodReason,
-      logged_at: nowLocalTimestamp(),
-    }),
-  });
+  const reason = selectedMoodReason;
   noteInput.value = "";
   setSelectedMoodScore(5);
   setSelectedMoodReason(null);
-  loadMoodPanel();
+  try {
+    await api("/api/mood-logs", {
+      method: "POST",
+      body: JSON.stringify({
+        date: todayStr(),
+        score,
+        note: note || null,
+        reason,
+        logged_at: nowLocalTimestamp(),
+      }),
+    });
+    loadMoodPanel();
+  } catch (err) {
+    noteInput.value = note;
+    setSelectedMoodScore(score);
+    setSelectedMoodReason(reason);
+    showToast("気分の記録に失敗しました。もう一度お試しください");
+  }
 });
 
 guardedSubmit(document.getElementById("goal-minutes-form"), async (e) => {
@@ -2226,8 +2346,12 @@ guardedSubmit(document.getElementById("goal-minutes-form"), async (e) => {
   if (!isNaN(dailyMinutes)) payload.daily_minimum_minutes = dailyMinutes;
   if (!isNaN(weeklyHours)) payload.weekly_goal_minutes = Math.round(weeklyHours * 60);
   if (!isNaN(monthlyHours)) payload.monthly_goal_minutes = Math.round(monthlyHours * 60);
-  await api("/api/settings", { method: "PUT", body: JSON.stringify(payload) });
-  loadGoalProgress();
+  try {
+    await api("/api/settings", { method: "PUT", body: JSON.stringify(payload) });
+    loadGoalProgress();
+  } catch (err) {
+    showToast("目標設定の保存に失敗しました。もう一度お試しください");
+  }
 });
 
 // ---------- summary & log list ----------
@@ -2299,11 +2423,19 @@ async function loadStudyLogList() {
       <button class="delete-btn" title="Delete">×</button>
     `;
     li.querySelector(".delete-btn").addEventListener("click", async () => {
-      await api(`/api/study-logs/${l.id}`, { method: "DELETE" });
-      loadStudyLogList();
-      loadStudySummary();
-      loadStudyChart();
-      loadGoalProgress();
+      const idx = logs.indexOf(l);
+      li.remove();
+      if (idx !== -1) logs.splice(idx, 1);
+      updateStudyLogHeader(logs.length);
+      try {
+        await api(`/api/study-logs/${l.id}`, { method: "DELETE" });
+        loadStudySummary();
+        loadStudyChart();
+        loadGoalProgress();
+      } catch (err) {
+        showToast("削除に失敗しました。もう一度お試しください");
+        loadStudyLogList();
+      }
     });
     list.appendChild(li);
   });
@@ -2343,13 +2475,24 @@ guardedSubmit(document.getElementById("countdown-edit-form"), async (e) => {
   const label = document.getElementById("countdown-edit-label").value.trim();
   const targetDate = document.getElementById("countdown-edit-date").value;
   if (!label || !targetDate) return;
-  await api("/api/settings", {
-    method: "PUT",
-    body: JSON.stringify({ countdown_label: label, countdown_target_date: targetDate }),
-  });
   document.getElementById("countdown-edit-form").classList.add("hidden");
-  loadCountdown();
+  try {
+    await api("/api/settings", {
+      method: "PUT",
+      body: JSON.stringify({ countdown_label: label, countdown_target_date: targetDate }),
+    });
+    loadCountdown();
+  } catch (err) {
+    showToast("カウントダウンの保存に失敗しました。もう一度お試しください");
+  }
 });
+
+function updateGoalProgress(goals) {
+  const doneCount = goals.filter((g) => g.done).length;
+  const pct = goals.length ? Math.round((doneCount / goals.length) * 100) : 0;
+  document.getElementById("goal-progress").textContent =
+    goals.length ? `Achieved: ${doneCount}/${goals.length} (${pct}%)` : "";
+}
 
 async function loadGoals() {
   const goals = await api("/api/goals");
@@ -2364,30 +2507,41 @@ async function loadGoals() {
       <button class="delete-btn" title="Delete">×</button>
     `;
     li.querySelector("input").addEventListener("click", async () => {
-      await api(`/api/goals/${g.id}/toggle`, { method: "POST" });
-      loadGoals();
+      const prevDone = g.done;
+      await optimistic(
+        () => { g.done = g.done ? 0 : 1; li.classList.toggle("done", !!g.done); updateGoalProgress(goals); },
+        () => { g.done = prevDone; li.classList.toggle("done", !!g.done); updateGoalProgress(goals); },
+        () => api(`/api/goals/${g.id}/toggle`, { method: "POST" }),
+      );
     });
     li.querySelector(".delete-btn").addEventListener("click", async () => {
-      await api(`/api/goals/${g.id}`, { method: "DELETE" });
-      loadGoals();
+      const idx = goals.indexOf(g);
+      li.remove();
+      goals.splice(idx, 1);
+      updateGoalProgress(goals);
+      try {
+        await api(`/api/goals/${g.id}`, { method: "DELETE" });
+      } catch (err) {
+        showToast("削除に失敗しました。もう一度お試しください");
+        loadGoals();
+      }
     });
     list.appendChild(li);
   });
-  const doneCount = goals.filter((g) => g.done).length;
-  const pct = goals.length ? Math.round((doneCount / goals.length) * 100) : 0;
-  document.getElementById("goal-progress").textContent =
-    goals.length ? `Achieved: ${doneCount}/${goals.length} (${pct}%)` : "";
+  updateGoalProgress(goals);
 }
 
 guardedSubmit(document.getElementById("goal-form"), async (e) => {
   const title = document.getElementById("goal-title").value.trim();
   if (!title) return;
-  await api("/api/goals", {
-    method: "POST",
-    body: JSON.stringify({ title }),
-  });
   document.getElementById("goal-title").value = "";
-  loadGoals();
+  try {
+    await api("/api/goals", { method: "POST", body: JSON.stringify({ title }) });
+    loadGoals();
+  } catch (err) {
+    document.getElementById("goal-title").value = title;
+    showToast(`「${title}」の追加に失敗しました。もう一度お試しください`);
+  }
 });
 
 // ---------- activation logs ----------
@@ -2408,8 +2562,10 @@ function updateActivationBanner() {
   banner.classList.remove("hidden");
 }
 
-async function loadActivationActive() {
-  activationActiveLog = await api("/api/activation-logs/active");
+// activationActiveLogの現在値に合わせて画面を更新する部分だけを切り出したもの(2026-09-05)。
+// サーバーから取得した後(loadActivationActive)だけでなく、楽観的更新(returnActivation)でも
+// activationActiveLogを書き換えた直後にそのまま呼べるようにするため。
+function renderActivationStatus() {
   const btn = document.getElementById("activation-btn");
   const statusEl = document.getElementById("activation-current-status");
   const settingsStatusEl = document.getElementById("settings-activation-status");
@@ -2439,13 +2595,26 @@ async function loadActivationActive() {
   updateActivationBanner();
 }
 
+async function loadActivationActive() {
+  activationActiveLog = await api("/api/activation-logs/active");
+  renderActivationStatus();
+}
+
 async function returnActivation() {
   if (!activationActiveLog) return;
-  await api(`/api/activation-logs/${activationActiveLog.id}/return`, {
-    method: "PUT",
-    body: JSON.stringify({ returned_at: nowLocalTimestamp() }),
-  });
-  refreshActivation();
+  const activeLog = activationActiveLog;
+  activationActiveLog = null;
+  renderActivationStatus(); // 楽観的に即座に「未Active」表示へ切り替える
+  try {
+    await api(`/api/activation-logs/${activeLog.id}/return`, {
+      method: "PUT",
+      body: JSON.stringify({ returned_at: nowLocalTimestamp() }),
+    });
+  } catch (err) {
+    showToast("復帰の記録に失敗しました。もう一度お試しください");
+  } finally {
+    refreshActivation(); // 成功・失敗いずれも正本で確定させる(失敗時はここでActiveに戻る)
+  }
 }
 
 async function loadActivationStats() {
@@ -2525,13 +2694,18 @@ async function loadActivationList() {
       <button class="delete-btn" title="Delete">×</button>
     `;
     li.querySelector(".delete-btn").addEventListener("click", async () => {
-      await api(`/api/activation-logs/${l.id}`, { method: "DELETE" });
-      loadActivationList();
-      loadActivationActive();
-      loadActivationStats();
-      loadActivationPostReturnStats();
-      loadActivationMoodReasons();
-      loadCalendar();
+      li.remove();
+      try {
+        await api(`/api/activation-logs/${l.id}`, { method: "DELETE" });
+        loadActivationActive();
+        loadActivationStats();
+        loadActivationPostReturnStats();
+        loadActivationMoodReasons();
+        loadCalendar();
+      } catch (err) {
+        showToast("削除に失敗しました。もう一度お試しください");
+        loadActivationList();
+      }
     });
     list.appendChild(li);
   });
@@ -2611,16 +2785,23 @@ document.getElementById("activation-banner").addEventListener("click", openSetti
 
 guardedSubmit(document.getElementById("activation-form"), async (e) => {
   const note = document.getElementById("activation-note").value.trim() || null;
-  await api("/api/activation-logs", {
-    method: "POST",
-    body: JSON.stringify({
-      triggered_at: nowLocalTimestamp(),
-      note,
-      mood: activationSelectedMood,
-      mood_reason: activationSelectedReason,
-    }),
-  });
+  const payload = {
+    triggered_at: nowLocalTimestamp(),
+    note,
+    mood: activationSelectedMood,
+    mood_reason: activationSelectedReason,
+  };
   closeActivationPanel();
+  activationActiveLog = { id: null, ...payload }; // idはPOST応答後にrefreshActivation()で正しい値に上書きされる
+  renderActivationStatus();
+  try {
+    await api("/api/activation-logs", { method: "POST", body: JSON.stringify(payload) });
+  } catch (err) {
+    activationActiveLog = null;
+    renderActivationStatus();
+    showToast("記録の開始に失敗しました。もう一度お試しください");
+    return;
+  }
   refreshActivation();
 });
 
@@ -2682,8 +2863,9 @@ function sleepDurationMinutes(bedtimeAt, wakeAt) {
   return Math.round((wake.getTime() - bed.getTime()) / 60000);
 }
 
-async function loadSleepActive() {
-  sleepActiveLog = await api("/api/sleep-logs/active");
+// activation-logsのrenderActivationStatusと同じ理由(2026-09-05): サーバー取得後だけでなく
+// 楽観的更新(wakeUp)からもsleepActiveLog書き換え直後にそのまま呼べるよう切り出した。
+function renderSleepStatus() {
   const btn = document.getElementById("sleep-btn");
   const settingsStatusEl = document.getElementById("settings-sleep-status");
   const settingsWakeBtn = document.getElementById("settings-sleep-wake-btn");
@@ -2708,16 +2890,29 @@ async function loadSleepActive() {
   updateSleepBanner();
 }
 
+async function loadSleepActive() {
+  sleepActiveLog = await api("/api/sleep-logs/active");
+  renderSleepStatus();
+}
+
 document.getElementById("sleep-banner").addEventListener("click", openSettingsPanel);
 
 async function wakeUp() {
   if (!sleepActiveLog) return;
-  await api(`/api/sleep-logs/${sleepActiveLog.id}`, {
-    method: "PUT",
-    body: JSON.stringify({ wake_at: nowLocalTimestamp() }),
-  });
-  loadSleepActive();
-  loadSleepPanel();
+  const activeLog = sleepActiveLog;
+  sleepActiveLog = null;
+  renderSleepStatus(); // 楽観的に即座に「起床済み」表示へ
+  try {
+    await api(`/api/sleep-logs/${activeLog.id}`, {
+      method: "PUT",
+      body: JSON.stringify({ wake_at: nowLocalTimestamp() }),
+    });
+  } catch (err) {
+    showToast("起床の記録に失敗しました。もう一度お試しください");
+  } finally {
+    loadSleepActive(); // 成功・失敗いずれも正本で確定(失敗時はここでまだ就寝中に戻る)
+    loadSleepPanel();
+  }
 }
 
 async function loadSleepPanel() {
@@ -2774,20 +2969,31 @@ function renderSleepLogList(logs) {
     li.querySelector(".sleep-edit-save").addEventListener("click", async () => {
       const bedtimeVal = li.querySelector(".sleep-edit-bedtime").value;
       const wakeVal = li.querySelector(".sleep-edit-wake").value;
-      await api(`/api/sleep-logs/${l.id}`, {
-        method: "PUT",
-        body: JSON.stringify({
-          bedtime_at: fromDatetimeLocalValue(bedtimeVal),
-          wake_at: fromDatetimeLocalValue(wakeVal),
-        }),
-      });
-      loadSleepActive();
-      loadSleepPanel();
+      li.querySelector(".sleep-edit-row").classList.add("hidden");
+      try {
+        await api(`/api/sleep-logs/${l.id}`, {
+          method: "PUT",
+          body: JSON.stringify({
+            bedtime_at: fromDatetimeLocalValue(bedtimeVal),
+            wake_at: fromDatetimeLocalValue(wakeVal),
+          }),
+        });
+        loadSleepActive();
+        loadSleepPanel();
+      } catch (err) {
+        li.querySelector(".sleep-edit-row").classList.remove("hidden");
+        showToast("保存に失敗しました。もう一度お試しください");
+      }
     });
     li.querySelector(".delete-btn").addEventListener("click", async () => {
-      await api(`/api/sleep-logs/${l.id}`, { method: "DELETE" });
-      loadSleepActive();
-      loadSleepPanel();
+      li.remove();
+      try {
+        await api(`/api/sleep-logs/${l.id}`, { method: "DELETE" });
+        loadSleepActive();
+      } catch (err) {
+        showToast("削除に失敗しました。もう一度お試しください");
+        loadSleepPanel();
+      }
     });
     list.appendChild(li);
   });
@@ -2826,24 +3032,36 @@ async function renderBedtimeCarryoverList() {
       </div>
     `;
     li.querySelector('[data-action="tomorrow"]').addEventListener("click", async () => {
-      await api(`/api/todos/${t.id}/due`, {
-        method: "PUT",
-        body: JSON.stringify({ due_date: addDaysToDate(t.due_date, 1), due_time: t.due_time || null }),
-      });
       li.remove();
-      loadTodos();
-      loadCalendar();
       toggleBedtimeCarryoverEmpty();
+      try {
+        await api(`/api/todos/${t.id}/due`, {
+          method: "PUT",
+          body: JSON.stringify({ due_date: addDaysToDate(t.due_date, 1), due_time: t.due_time || null }),
+        });
+        loadTodos();
+        loadCalendar();
+      } catch (err) {
+        list.appendChild(li);
+        toggleBedtimeCarryoverEmpty();
+        showToast(`「${t.title}」の変更に失敗しました。もう一度お試しください`);
+      }
     });
     li.querySelector('[data-action="keep"]').addEventListener("click", () => {
       li.remove();
       toggleBedtimeCarryoverEmpty();
     });
     li.querySelector('[data-action="delete"]').addEventListener("click", async () => {
-      await api(`/api/todos/${t.id}`, { method: "DELETE" });
       li.remove();
-      loadTodos();
       toggleBedtimeCarryoverEmpty();
+      try {
+        await api(`/api/todos/${t.id}`, { method: "DELETE" });
+        loadTodos();
+      } catch (err) {
+        list.appendChild(li);
+        toggleBedtimeCarryoverEmpty();
+        showToast(`「${t.title}」の削除に失敗しました。もう一度お試しください`);
+      }
     });
     list.appendChild(li);
   });
@@ -2869,16 +3087,21 @@ guardedSubmit(document.getElementById("bedtime-add-form"), async (e) => {
   const titleInput = document.getElementById("bedtime-add-title");
   const title = titleInput.value.trim();
   if (!title) return;
-  await api("/api/todos", {
-    method: "POST",
-    body: JSON.stringify({ title, due_date: addDaysToDate(todayStr(), 1) }),
-  });
   titleInput.value = "";
   const li = document.createElement("li");
   li.innerHTML = `<span class="log-info"><span>${escapeHtml(title)}</span></span>`;
   document.getElementById("bedtime-added-list").appendChild(li);
-  loadTodos();
-  loadCalendar();
+  try {
+    await api("/api/todos", {
+      method: "POST",
+      body: JSON.stringify({ title, due_date: addDaysToDate(todayStr(), 1) }),
+    });
+    loadTodos();
+    loadCalendar();
+  } catch (err) {
+    li.remove();
+    showToast(`「${title}」の追加に失敗しました。もう一度お試しください`);
+  }
 });
 
 document.getElementById("bedtime-step2-done").addEventListener("click", closeBedtimePanel);
@@ -2887,13 +3110,19 @@ guardedClick(document.getElementById("sleep-btn"), async () => {
   if (sleepActiveLog) {
     await wakeUp();
   } else {
-    await api("/api/sleep-logs", {
-      method: "POST",
-      body: JSON.stringify({ bedtime_at: nowLocalTimestamp() }),
-    });
-    await loadSleepActive();
-    loadSleepPanel();
+    const bedtime_at = nowLocalTimestamp();
+    sleepActiveLog = { id: null, bedtime_at }; // idはPOST応答後にloadSleepActive()で正しい値に上書きされる
+    renderSleepStatus();
     openBedtimePanel();
+    try {
+      await api("/api/sleep-logs", { method: "POST", body: JSON.stringify({ bedtime_at }) });
+      await loadSleepActive();
+      loadSleepPanel();
+    } catch (err) {
+      sleepActiveLog = null;
+      renderSleepStatus();
+      showToast("就寝の記録に失敗しました。もう一度お試しください");
+    }
   }
 });
 
@@ -3360,8 +3589,14 @@ function renderCalDayDetail() {
     li.querySelector(".delete-btn").addEventListener("click", async (e) => {
       e.stopPropagation();
       if (ev.recurrence && !confirm("This is a recurring event. Delete the entire series?")) return;
-      await api(`/api/events/${ev.id}`, { method: "DELETE" });
-      loadCalendar();
+      li.remove();
+      try {
+        await api(`/api/events/${ev.id}`, { method: "DELETE" });
+      } catch (err) {
+        showToast("削除に失敗しました。もう一度お試しください");
+      } finally {
+        loadCalendar();
+      }
     });
     li.classList.add("clickable");
     li.addEventListener("click", () => openEventDetail(ev));
@@ -3383,10 +3618,21 @@ function renderCalDayDetail() {
     `;
     li.querySelector("input").addEventListener("click", async (e) => {
       e.stopPropagation();
-      await api(`/api/todos/${t.id}/toggle`, { method: "POST" });
-      loadTodos();
-      loadTodoStats();
-      loadCalendar();
+      const checkbox = e.currentTarget;
+      const prevDone = t.done;
+      t.done = t.done ? 0 : 1;
+      li.classList.toggle("done", !!t.done);
+      checkbox.checked = !!t.done;
+      try {
+        await api(`/api/todos/${t.id}/toggle`, { method: "POST" });
+        loadTodos();
+        loadTodoStats();
+      } catch (err) {
+        t.done = prevDone;
+        li.classList.toggle("done", !!t.done);
+        checkbox.checked = !!t.done;
+        showToast("保存に失敗しました。もう一度お試しください");
+      }
     });
     li.classList.add("clickable");
     li.addEventListener("click", () => openTodoDetail(t));
@@ -3595,24 +3841,26 @@ guardedSubmit(document.getElementById("event-form"), async (e) => {
   const note = document.getElementById("event-note").value.trim() || null;
   if (!title || !evDate || !startTime || !endTime) return;
   const recurrence = selectedEventRecurrenceDays.size ? [...selectedEventRecurrenceDays].join(",") : null;
-  await api("/api/events", {
-    method: "POST",
-    body: JSON.stringify({
-      title,
-      category,
-      date: evDate,
-      start_time: startTime,
-      end_time: endTime,
-      recurrence,
-      recurrence_until: recurrence ? recurrenceUntilInput : null,
-      notify_offset_minutes,
-      note,
-    }),
-  });
+  const payload = {
+    title,
+    category,
+    date: evDate,
+    start_time: startTime,
+    end_time: endTime,
+    recurrence,
+    recurrence_until: recurrence ? recurrenceUntilInput : null,
+    notify_offset_minutes,
+    note,
+  };
   e.target.reset();
   setEventRecurrenceDays([]);
   closeEventAddPanel();
-  loadCalendar();
+  try {
+    await api("/api/events", { method: "POST", body: JSON.stringify(payload) });
+    loadCalendar();
+  } catch (err) {
+    showToast(`「${title}」の追加に失敗しました。もう一度お試しください`);
+  }
 });
 
 // ---------- copy last week's schedule ----------
@@ -3817,26 +4065,34 @@ guardedClick(document.getElementById("copyweek-commit"), async () => {
   if (conflictCount > 0 && !confirm(`${conflictCount} event(s) overlap with an existing schedule. Copy anyway?`)) {
     return;
   }
-  for (const row of copyweekRows) {
-    await api("/api/events", {
-      method: "POST",
-      body: JSON.stringify({
-        title: row.title,
-        category: row.category,
-        date: row.date,
-        start_time: row.start_time,
-        end_time: row.end_time,
-        recurrence: null,
-        recurrence_until: null,
-        notify_offset_minutes: 0,
-        note: row.note,
-      }),
-    });
-  }
   const copiedCount = copyweekRows.length;
   closeCopyweekPanel();
-  alert(`Copied ${copiedCount} event(s).`);
-  if (document.getElementById("tab-calendar").classList.contains("active")) loadCalendar();
+  try {
+    // 1件ずつ直列でawaitしていたため件数分の往復を待たされていた。まとめて並列送信に変更(2026-09-05)
+    await Promise.all(
+      copyweekRows.map((row) =>
+        api("/api/events", {
+          method: "POST",
+          body: JSON.stringify({
+            title: row.title,
+            category: row.category,
+            date: row.date,
+            start_time: row.start_time,
+            end_time: row.end_time,
+            recurrence: null,
+            recurrence_until: null,
+            notify_offset_minutes: 0,
+            note: row.note,
+          }),
+        })
+      )
+    );
+    showToast(`Copied ${copiedCount} event(s).`);
+  } catch (err) {
+    showToast("一部の予定のコピーに失敗しました。カレンダーを確認してください");
+  } finally {
+    if (document.getElementById("tab-calendar").classList.contains("active")) loadCalendar();
+  }
 });
 
 document.getElementById("cal-copy-week-btn").addEventListener("click", () => {
@@ -3893,23 +4149,26 @@ guardedSubmit(document.getElementById("event-detail-form"), async (e) => {
   const note = document.getElementById("event-detail-note").value.trim() || null;
   if (!title || !evDate || !startTime || !endTime) return;
   const recurrence = selectedEventDetailRecurrenceDays.size ? [...selectedEventDetailRecurrenceDays].join(",") : null;
-  await api(`/api/events/${currentDetailEventId}`, {
-    method: "PUT",
-    body: JSON.stringify({
-      title,
-      category,
-      date: evDate,
-      start_time: startTime,
-      end_time: endTime,
-      recurrence,
-      recurrence_until: recurrence ? recurrenceUntilInput : null,
-      notify_offset_minutes,
-      note,
-    }),
-  });
+  const payload = {
+    title,
+    category,
+    date: evDate,
+    start_time: startTime,
+    end_time: endTime,
+    recurrence,
+    recurrence_until: recurrence ? recurrenceUntilInput : null,
+    notify_offset_minutes,
+    note,
+  };
+  const eventId = currentDetailEventId;
   document.getElementById("event-detail-status").textContent = "Saved";
   closeEventDetail();
-  loadCalendar();
+  try {
+    await api(`/api/events/${eventId}`, { method: "PUT", body: JSON.stringify(payload) });
+    loadCalendar();
+  } catch (err) {
+    showToast(`「${title}」の保存に失敗しました。もう一度お試しください`);
+  }
 });
 
 // ---------- push notifications ----------
