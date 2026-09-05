@@ -1153,6 +1153,7 @@ function openStartPanel(subject, todoId) {
   document.getElementById("start-duration-input").value = 25;
   document.getElementById("start-clockonly").checked = false;
   document.getElementById("start-keep-awake").checked = false;
+  document.getElementById("start-reset-on-reopen").checked = false;
   startTrigger = null;
   document.querySelectorAll("#start-trigger-picker .reason-btn").forEach((b) => {
     b.classList.remove("active");
@@ -1203,6 +1204,7 @@ document.getElementById("start-begin-btn").addEventListener("click", () => {
   const { subject, todoId } = pendingStart;
   const clockOnly = document.getElementById("start-clockonly").checked;
   const keepAwake = document.getElementById("start-keep-awake").checked;
+  const resetOnReopen = document.getElementById("start-reset-on-reopen").checked;
   let targetMs = null;
   if (startMode === "countdown") {
     const minutes = parseInt(document.getElementById("start-duration-input").value, 10);
@@ -1220,7 +1222,7 @@ document.getElementById("start-begin-btn").addEventListener("click", () => {
   }
   const trigger = startTrigger;
   closeStartPanel();
-  beginSession(subject, todoId, startMode, targetMs, clockOnly, trigger, keepAwake);
+  beginSession(subject, todoId, startMode, targetMs, clockOnly, trigger, keepAwake, resetOnReopen);
 });
 
 // ---------- focus timer (start / pause / resume / stop / minimize) ----------
@@ -1235,6 +1237,9 @@ let sessionMode = "countup"; // "countup" | "countdown"
 let sessionTargetMs = null;
 let sessionClockOnly = false;
 let sessionKeepAwake = false; // user-selected "don't let the screen sleep" option, independent of clock-only
+// user-selected "reset to 0:00 instead of restoring elapsed time" option, checked in restoreSession()
+// when the app is reopened (reload / PWA relaunch) while this session is still running.
+let sessionResetOnReopen = false;
 let sessionCompleted = false;
 let overlayMinimized = false;
 let sessionStartTrigger = null;
@@ -1393,6 +1398,7 @@ function persistSession() {
       sessionTargetMs,
       sessionClockOnly,
       sessionKeepAwake,
+      sessionResetOnReopen,
       sessionCompleted,
       overlayMinimized,
       sessionStartTrigger,
@@ -1424,9 +1430,22 @@ function restoreSession() {
   sessionTargetMs = saved.sessionTargetMs;
   sessionClockOnly = saved.sessionClockOnly;
   sessionKeepAwake = !!saved.sessionKeepAwake;
+  sessionResetOnReopen = !!saved.sessionResetOnReopen;
   sessionCompleted = !!saved.sessionCompleted;
   overlayMinimized = saved.overlayMinimized;
   sessionStartTrigger = saved.sessionStartTrigger || null;
+
+  let didReset = false;
+  if (sessionResetOnReopen) {
+    accumulatedMs = 0;
+    segmentStart = isPaused ? null : Date.now();
+    sessionCompleted = false;
+    didReset = true;
+    persistSession();
+    if (sessionMode === "countdown") {
+      syncFocusSessionServer(isPaused ? null : Math.round(sessionTargetMs / 1000), timerSubject);
+    }
+  }
 
   if (overlayMinimized) {
     showMiniBar();
@@ -1439,9 +1458,10 @@ function restoreSession() {
     startTimerTick();
     if (sessionClockOnly || sessionKeepAwake) requestWakeLock();
   }
+  if (didReset) showToast("タイマーをリセットしました");
 }
 
-function beginSession(subject, todoId, mode, targetMs, clockOnly, trigger, keepAwake) {
+function beginSession(subject, todoId, mode, targetMs, clockOnly, trigger, keepAwake, resetOnReopen) {
   timerSubject = subject;
   activeTodoId = todoId;
   accumulatedMs = 0;
@@ -1451,6 +1471,7 @@ function beginSession(subject, todoId, mode, targetMs, clockOnly, trigger, keepA
   sessionTargetMs = targetMs;
   sessionClockOnly = clockOnly;
   sessionKeepAwake = !!keepAwake;
+  sessionResetOnReopen = !!resetOnReopen;
   sessionCompleted = false;
   overlayMinimized = false;
   sessionStartTrigger = trigger || null;

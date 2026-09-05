@@ -831,7 +831,7 @@ button.secondary {
   opacity: 0;
   pointer-events: none;
   transition: opacity 0.2s ease, transform 0.2s ease;
-  z-index: 40;
+  z-index: 65; /* above .focus-overlay(50) and its controls(55) so toasts stay visible over the full-screen timer */
   max-width: calc(100vw - 40px);
   text-align: center;
 }
