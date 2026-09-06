@@ -1237,9 +1237,12 @@ let sessionMode = "countup"; // "countup" | "countdown"
 let sessionTargetMs = null;
 let sessionClockOnly = false;
 let sessionKeepAwake = false; // user-selected "don't let the screen sleep" option, independent of clock-only
-// user-selected "reset to 0:00 instead of restoring elapsed time" option, checked in restoreSession()
-// when the app is reopened (reload / PWA relaunch) while this session is still running.
+// user-selected "reset to 0:00 instead of restoring elapsed time" option. Applied both on a real
+// page reload (restoreSession(), below) and on returning from the background (visibilitychange,
+// near pauseSession()) — a reload alone isn't enough in practice, since switching to another app
+// and back rarely reloads the page at all (the browser/PWA process just stays alive).
 let sessionResetOnReopen = false;
+let lastResetOnReopenAt = 0; // debounce: avoid a double reset+toast if both triggers fire close together
 let sessionCompleted = false;
 let overlayMinimized = false;
 let sessionStartTrigger = null;
@@ -1406,6 +1409,27 @@ function persistSession() {
   );
 }
 
+// Shared by restoreSession() (a genuine page reload) and the visibilitychange handler below
+// (returning from the background without a reload — by far the more common "reopen" in practice,
+// e.g. switching to another app and back). Resets elapsed time to 0 while keeping the same
+// subject/session running, re-arms the countdown push-notification tracking, and toasts about it.
+function applyResetOnReopenIfNeeded() {
+  if (!sessionResetOnReopen || !timerSubject) return false;
+  const now = Date.now();
+  if (now - lastResetOnReopenAt < 2000) return false; // both triggers landing together shouldn't double-fire
+  lastResetOnReopenAt = now;
+  accumulatedMs = 0;
+  segmentStart = isPaused ? null : now;
+  sessionCompleted = false;
+  persistSession();
+  if (sessionMode === "countdown") {
+    syncFocusSessionServer(isPaused ? null : Math.round(sessionTargetMs / 1000), timerSubject);
+  }
+  updateFocusDisplay();
+  showToast("タイマーをリセットしました");
+  return true;
+}
+
 function restoreSession() {
   const raw = localStorage.getItem(FOCUS_SESSION_KEY);
   if (!raw) return;
@@ -1435,17 +1459,7 @@ function restoreSession() {
   overlayMinimized = saved.overlayMinimized;
   sessionStartTrigger = saved.sessionStartTrigger || null;
 
-  let didReset = false;
-  if (sessionResetOnReopen) {
-    accumulatedMs = 0;
-    segmentStart = isPaused ? null : Date.now();
-    sessionCompleted = false;
-    didReset = true;
-    persistSession();
-    if (sessionMode === "countdown") {
-      syncFocusSessionServer(isPaused ? null : Math.round(sessionTargetMs / 1000), timerSubject);
-    }
-  }
+  applyResetOnReopenIfNeeded();
 
   if (overlayMinimized) {
     showMiniBar();
@@ -1458,7 +1472,6 @@ function restoreSession() {
     startTimerTick();
     if (sessionClockOnly || sessionKeepAwake) requestWakeLock();
   }
-  if (didReset) showToast("タイマーをリセットしました");
 }
 
 function beginSession(subject, todoId, mode, targetMs, clockOnly, trigger, keepAwake, resetOnReopen) {
@@ -1721,8 +1734,15 @@ document.addEventListener("visibilitychange", () => {
     if (timerSubject && sessionClockOnly && !isPaused) {
       pauseSession();
     }
-  } else if (timerSubject && (sessionClockOnly || sessionKeepAwake) && !isPaused) {
-    requestWakeLock();
+  } else {
+    // coming back from the background (switching to another app, unlocking the phone, ...) is
+    // the realistic "reopening the timer" case in practice — a genuine page reload (handled by
+    // restoreSession() at boot) is much rarer, since the browser/PWA process usually just stays
+    // alive while backgrounded.
+    applyResetOnReopenIfNeeded();
+    if (timerSubject && (sessionClockOnly || sessionKeepAwake) && !isPaused) {
+      requestWakeLock();
+    }
   }
 });
 
