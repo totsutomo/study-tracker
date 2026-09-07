@@ -1291,10 +1291,16 @@ function syncSessionActiveFlag(active, subject) {
 // 伝える。syncSessionActiveFlag()のactiveはpause中もtrueのまま保つ(ブロック維持のため)ので、
 // 「pause中かどうか」自体はこちらで別に送る。elapsedMsはpause/resumeを押した瞬間の
 // currentElapsedMs()(pause中はaccumulatedMsそのもの)。
+// pause(true)はclock-onlyセッションのvisibilitychangeハンドラ(バックグラウンド移行の瞬間)から
+// 同期的に呼ばれる = ページが送信途中で破棄されうるタイミングと重なる。keepaliveなしだと
+// このfetchが送信完了前にタブ/PWAが閉じられて失われ、サーバー側はsession_paused=falseのまま
+// 残り、peer-session-bannerが「Paused」ではなく経過時間表示のまま延々スタックする
+// (syncSessionActiveFlagで既に対策済みの同じバグ系統、2026-09-07に発現を確認)。
 function syncFocusSessionPause(paused, elapsedMs) {
   api("/api/focus-session/pause", {
     method: "POST",
     body: JSON.stringify({ paused, elapsed_ms: Math.round(elapsedMs) }),
+    keepalive: true,
   }).catch(() => {});
 }
 
@@ -1743,6 +1749,12 @@ document.addEventListener("visibilitychange", () => {
     if (timerSubject && (sessionClockOnly || sessionKeepAwake) && !isPaused) {
       requestWakeLock();
     }
+    // the peer-session-banner's own setInterval keeps running while this tab is hidden, but
+    // background tabs get their timers throttled (sometimes to once a minute or more) or
+    // fully frozen by the browser, so a peer session that ended while this tab was in the
+    // background could sit stale on screen for a long time after switching back. Force an
+    // immediate re-check here so returning to the tab never shows outdated "studying now" info.
+    checkPeerSession();
   }
 });
 
