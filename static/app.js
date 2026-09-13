@@ -751,7 +751,6 @@ async function loadCategories() {
 
   renderStudyButtons(cats);
   renderStudyFabMenu(cats);
-  populateManualLogSubjects(cats);
   populateEventCategorySelect(cats);
 
   const list = document.getElementById("category-list");
@@ -1071,15 +1070,6 @@ document.addEventListener("click", (e) => {
   }
 });
 
-function populateManualLogSubjects(cats) {
-  const select = document.getElementById("manual-log-subject");
-  const previous = select.value;
-  select.innerHTML = cats
-    .map((c) => `<option value="${escapeHtml(c.name)}">${escapeHtml(c.name)}</option>`)
-    .join("");
-  if (cats.some((c) => c.name === previous)) select.value = previous;
-}
-
 function localDatetimeNow() {
   const now = new Date();
   now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
@@ -1089,42 +1079,6 @@ function localDatetimeNow() {
 function nowLocalTimestamp() {
   return `${localDatetimeNow().replace("T", " ")}:00`; // "YYYY-MM-DD HH:MM:SS"
 }
-
-document.getElementById("manual-log-toggle").addEventListener("click", () => {
-  const form = document.getElementById("manual-log-form");
-  const opening = form.classList.contains("hidden");
-  form.classList.toggle("hidden");
-  if (opening) {
-    document.getElementById("manual-log-datetime").value = localDatetimeNow();
-  }
-});
-
-guardedSubmit(document.getElementById("manual-log-form"), async (e) => {
-  const subject = document.getElementById("manual-log-subject").value;
-  const minutes = parseInt(document.getElementById("manual-log-minutes").value, 10);
-  const datetimeLocal = document.getElementById("manual-log-datetime").value; // "YYYY-MM-DDTHH:MM"
-  const note = document.getElementById("manual-log-note").value.trim() || null;
-  if (!subject || !minutes || !datetimeLocal) return;
-  e.target.reset();
-  document.getElementById("manual-log-form").classList.add("hidden");
-  try {
-    await api("/api/study-logs", {
-      method: "POST",
-      body: JSON.stringify({
-        subject,
-        minutes,
-        note,
-        logged_at: `${datetimeLocal.replace("T", " ")}:00`,
-      }),
-    });
-    loadStudySummary();
-    loadStudyLogList();
-    loadStudyChart();
-    loadGoalProgress();
-  } catch (err) {
-    showToast(`「${subject}」の学習記録の保存に失敗しました。もう一度お試しください`);
-  }
-});
 
 function formatElapsed(ms) {
   const totalSec = Math.max(0, Math.floor(ms / 1000));
