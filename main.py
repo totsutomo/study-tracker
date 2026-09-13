@@ -1334,6 +1334,16 @@ SCREEN_BUDGET_DEFAULT_STUDY_PACKAGES = [
     "com.elsanow.speak",    # ELSA Speak (要検証)
     "com.openai.chatgpt",   # ChatGPT公式アプリ
     "com.anthropic.claude",  # Claude公式アプリ
+    # 2026-09-14の事故で発覚: このリストはAndroid(JpBlocker)とWindows(FocusGuard)
+    # 両方が「除外対象アプリ一覧」として共有・上書きされる。Android名しか
+    # 入っていなかったため、FocusGuard側のconfig.jsonがサーバーの権威あるリストで
+    # 上書きされた瞬間、PC側のexe名指定(anki.exe等)が消えてPCでの勉強アプリ除外が
+    # 効かなくなる実害が出た。両OS分を1つのリストに同居させることでその場しのぎで
+    # 直す(各プラットフォームは知らない識別子を無視するだけなので実害はない)。
+    # 恒久対応はstudy_packagesをプラットフォーム別に分割すること(Obsidian開発ログ参照)。
+    "anki.exe",             # AnkiDroid(Windows版Anki)
+    "Claude.exe",           # Claudeデスクトップアプリ
+    "ChatGPT.exe",          # ChatGPTデスクトップアプリ
 ]
 
 
