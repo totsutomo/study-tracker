@@ -232,9 +232,13 @@ class SleepLogUpdate(BaseModel):
 
 
 class ScreenTimeUpsert(BaseModel):
-    date: str  # "YYYY-MM-DD", client(JpBlocker)local date
+    date: str  # "YYYY-MM-DD", client local date
     total_minutes: int
     by_app: str | None = None  # optional JSON文字列(アプリ別内訳、パッケージ名→分)
+    device: str = "phone"  # 'phone'(JpBlocker) / 'pc' / 'tablet'(FocusGuard)。省略時は後方互換でphone扱い
+    # screen_budget_paramsのpayload形状はJSON文字列(他のaction_typeと同じくサーバーはパースせず素通し、
+    # _write_screen_budget_paramsが受け取るキーはbaseline_minutes/study_ratio/todo_bonus_max/
+    # daily_cap/study_packages。詳細はSCREEN_BUDGET_DEFAULTS周辺のコメント参照。
 
 
 class ApproveIn(BaseModel):
@@ -1209,11 +1213,11 @@ def upsert_screen_time(payload: ScreenTimeUpsert, token: str | None = None):
         )
     conn = get_connection()
     conn.execute(
-        "INSERT INTO screen_time_logs (date, total_minutes, by_app, updated_at) "
-        "VALUES (?, ?, ?, datetime('now')) "
-        "ON CONFLICT(date) DO UPDATE SET total_minutes = excluded.total_minutes, "
+        "INSERT INTO screen_time_logs (date, device, total_minutes, by_app, updated_at) "
+        "VALUES (?, ?, ?, ?, datetime('now')) "
+        "ON CONFLICT(date, device) DO UPDATE SET total_minutes = excluded.total_minutes, "
         "by_app = excluded.by_app, updated_at = excluded.updated_at",
-        (payload.date, payload.total_minutes, payload.by_app),
+        (payload.date, payload.device, payload.total_minutes, payload.by_app),
     )
     conn.commit()
     conn.close()
@@ -1221,12 +1225,13 @@ def upsert_screen_time(payload: ScreenTimeUpsert, token: str | None = None):
 
 
 @app.get("/api/screen-time/{date}/by-app")
-def screen_time_by_app(date: str):
+def screen_time_by_app(date: str, device: str = "phone"):
     # ランチャー除外修正(2026-08-31)後もDigital Wellbeingとの乖離が残っていないか、
     # アプリ別内訳を見て原因を切り分けるためのデバッグ用エンドポイント。
     conn = get_connection()
     row = conn.execute(
-        "SELECT total_minutes, by_app, updated_at FROM screen_time_logs WHERE date = ?", (date,)
+        "SELECT total_minutes, by_app, updated_at FROM screen_time_logs WHERE date = ? AND device = ?",
+        (date, device),
     ).fetchone()
     conn.close()
     if row is None:
@@ -1243,10 +1248,13 @@ def screen_time_by_app(date: str):
 
 @app.get("/api/screen-time/daily")
 def screen_time_daily(days: int = 14):
-    # mood-logsチャートの重ね合わせ表示用。study-logs/dailyと同じ「範囲内は気分記録の有無を問わず返す」流儀
+    # mood-logsチャートの重ね合わせ表示用。study-logs/dailyと同じ「範囲内は気分記録の有無を問わず返す」流儀。
+    # 2026-09-14、PC/タブレット対応でdevice列が増えたため、同じdateの複数デバイス分をSUMして
+    # 「その日の合計利用時間」として返す(呼び出し側はこれまで通り1日1値の前提で使える)。
     conn = get_connection()
     cur = conn.execute(
-        "SELECT date, total_minutes FROM screen_time_logs WHERE date >= date('now', ?) ORDER BY date",
+        "SELECT date, SUM(total_minutes) AS total_minutes FROM screen_time_logs "
+        "WHERE date >= date('now', ?) GROUP BY date ORDER BY date",
         (f"-{days - 1} days",),
     )
     result = rows_to_dicts(cur)
@@ -1257,9 +1265,11 @@ def screen_time_daily(days: int = 14):
 @app.get("/api/screen-time/mood-correlation")
 def screen_time_mood_correlation(days: int = 30):
     # スクリーンタイムが多い日と少ない日で気分平均に差があるかを見る(中央値で2群に分ける簡易分析)。
+    # daily()と同じ理由でデバイス合算のSUMにする。
     conn = get_connection()
     screen_rows = conn.execute(
-        "SELECT date, total_minutes FROM screen_time_logs WHERE date >= date('now', ?)",
+        "SELECT date, SUM(total_minutes) AS total_minutes FROM screen_time_logs "
+        "WHERE date >= date('now', ?) GROUP BY date",
         (f"-{days} days",),
     ).fetchall()
     mood_rows = conn.execute(
@@ -1290,6 +1300,174 @@ def screen_time_mood_correlation(days: int = 30):
         "low_screen_time_avg_mood": round(sum(s for _, s in low_half) / len(low_half), 1),
         "high_screen_time_avg_minutes": round(sum(m for m, _ in high_half) / len(high_half)),
         "high_screen_time_avg_mood": round(sum(s for _, s in high_half) / len(high_half), 1),
+    }
+
+
+# ---------- スマホ利用時間連動機能(JpBlocker×study-tracker、B案) ----------
+#
+# 経緯: Obsidian「2026-08-30_スマホ利用時間連動機能(JpBlocker×study-tracker)検討.md」参照。
+# ボーナス型・即日反映・計算式を本人が確認/調整可能、の3条件を満たす設計(B案)として、
+# 「最低保証+勉強時間ボーナス+ToDo達成ボーナス、上限あり」の予算を毎日計算する。
+#
+# パラメータ変更(本人が調整可能な部分)は既存のPIN+美緒承認+24時間遅延フロー
+# (pending_changes、action_type="screen_budget_params")に統合する。ただしmode/limit等の
+# 既存action_typeと違い、この値はJpBlocker/FocusGuardのローカル設定ではなくCompass自身が
+# 予算計算に使うサーバー側の値なので、デバイス側のApprovalSync.applyChange()が適用するのではなく
+# Compass自身が「猶予時間を過ぎたら自分でsettingsに書き込む」(_apply_due_screen_budget_changes)。
+# list_due_pending_changes()の中でこれを呼んでおけば、既存のポーリング(ApprovalSync.startPolling、
+# 5分間隔)に相乗りする形で反映される。
+
+SCREEN_BUDGET_DEFAULTS = {
+    "baseline_minutes": 220,   # 何もしなかった日の最低保証(2026-09-14、実績10日分の平均340分の6.5割から算出)
+    "study_ratio": 0.75,       # 勉強1分につき何分ボーナスを与えるか
+    "todo_bonus_max": 60,      # ToDo全件達成時の最大ボーナス(分)
+    "daily_cap": 420,          # 1日の合計予算上限(分)
+}
+# 集計除外(ノーカウント)対象のアプリ。ランチャー除外と同じ思想で、「勉強のためのスマホ利用」が
+# 予算を消費してしまう本末転倒を防ぐ。2026-09-14時点の初期値は主要な単機能アプリのみ実機未検証で
+# 投入したもの(パッケージ名の正確性は要確認、Obsidianの開発ログに詳細あり)。
+# Compass/Drill/vocab-appのような自作Webアプリはブラウザ経由アクセスだと個別のパッケージ名を
+# 持たない(PWAとしてホーム画面に追加していれば独自のWebAPKパッケージが振られるが、実機で
+# 確認しないと正確な値は分からない)ため、初期値には含めていない。
+SCREEN_BUDGET_DEFAULT_STUDY_PACKAGES = [
+    "com.ichi2.anki",       # AnkiDroid
+    "com.elsanow.speak",    # ELSA Speak (要検証)
+    "com.openai.chatgpt",   # ChatGPT公式アプリ
+    "com.anthropic.claude",  # Claude公式アプリ
+]
+
+
+def _read_screen_budget_params(conn) -> dict:
+    rows = conn.execute(
+        "SELECT key, value FROM settings WHERE key LIKE 'screen_budget_%'"
+    ).fetchall()
+    d = {row[0]: row[1] for row in rows}
+    packages_raw = d.get("screen_budget_study_packages")
+    return {
+        "baseline_minutes": int(d.get("screen_budget_baseline_minutes", SCREEN_BUDGET_DEFAULTS["baseline_minutes"])),
+        "study_ratio": float(d.get("screen_budget_study_ratio", SCREEN_BUDGET_DEFAULTS["study_ratio"])),
+        "todo_bonus_max": int(d.get("screen_budget_todo_bonus_max", SCREEN_BUDGET_DEFAULTS["todo_bonus_max"])),
+        "daily_cap": int(d.get("screen_budget_daily_cap", SCREEN_BUDGET_DEFAULTS["daily_cap"])),
+        "study_packages": json.loads(packages_raw) if packages_raw else list(SCREEN_BUDGET_DEFAULT_STUDY_PACKAGES),
+    }
+
+
+def _write_screen_budget_params(conn, params: dict):
+    key_map = {
+        "baseline_minutes": "screen_budget_baseline_minutes",
+        "study_ratio": "screen_budget_study_ratio",
+        "todo_bonus_max": "screen_budget_todo_bonus_max",
+        "daily_cap": "screen_budget_daily_cap",
+    }
+    for field, key in key_map.items():
+        if params.get(field) is None:
+            continue
+        conn.execute(
+            "INSERT INTO settings (key, value) VALUES (?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (key, str(params[field])),
+        )
+    if params.get("study_packages") is not None:
+        conn.execute(
+            "INSERT INTO settings (key, value) VALUES ('screen_budget_study_packages', ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (json.dumps(params["study_packages"]),),
+        )
+
+
+def _apply_due_screen_budget_changes(conn):
+    """猶予時間を過ぎたscreen_budget_paramsのpending_changesを、Compass自身の設定へ反映する。
+    mode/limit等と違い適用先がJpBlocker/FocusGuardのローカル設定ではないため、デバイス側の
+    ApprovalSync.applyChange()は関与しない(実際unknown action_typeとしてログに出るだけで無害)。
+    """
+    now = datetime.now()
+    rows = rows_to_dicts(conn.execute(
+        "SELECT id, payload, apply_after FROM pending_changes "
+        "WHERE applied = 0 AND action_type = 'screen_budget_params'"
+    ))
+    for row in rows:
+        if datetime.fromisoformat(row["apply_after"]) > now:
+            continue
+        try:
+            payload = json.loads(row["payload"])
+        except (json.JSONDecodeError, TypeError):
+            payload = {}
+        _write_screen_budget_params(conn, payload)
+        conn.execute(
+            "UPDATE pending_changes SET applied = 1, applied_at = datetime('now') WHERE id = ?",
+            (row["id"],),
+        )
+    if rows:
+        conn.commit()
+
+
+@app.get("/api/screen-budget/params")
+def get_screen_budget_params(token: str | None = None):
+    _require_device_token(token)
+    conn = get_connection()
+    _apply_due_screen_budget_changes(conn)
+    params = _read_screen_budget_params(conn)
+    conn.close()
+    return params
+
+
+@app.get("/api/screen-budget/status")
+def get_screen_budget_status(date: str, token: str | None = None):
+    # dateはJpBlocker/FocusGuardなど呼び出し側のローカル日付("YYYY-MM-DD")を必須で受け取る。
+    # study_logs.logged_at/todos.due_dateはサーバー時刻(UTC)基準の値が混在しており、
+    # とっつーのいるNZ(UTC+12、DST期はUTC+13)とは最大13時間ずれる。ここでは'+12 hours'で
+    # 近似してNZの日付境界に寄せている(DST期は最大1時間分、日付境界付近の記録がずれ得る
+    # 既知の誤差。詳細はObsidian開発ログ参照)。
+    _require_device_token(token)
+    conn = get_connection()
+    _apply_due_screen_budget_changes(conn)
+    params = _read_screen_budget_params(conn)
+
+    # 抜け穴塞ぎ(2026-08-30決定): タイマー経由(start_trigger IS NOT NULL)の記録のみボーナス対象。
+    # 手動ログ入力(タイマーを使わず分数を直接入力)は実績を盛れてしまうため対象外にする。
+    study_minutes = conn.execute(
+        "SELECT COALESCE(SUM(minutes), 0) FROM study_logs "
+        "WHERE start_trigger IS NOT NULL AND date(logged_at, '+12 hours') = ?",
+        (date,),
+    ).fetchone()[0]
+
+    todo_row = conn.execute(
+        "SELECT COUNT(*), COALESCE(SUM(done), 0) FROM todos WHERE due_date = ? AND skipped = 0",
+        (date,),
+    ).fetchone()
+    todo_total, todo_done = todo_row
+    todo_rate = (todo_done / todo_total) if todo_total > 0 else 1.0
+
+    by_device_rows = conn.execute(
+        "SELECT device, total_minutes FROM screen_time_logs WHERE date = ?", (date,)
+    ).fetchall()
+    conn.close()
+
+    study_bonus = round(study_minutes * params["study_ratio"])
+    todo_bonus = round(params["todo_bonus_max"] * todo_rate)
+    budget = min(params["baseline_minutes"] + study_bonus + todo_bonus, params["daily_cap"])
+    consumed_by_device = {device: minutes for device, minutes in by_device_rows}
+    consumed = sum(consumed_by_device.values())
+
+    return {
+        "date": date,
+        "budget_minutes": budget,
+        "consumed_minutes": consumed,
+        "remaining_minutes": budget - consumed,
+        "consumed_by_device": consumed_by_device,
+        "breakdown": {
+            "baseline_minutes": params["baseline_minutes"],
+            "study_minutes": study_minutes,
+            "study_ratio": params["study_ratio"],
+            "study_bonus_minutes": study_bonus,
+            "todo_total": todo_total,
+            "todo_done": todo_done,
+            "todo_completion_rate": round(todo_rate, 3),
+            "todo_bonus_minutes": todo_bonus,
+            "daily_cap": params["daily_cap"],
+            "capped": (params["baseline_minutes"] + study_bonus + todo_bonus) > params["daily_cap"],
+        },
+        "study_packages": params["study_packages"],
     }
 
 
@@ -1335,6 +1513,7 @@ ACTION_TYPE_LABELS = {
     "youtube_lockout": "YouTubeロック時間(分)",
     "block_list": "study-tracker連携ブロックリスト",
     "open_limits": "起動回数上限",
+    "screen_budget_params": "スマホ利用予算パラメータ",
 }
 
 
@@ -1651,6 +1830,11 @@ def list_pending_changes(token: str | None = None):
 def list_due_pending_changes(token: str | None = None):
     _require_device_token(token)
     conn = get_connection()
+    # screen_budget_paramsはデバイス側ではなくCompass自身が適用する設定なので、ここで
+    # 先に自己適用・自己applied化しておく。以降このループには出てこなくなる
+    # (デバイス側ApprovalSyncのapplyChange()には「unknown action_type」として無害に無視される、
+    # という二重の安全策も兼ねている)。
+    _apply_due_screen_budget_changes(conn)
     # apply_afterはPythonのdatetime.now()(サーバーのローカル時刻)由来の文字列。
     # SQLite側のdatetime('now')はUTCなので、SQL側で比較するとサーバーのタイムゾーンが
     # UTCでない環境ではズレる。他の期限判定(todo/eventのnotify_at等)と同じく、

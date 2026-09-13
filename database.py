@@ -99,11 +99,16 @@ CREATE TABLE IF NOT EXISTS sleep_logs (
     logged_at TEXT DEFAULT (datetime('now'))
 );
 
+-- deviceは'phone'(JpBlocker)/'pc'/'tablet'(FocusGuard)。
+-- 2026-09-14、スマホ利用時間連動機能(JpBlocker×study-tracker)のPC/タブレット対応で
+-- date単独PKからdevice込みの複合PKに変更(旧スキーマからの移行はdatabase.py _migrate()側で行う)。
 CREATE TABLE IF NOT EXISTS screen_time_logs (
-    date TEXT PRIMARY KEY,
+    date TEXT NOT NULL,
+    device TEXT NOT NULL DEFAULT 'phone',
     total_minutes INTEGER NOT NULL,
     by_app TEXT,
-    updated_at TEXT DEFAULT (datetime('now'))
+    updated_at TEXT DEFAULT (datetime('now')),
+    PRIMARY KEY (date, device)
 );
 
 -- JpBlocker(Android)のPIN第三者管理+時間遅延ガード用。
@@ -288,6 +293,30 @@ def _migrate(conn):
         conn.execute("ALTER TABLE study_logs ADD COLUMN page_start INTEGER")
     if "page_end" not in study_log_cols:
         conn.execute("ALTER TABLE study_logs ADD COLUMN page_end INTEGER")
+
+    # screen_time_logsをdate単独PKからdevice込みの複合PKへ移行(2026-09-14、PC/タブレット対応)。
+    # SQLiteはPRIMARY KEYを直接変更できないため、mood_logsの時と同じリネーム→作り直し→コピー手順を使う。
+    screen_time_cols = [row[1] for row in conn.execute("PRAGMA table_info(screen_time_logs)").fetchall()]
+    if screen_time_cols and "device" not in screen_time_cols:
+        conn.execute("ALTER TABLE screen_time_logs RENAME TO screen_time_logs_old")
+        conn.execute(
+            """
+            CREATE TABLE screen_time_logs (
+                date TEXT NOT NULL,
+                device TEXT NOT NULL DEFAULT 'phone',
+                total_minutes INTEGER NOT NULL,
+                by_app TEXT,
+                updated_at TEXT DEFAULT (datetime('now')),
+                PRIMARY KEY (date, device)
+            )
+            """
+        )
+        # 旧データは全件JpBlocker(スマホ)由来なのでdevice='phoneで移す
+        conn.execute(
+            "INSERT INTO screen_time_logs (date, device, total_minutes, by_app, updated_at) "
+            "SELECT date, 'phone', total_minutes, by_app, updated_at FROM screen_time_logs_old"
+        )
+        conn.execute("DROP TABLE screen_time_logs_old")
 
     # 犬育成機能を廃止したため、既存環境(ローカルdata.db・本番Turso)に残っているテーブル・設定を掃除する
     conn.execute("DROP TABLE IF EXISTS pet_feedings")
