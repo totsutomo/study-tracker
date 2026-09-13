@@ -1436,7 +1436,9 @@ def get_screen_budget_status(date: str, token: str | None = None):
         (date,),
     ).fetchone()
     todo_total, todo_done = todo_row
-    todo_rate = (todo_done / todo_total) if todo_total > 0 else 1.0
+    # 抜け穴塞ぎ: ToDoを1件も登録しない日にボーナス満額(1.0扱い)を与えると、
+    # 「何も登録しなければ毎日満額」というやり得になってしまう。未登録日は0扱いにする。
+    todo_rate = (todo_done / todo_total) if todo_total > 0 else 0.0
 
     by_device_rows = conn.execute(
         "SELECT device, total_minutes FROM screen_time_logs WHERE date = ?", (date,)
