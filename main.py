@@ -1421,15 +1421,12 @@ def get_screen_budget_params(token: str | None = None):
     return params
 
 
-@app.get("/api/screen-budget/status")
-def get_screen_budget_status(date: str, token: str | None = None):
+def _compute_screen_budget_status(conn, date: str) -> dict:
     # dateはJpBlocker/FocusGuardなど呼び出し側のローカル日付("YYYY-MM-DD")を必須で受け取る。
     # study_logs.logged_at/todos.due_dateはサーバー時刻(UTC)基準の値が混在しており、
     # とっつーのいるNZ(UTC+12、DST期はUTC+13)とは最大13時間ずれる。ここでは'+12 hours'で
     # 近似してNZの日付境界に寄せている(DST期は最大1時間分、日付境界付近の記録がずれ得る
     # 既知の誤差。詳細はObsidian開発ログ参照)。
-    _require_device_token(token)
-    conn = get_connection()
     _apply_due_screen_budget_changes(conn)
     params = _read_screen_budget_params(conn)
 
@@ -1453,7 +1450,6 @@ def get_screen_budget_status(date: str, token: str | None = None):
     by_device_rows = conn.execute(
         "SELECT device, total_minutes FROM screen_time_logs WHERE date = ?", (date,)
     ).fetchall()
-    conn.close()
 
     study_bonus = round(study_minutes * params["study_ratio"])
     todo_bonus = round(params["todo_bonus_max"] * todo_rate)
@@ -1481,6 +1477,27 @@ def get_screen_budget_status(date: str, token: str | None = None):
         },
         "study_packages": params["study_packages"],
     }
+
+
+@app.get("/api/screen-budget/status")
+def get_screen_budget_status(date: str, token: str | None = None):
+    # JpBlocker/FocusGuard(デバイス側)専用、ロック判定に使うためDEVICE_TOKEN必須。
+    _require_device_token(token)
+    conn = get_connection()
+    result = _compute_screen_budget_status(conn, date)
+    conn.close()
+    return result
+
+
+# 上のstatus()はデバイス側専用でDEVICE_TOKEN必須。こちらはWebフロント(PWA)が「残り時間・
+# 端末別内訳」を表示するための公開版。/api/focus-session/current と同じ線引き
+# (このアプリは個人利用でユーザー認証が無く、読み取り系は無認証で公開する方針)。
+@app.get("/api/screen-budget/current")
+def get_screen_budget_current(date: str):
+    conn = get_connection()
+    result = _compute_screen_budget_status(conn, date)
+    conn.close()
+    return result
 
 
 # ---------- 設定変更の遠隔承認(美緒)+ PIN + 設定変更の時間遅延(JpBlocker連携) ----------

@@ -20,6 +20,7 @@ tabButtons.forEach((btn) => {
 });
 
 document.getElementById("daily-min-banner").addEventListener("click", () => switchTab("tab-study"));
+document.getElementById("screen-budget-banner").addEventListener("click", () => switchTab("tab-study"));
 
 // ---------- collapsible history sections ----------
 // 生ログの一覧(学習ログ履歴・発動ログ履歴・睡眠履歴)は普段あまり見ない情報でスクロールを
@@ -1771,6 +1772,7 @@ async function finishSession(elapsedMinutes) {
   loadStudyLogList();
   loadStudyChart();
   loadGoalProgress();
+  loadScreenBudget(); // 学習分がスマホ利用予算のボーナスに反映されるため
 }
 
 // alert()/vibrate() only reach the user while this tab is focused; a background tab or locked
@@ -2047,6 +2049,46 @@ async function loadGoalProgress() {
   document.getElementById("monthly-goal-input").value = monthGoalHours || "";
 
   loadMoodPanel();
+}
+
+// ---------- screen budget (JpBlocker×FocusGuardのスマホ利用時間連動、B案) ----------
+// 予算そのものの計算はサーバー側(/api/screen-budget/current、DEVICE_TOKEN不要の公開版。
+// ロック判定に使う/api/screen-budget/statusはデバイス専用でトークン必須のため、Webフロントに
+// トークンを埋め込まずに済むようこちらを新設した)。ここではその結果を上の
+// daily-min-bannerと同じ最小限の一行+バーの見た目で表示するだけ。
+// 更新間隔の限界: PC/タブレットの利用時間はFocusGuard側が60秒おきに集計して送信するため、
+// この表示は最大で約1分遅れた値になる(リアルタイムではない)。
+const SCREEN_BUDGET_DEVICE_LABEL = { phone: "phone", pc: "PC", tablet: "tablet" };
+
+async function loadScreenBudget() {
+  const banner = document.getElementById("screen-budget-banner");
+  const label = document.getElementById("screen-budget-banner-label");
+  const fill = document.getElementById("screen-budget-banner-fill");
+  let s;
+  try {
+    s = await api(`/api/screen-budget/current?date=${todayStr()}`);
+  } catch (e) {
+    return; // ネットワーク一時失敗時は前回の表示を維持する(daily-min-banner等と同じ方針)
+  }
+  if (!s || !s.budget_minutes) {
+    banner.classList.add("hidden");
+    return;
+  }
+
+  const deviceParts = Object.entries(s.consumed_by_device)
+    .filter(([, minutes]) => minutes > 0)
+    .map(([device, minutes]) => `${SCREEN_BUDGET_DEVICE_LABEL[device] || device} ${minutes}m`);
+  const deviceText = deviceParts.length ? ` (${deviceParts.join(" · ")})` : "";
+  const remaining = s.remaining_minutes;
+
+  label.textContent = remaining > 0
+    ? `${remaining} min left today${deviceText}`
+    : `Screen budget used up${deviceText}`;
+  fill.style.width = `${Math.min(100, Math.max(0, (s.consumed_minutes / s.budget_minutes) * 100))}%`;
+
+  banner.classList.remove("hidden");
+  banner.classList.toggle("exhausted", remaining <= 0);
+  banner.classList.toggle("low", remaining > 0 && remaining <= s.budget_minutes * 0.2);
 }
 
 let selectedMoodScore = 5;
@@ -2442,6 +2484,7 @@ async function loadStudyLogList() {
         loadStudySummary();
         loadStudyChart();
         loadGoalProgress();
+        loadScreenBudget();
       } catch (err) {
         showToast("削除に失敗しました。もう一度お試しください");
         loadStudyLogList();
@@ -4298,6 +4341,10 @@ async function hydrateFromCache() {
   await loadCategories(); // study-buttons and the chart's subject list depend on categories being loaded first
   restoreSession();
   startPeerSessionPolling(); // "studying on another device" banner; own timer (if any) already restored above
+  // PC/タブレットの利用時間はこの端末を操作していなくても裏で増えていくため、
+  // ユーザー操作をきっかけにした再読込(上のloadScreenBudget呼び出し)だけでは反映が遅れる。
+  // peer-session-bannerと同じ30秒ポーリングで補う。
+  setInterval(loadScreenBudget, 30000);
 
   // 起動画面は「最初に表示されるToDoタブに必要な分」+「起動画面自体に出す目標カウントダウン」
   // だけ待って閉じる。残り12件は起動画面の裏でバックグラウンド読み込みを続け、届き次第
@@ -4313,6 +4360,7 @@ async function hydrateFromCache() {
     loadStudyLogList(),
     loadStudyChart(),
     loadGoalProgress(),
+    loadScreenBudget(),
     loadGoals(),
     loadActivationActive(),
     loadActivationList(),

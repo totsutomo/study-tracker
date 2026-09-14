@@ -322,6 +322,22 @@ header h1 {
   box-shadow: 0 0 6px var(--accent-dim);
 }
 
+.screen-budget-banner.low span {
+  color: #e0a030;
+}
+
+.screen-budget-banner.low .stat-bar-fill {
+  background: #e0a030;
+}
+
+.screen-budget-banner.exhausted span {
+  color: #e05050;
+}
+
+.screen-budget-banner.exhausted .stat-bar-fill {
+  background: #e05050;
+}
+
 /* もう一方のデバイス(スマホ/PC)で今フォーカスタイマーが動いている時のFYI表示。
    行動を要求するactivation(赤)/sleep(青)ほど緊急ではないが、気付いてもらう必要はあるため
    daily-min-bannerの控えめな見た目からは離し、sleep-bannerと同格(色付き背景+パルス)にした
