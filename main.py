@@ -1331,7 +1331,7 @@ SCREEN_BUDGET_DEFAULTS = {
 # 確認しないと正確な値は分からない)ため、初期値には含めていない。
 SCREEN_BUDGET_DEFAULT_STUDY_PACKAGES = [
     "com.ichi2.anki",       # AnkiDroid
-    "com.elsanow.speak",    # ELSA Speak (要検証)
+    "us.nobarriers.elsa",   # ELSA Speak (2026-09-14 実機adbで確認・修正。旧値com.elsanow.speakは誤り)
     "com.openai.chatgpt",   # ChatGPT公式アプリ
     "com.anthropic.claude",  # Claude公式アプリ
     # 2026-09-14の事故で発覚: このリストはAndroid(JpBlocker)とWindows(FocusGuard)
