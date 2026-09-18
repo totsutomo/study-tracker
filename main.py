@@ -48,6 +48,11 @@ VOCAB_APP_TOKEN = _env_token("VOCAB_APP_TOKEN")
 # 全体に許可すると、todos/events/pending-changes等トークンなしの既存エンドポイントまで
 # 一括でvocab-appの生JSから読み書き可能になってしまうため、意図的にグローバル許可はしない)。
 VOCAB_APP_ORIGIN = os.environ.get("VOCAB_APP_ORIGIN", "https://vocab-app-blue-xi.vercel.app")
+# drill-tracker(Render、別オリジン)からのattempt自動記録を認証する共有トークン。
+# 用途・信頼境界はVOCAB_APP_TOKENと同じ(サーバー側だがdrill-tracker側でconfig.js経由で
+# クライアントバンドルに渡すため「見えても仕方ない」前提)。
+DRILL_TRACKER_TOKEN = _env_token("DRILL_TRACKER_TOKEN")
+DRILL_TRACKER_ORIGIN = os.environ.get("DRILL_TRACKER_ORIGIN", "https://drill-tracker.onrender.com")
 # 美緒専用の承認ページ(/approve)のトークン。DEVICE_TOKENと分けているのは信頼境界が
 # 違うため(こちらは美緒だけが使う想定で、とっつーのAndroid端末は使わない)。
 # 環境変数名は移行前の PIN_CUSTODY_TOKEN のまま据え置いている(Render側の値を
@@ -158,6 +163,14 @@ class VocabAppStudyLogCreate(BaseModel):
     # ような開始〜終了ページ範囲を表示するため(2026-08-31)
     page_start: int | None = None
     page_end: int | None = None
+
+
+class DrillTrackerSyncCreate(BaseModel):
+    # drill-trackerのattempt保存直後にfire-and-forgetで送られる。1回の呼び出し=1問(rating入力)。
+    # 所要時間は計測していないのでminutesは常に0固定、ヒートマップ側はcountで見る。
+    subject: str = "数学"
+    count: int = 1
+    logged_at: str | None = None  # "YYYY-MM-DD HH:MM:SS", client(drill-tracker)local time
 
 
 class VocabSessionActiveSync(BaseModel):
@@ -633,6 +646,72 @@ def create_vocab_study_log(log: VocabAppStudyLogCreate, token: str | None = None
     new_id = cur.lastrowid
     conn.close()
     return JSONResponse(content={"id": new_id}, headers=_vocab_cors_headers())
+
+
+def _drill_cors_headers() -> dict[str, str]:
+    return {
+        "Access-Control-Allow-Origin": DRILL_TRACKER_ORIGIN,
+        "Access-Control-Allow-Methods": "POST, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type",
+    }
+
+
+@app.options("/api/study-logs/drill-sync")
+def drill_sync_preflight():
+    return JSONResponse(content=None, headers=_drill_cors_headers())
+
+
+@app.post("/api/study-logs/drill-sync")
+def create_drill_study_log(log: DrillTrackerSyncCreate, token: str | None = None):
+    if not DRILL_TRACKER_TOKEN or token != DRILL_TRACKER_TOKEN:
+        raise HTTPException(status_code=403, detail="invalid token", headers=_drill_cors_headers())
+    start_trigger = "drill-tracker:solve"
+    conn = get_connection()
+    if log.logged_at:
+        cur = conn.execute(
+            "INSERT INTO study_logs (subject, minutes, start_trigger, count, logged_at) VALUES (?, 0, ?, ?, ?)",
+            (log.subject, start_trigger, log.count, log.logged_at),
+        )
+    else:
+        cur = conn.execute(
+            "INSERT INTO study_logs (subject, minutes, start_trigger, count) VALUES (?, 0, ?, ?)",
+            (log.subject, start_trigger, log.count),
+        )
+    conn.commit()
+    new_id = cur.lastrowid
+    conn.close()
+    return JSONResponse(content={"id": new_id}, headers=_drill_cors_headers())
+
+
+# 3アプリ統合ヒートマップ(Studyタブ)用の日次集計。start_triggerのプレフィックスで
+# 発生元アプリを判定する: "vocab-app:*" / "drill-tracker:*" / それ以外はCompass純正
+# (手動記録・フォーカスセッション等)。新規テーブルは作らずstudy_logsだけで完結させる。
+@app.get("/api/study-logs/heatmap")
+def get_study_heatmap(days: int = 180):
+    days = max(1, min(days, 400))
+    conn = get_connection()
+    rows = conn.execute(
+        "SELECT date(logged_at) AS d, "
+        "SUM(CASE WHEN start_trigger LIKE 'vocab-app:%' THEN minutes ELSE 0 END) AS vocab_minutes, "
+        "SUM(CASE WHEN start_trigger LIKE 'drill-tracker:%' THEN COALESCE(count, 0) ELSE 0 END) AS drill_count, "
+        "SUM(CASE WHEN start_trigger IS NULL OR "
+        "(start_trigger NOT LIKE 'vocab-app:%' AND start_trigger NOT LIKE 'drill-tracker:%') "
+        "THEN minutes ELSE 0 END) AS compass_minutes "
+        "FROM study_logs "
+        "WHERE date(logged_at) >= date('now', ?) "
+        "GROUP BY d ORDER BY d",
+        (f"-{days} days",),
+    ).fetchall()
+    conn.close()
+    return [
+        {
+            "date": row[0],
+            "vocab_minutes": row[1] or 0,
+            "drill_count": row[2] or 0,
+            "compass_minutes": row[3] or 0,
+        }
+        for row in rows
+    ]
 
 
 @app.options("/api/vocab-session/active")

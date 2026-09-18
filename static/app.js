@@ -1828,6 +1828,7 @@ async function finishSession(elapsedMinutes) {
   loadStudySummary();
   loadStudyLogList();
   loadStudyChart();
+  loadActivityHeatmap();
   loadGoalProgress();
   loadScreenBudget(); // 学習分がスマホ利用予算のボーナスに反映されるため
 }
@@ -1913,6 +1914,80 @@ function lastNWeekStarts(n) {
 function monthDayLabel(isoDate) {
   const [, mo, da] = isoDate.split("-");
   return `${parseInt(mo, 10)}/${parseInt(da, 10)}`;
+}
+
+const HEATMAP_WEEKS = 18; // 直近18週分(約4ヶ月)。GitHub contribution graph相当
+
+async function loadActivityHeatmap() {
+  const raw = await api(`/api/study-logs/heatmap?days=${HEATMAP_WEEKS * 7 + 7}`);
+  const byDate = {};
+  raw.forEach((row) => { byDate[row.date] = row; });
+  renderActivityHeatmap(byDate);
+}
+
+// 3アプリ(Compass純正/vocab-app/drill-tracker)分の活動を1マス=1日のGitHub風グリッドで表示。
+// 「今日やったこと」を1画面で明白にするのが狙いなので、内訳ではなく合計の強度だけで色分けする。
+function renderActivityHeatmap(byDate) {
+  const container = document.getElementById("activity-heatmap");
+  const today = new Date();
+  const startMonday = mondayOfDate(today);
+  startMonday.setDate(startMonday.getDate() - (HEATMAP_WEEKS - 1) * 7);
+
+  const weeks = [];
+  for (let w = 0; w < HEATMAP_WEEKS; w++) {
+    const days = [];
+    for (let d = 0; d < 7; d++) {
+      const date = new Date(startMonday);
+      date.setDate(date.getDate() + w * 7 + d);
+      days.push(date);
+    }
+    weeks.push(days);
+  }
+
+  const scoreOf = (row) => {
+    if (!row) return 0;
+    return row.compass_minutes + row.vocab_minutes + row.drill_count * 3; // drillは1問≒3分相当の重み付け目安
+  };
+  const maxScore = Math.max(1, ...Object.values(byDate).map(scoreOf));
+
+  const levelOf = (score) => {
+    if (score <= 0) return 0;
+    const ratio = score / maxScore;
+    if (ratio > 0.75) return 4;
+    if (ratio > 0.5) return 3;
+    if (ratio > 0.25) return 2;
+    return 1;
+  };
+
+  const cols = weeks
+    .map((days) => {
+      const cells = days
+        .map((date) => {
+          if (date > today) return `<div class="heatmap-cell heatmap-cell-empty"></div>`;
+          const iso = formatLocalDate(date);
+          const row = byDate[iso];
+          const level = levelOf(scoreOf(row));
+          return `<div class="heatmap-cell" data-level="${level}" data-date="${iso}" title="${iso}"></div>`;
+        })
+        .join("");
+      return `<div class="heatmap-col">${cells}</div>`;
+    })
+    .join("");
+
+  container.innerHTML = `<div class="heatmap-grid">${cols}</div>`;
+
+  container.querySelectorAll(".heatmap-cell[data-date]").forEach((cell) => {
+    cell.addEventListener("click", () => {
+      const iso = cell.dataset.date;
+      const row = byDate[iso];
+      const parts = [];
+      if (row?.compass_minutes) parts.push(`Compass ${row.compass_minutes}min`);
+      if (row?.vocab_minutes) parts.push(`Vocab ${row.vocab_minutes}min`);
+      if (row?.drill_count) parts.push(`Drill ${row.drill_count} problems`);
+      document.getElementById("activity-heatmap-detail").textContent =
+        parts.length ? `${iso}: ${parts.join(" / ")}` : `${iso}: no activity`;
+    });
+  });
 }
 
 async function loadStudyChart() {
@@ -4534,6 +4609,7 @@ async function hydrateFromCache() {
     loadStudySummary(),
     loadStudyLogList(),
     loadStudyChart(),
+    loadActivityHeatmap(),
     loadGoalProgress(),
     loadScreenBudget(),
     loadGoals(),

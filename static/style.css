@@ -1472,6 +1472,37 @@ body.focus-open #tabbar {
   display: block;
 }
 
+.heatmap-grid {
+  display: flex;
+  gap: 3px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+
+.heatmap-col {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.heatmap-cell {
+  width: 11px;
+  height: 11px;
+  border-radius: 2px;
+  background: var(--border);
+  cursor: pointer;
+}
+
+.heatmap-cell-empty {
+  background: transparent;
+  cursor: default;
+}
+
+.heatmap-cell[data-level="1"] { background: color-mix(in srgb, var(--accent) 25%, var(--border)); }
+.heatmap-cell[data-level="2"] { background: color-mix(in srgb, var(--accent) 50%, var(--border)); }
+.heatmap-cell[data-level="3"] { background: color-mix(in srgb, var(--accent) 75%, var(--border)); }
+.heatmap-cell[data-level="4"] { background: var(--accent); }
+
 .mood-scale-buttons {
   display: flex;
   gap: 2px;
