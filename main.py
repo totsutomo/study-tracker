@@ -958,8 +958,12 @@ ACTIVATION_REMINDER_MINUTES = 45
 ACTIVATION_ENCOURAGEMENT_WINDOW_DAYS = 14
 ACTIVATION_ENCOURAGEMENT_HOUR = 18
 
-MOOD_REMINDER_HOUR = 21
-MOOD_REMINDER_ENABLED = False  # 一時停止中
+# モチベーション記録は単独の21時リマインダーを廃止し、就寝前後の2回に統合した
+# (2026-09-18、アプリ開発/2026-09-18_Compassのサボりログ・モチベーション・睡眠ログの習慣化設計.md参照)。
+BEDTIME_REMINDER_HOUR = 22
+BEDTIME_REMINDER_MINUTE = 30
+WAKE_REMINDER_HOUR = 7
+WAKE_REMINDER_MINUTE = 0
 
 
 def _post_return_minutes(conn, returned_at: str) -> int:
@@ -2292,12 +2296,14 @@ def push_check(token: str | None = None):
         due_dt = datetime.fromisoformat(f"{todo['due_date']}T{todo['due_time']}")
         notify_at = due_dt - timedelta(minutes=todo["notify_offset_minutes"])
         if notify_at <= now:
-            sent_count += _send_push_to_all(conn, {
+            sent = _send_push_to_all(conn, {
                 "title": "Task due",
                 "body": todo["title"],
                 "tag": f"todo-{todo['id']}",
             })
-            conn.execute("UPDATE todos SET notified_at = datetime('now') WHERE id = ?", (todo["id"],))
+            sent_count += sent
+            if sent > 0:
+                conn.execute("UPDATE todos SET notified_at = datetime('now') WHERE id = ?", (todo["id"],))
 
     event_rows = rows_to_dicts(conn.execute(
         "SELECT * FROM events WHERE notify_offset_minutes IS NOT NULL"
@@ -2327,16 +2333,18 @@ def push_check(token: str | None = None):
             start_dt = datetime.fromisoformat(f"{occ_date.isoformat()}T{event['start_time']}")
             notify_at = start_dt - timedelta(minutes=event["notify_offset_minutes"])
             if notify_at <= now:
-                sent_count += _send_push_to_all(conn, {
+                sent = _send_push_to_all(conn, {
                     "title": "Event",
                     "body": event["title"],
                     "tag": f"event-{event['id']}-{occ_date.isoformat()}",
                 })
-                conn.execute(
-                    "UPDATE events SET last_notified_occurrence = ? WHERE id = ?",
-                    (occ_date.isoformat(), event["id"]),
-                )
-                last_notified = occ_date
+                sent_count += sent
+                if sent > 0:
+                    conn.execute(
+                        "UPDATE events SET last_notified_occurrence = ? WHERE id = ?",
+                        (occ_date.isoformat(), event["id"]),
+                    )
+                    last_notified = occ_date
 
     activation_rows = rows_to_dicts(conn.execute(
         "SELECT * FROM activation_logs WHERE returned_at IS NULL AND reminded_at IS NULL"
@@ -2344,14 +2352,16 @@ def push_check(token: str | None = None):
     for act in activation_rows:
         triggered_dt = datetime.fromisoformat(act["triggered_at"].replace(" ", "T"))
         if now - triggered_dt >= timedelta(minutes=ACTIVATION_REMINDER_MINUTES):
-            sent_count += _send_push_to_all(conn, {
+            sent = _send_push_to_all(conn, {
                 "title": "Activation Log",
                 "body": "You haven't logged your return yet",
                 "tag": f"activation-{act['id']}",
             })
-            conn.execute(
-                "UPDATE activation_logs SET reminded_at = datetime('now') WHERE id = ?", (act["id"],)
-            )
+            sent_count += sent
+            if sent > 0:
+                conn.execute(
+                    "UPDATE activation_logs SET reminded_at = datetime('now') WHERE id = ?", (act["id"],)
+                )
 
     if int(conn.execute("SELECT CAST(strftime('%H', 'now') AS INTEGER)").fetchone()[0]) >= ACTIVATION_ENCOURAGEMENT_HOUR:
         today_str = conn.execute("SELECT date('now')").fetchone()[0]
@@ -2392,37 +2402,70 @@ def push_check(token: str | None = None):
             )
 
             if notably_fewer or notably_later:
-                sent_count += _send_push_to_all(conn, {
+                sent = _send_push_to_all(conn, {
                     "title": "Compass",
                     "body": "It's been a bit quiet today. No pressure, take it easy",
                     "tag": "activation-encouragement",
                 })
-                conn.execute(
-                    "INSERT INTO settings (key, value) VALUES ('activation_encouragement_notified_date', ?) "
-                    "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-                    (today_str,),
-                )
+                sent_count += sent
+                if sent > 0:
+                    conn.execute(
+                        "INSERT INTO settings (key, value) VALUES ('activation_encouragement_notified_date', ?) "
+                        "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                        (today_str,),
+                    )
 
-    if MOOD_REMINDER_ENABLED and int(conn.execute("SELECT CAST(strftime('%H', 'now') AS INTEGER)").fetchone()[0]) >= MOOD_REMINDER_HOUR:
-        today_str = conn.execute("SELECT date('now')").fetchone()[0]
-        mood_logged_today = conn.execute(
-            "SELECT 1 FROM mood_logs WHERE date = ?", (today_str,)
+    now_hm = now.hour * 60 + now.minute
+    today_str = conn.execute("SELECT date('now')").fetchone()[0]
+
+    if now_hm >= BEDTIME_REMINDER_HOUR * 60 + BEDTIME_REMINDER_MINUTE:
+        last_notified_row = conn.execute(
+            "SELECT value FROM settings WHERE key = 'bedtime_reminder_notified_date'"
         ).fetchone()
-        if not mood_logged_today:
-            last_notified_row = conn.execute(
-                "SELECT value FROM settings WHERE key = 'mood_reminder_notified_date'"
+        if not last_notified_row or last_notified_row[0] != today_str:
+            active_sleep = conn.execute(
+                "SELECT 1 FROM sleep_logs WHERE wake_at IS NULL ORDER BY bedtime_at DESC LIMIT 1"
             ).fetchone()
-            if not last_notified_row or last_notified_row[0] != today_str:
-                sent_count += _send_push_to_all(conn, {
-                    "title": "Today's Mood",
-                    "body": "You haven't logged your mood today yet",
-                    "tag": "mood-reminder",
+            bedtime_started_today = conn.execute(
+                "SELECT 1 FROM sleep_logs WHERE date(bedtime_at) = ?", (today_str,)
+            ).fetchone()
+            if not active_sleep and not bedtime_started_today:
+                sent = _send_push_to_all(conn, {
+                    "title": "Compass",
+                    "body": "Time to wrap up and get ready for bed",
+                    "tag": "bedtime-reminder",
+                    "url": "/#bedtime",
                 })
-                conn.execute(
-                    "INSERT INTO settings (key, value) VALUES ('mood_reminder_notified_date', ?) "
-                    "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-                    (today_str,),
-                )
+                sent_count += sent
+                if sent > 0:
+                    conn.execute(
+                        "INSERT INTO settings (key, value) VALUES ('bedtime_reminder_notified_date', ?) "
+                        "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                        (today_str,),
+                    )
+
+    if now_hm >= WAKE_REMINDER_HOUR * 60 + WAKE_REMINDER_MINUTE:
+        last_notified_row = conn.execute(
+            "SELECT value FROM settings WHERE key = 'wake_reminder_notified_date'"
+        ).fetchone()
+        if not last_notified_row or last_notified_row[0] != today_str:
+            # 起床という行為自体は検知できないため、あくまで「まだ起床ボタンを押していない」の代理判定
+            woke_today = conn.execute(
+                "SELECT 1 FROM sleep_logs WHERE date(wake_at) = ?", (today_str,)
+            ).fetchone()
+            if not woke_today:
+                sent = _send_push_to_all(conn, {
+                    "title": "Compass",
+                    "body": "Good morning. Log your wake-up when you're ready",
+                    "tag": "wake-reminder",
+                })
+                sent_count += sent
+                if sent > 0:
+                    conn.execute(
+                        "INSERT INTO settings (key, value) VALUES ('wake_reminder_notified_date', ?) "
+                        "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                        (today_str,),
+                    )
 
     focus_rows = {row[0]: row[1] for row in conn.execute(
         "SELECT key, value FROM settings WHERE key IN "
@@ -2431,15 +2474,17 @@ def push_check(token: str | None = None):
     focus_end_at = focus_rows.get("focus_target_end_at")
     if focus_end_at and focus_rows.get("focus_target_notified") != "1":
         if datetime.fromisoformat(focus_end_at) <= now:
-            sent_count += _send_push_to_all(conn, {
+            sent = _send_push_to_all(conn, {
                 "title": "Compass",
                 "body": f"{focus_rows.get('focus_target_subject') or 'Study'}: time's up",
                 "tag": "focus-session",
             })
-            conn.execute(
-                "INSERT INTO settings (key, value) VALUES ('focus_target_notified', '1') "
-                "ON CONFLICT(key) DO UPDATE SET value = excluded.value"
-            )
+            sent_count += sent
+            if sent > 0:
+                conn.execute(
+                    "INSERT INTO settings (key, value) VALUES ('focus_target_notified', '1') "
+                    "ON CONFLICT(key) DO UPDATE SET value = excluded.value"
+                )
 
     conn.commit()
     conn.close()

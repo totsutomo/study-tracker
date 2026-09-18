@@ -2941,6 +2941,7 @@ document.getElementById("activation-copy-btn").addEventListener("click", async (
 
 let sleepActiveLog = null;
 let sleepTickInterval = null;
+let wakeMoodScore = null;
 
 // サボりモード(発動ログ)のバナー・アイコン点滅と同じ「今この状態だとひと目でわかる」表現を、
 // 睡眠モードにも用意する。ただし睡眠は焦らせる状態ではないので、色はdangerではなくaccent、
@@ -3007,6 +3008,21 @@ async function loadSleepActive() {
 
 document.getElementById("sleep-banner").addEventListener("click", openSettingsPanel);
 
+function openWakeMoodPanel() {
+  const panel = document.getElementById("wake-mood-panel");
+  const backdrop = document.getElementById("wake-mood-backdrop");
+  const buttons = document.getElementById("wake-mood-buttons");
+  setBedtimeMoodScore(buttons, null);
+  wakeMoodScore = null;
+  panel.classList.remove("hidden");
+  backdrop.classList.remove("hidden");
+}
+
+function closeWakeMoodPanel() {
+  document.getElementById("wake-mood-panel").classList.add("hidden");
+  document.getElementById("wake-mood-backdrop").classList.add("hidden");
+}
+
 async function wakeUp() {
   if (!sleepActiveLog) return;
   const activeLog = sleepActiveLog;
@@ -3017,6 +3033,7 @@ async function wakeUp() {
       method: "PUT",
       body: JSON.stringify({ wake_at: nowLocalTimestamp() }),
     });
+    openWakeMoodPanel();
   } catch (err) {
     showToast("起床の記録に失敗しました。もう一度お試しください");
   } finally {
@@ -3182,14 +3199,93 @@ async function openBedtimePanel() {
   bedtimePanel.classList.remove("hidden");
   bedtimeBackdrop.classList.remove("hidden");
   document.getElementById("bedtime-step1").classList.remove("hidden");
+  document.getElementById("bedtime-step-mood").classList.add("hidden");
+  document.getElementById("bedtime-step-sabori").classList.add("hidden");
   document.getElementById("bedtime-step2").classList.add("hidden");
   document.getElementById("bedtime-add-title").value = "";
   document.getElementById("bedtime-added-list").innerHTML = "";
+  document.getElementById("bedtime-sabori-note").value = "";
+  document.getElementById("bedtime-sabori-list").innerHTML = "";
+  bedtimeMoodScore = null;
+  setBedtimeMoodScore(bedtimeMoodButtons, null);
   await renderBedtimeCarryoverList();
+}
+
+let bedtimeMoodScore = null;
+
+function setBedtimeMoodScore(container, score) {
+  container.querySelectorAll(".mood-scale-btn").forEach((btn) => {
+    btn.classList.toggle("active", parseInt(btn.dataset.score, 10) === score);
+  });
+  return score;
+}
+
+const bedtimeMoodButtons = document.getElementById("bedtime-mood-buttons");
+bedtimeMoodButtons.querySelectorAll(".mood-scale-btn").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    bedtimeMoodScore = setBedtimeMoodScore(bedtimeMoodButtons, parseInt(btn.dataset.score, 10));
+  });
+});
+
+async function saveMoodScoreOnly(score) {
+  if (score == null) return;
+  await api("/api/mood-logs", {
+    method: "POST",
+    body: JSON.stringify({ date: todayStr(), score, logged_at: nowLocalTimestamp() }),
+  });
+  loadMoodStats();
 }
 
 document.getElementById("bedtime-step1-next").addEventListener("click", () => {
   document.getElementById("bedtime-step1").classList.add("hidden");
+  bedtimeMoodScore = null;
+  setBedtimeMoodScore(bedtimeMoodButtons, null);
+  document.getElementById("bedtime-step-mood").classList.remove("hidden");
+});
+
+document.getElementById("bedtime-mood-next").addEventListener("click", async () => {
+  const score = bedtimeMoodScore;
+  document.getElementById("bedtime-step-mood").classList.add("hidden");
+  document.getElementById("bedtime-step-sabori").classList.remove("hidden");
+  if (score != null) {
+    try {
+      await saveMoodScoreOnly(score);
+    } catch (err) {
+      showToast("気分の記録に失敗しました。もう一度お試しください");
+    }
+  }
+});
+
+guardedSubmit(document.getElementById("bedtime-sabori-form"), async (e) => {
+  const input = document.getElementById("bedtime-sabori-note");
+  const note = input.value.trim();
+  if (!note) return;
+  input.value = "";
+  const li = document.createElement("li");
+  li.innerHTML = `<span class="log-info"><span>${escapeHtml(note)}</span></span>`;
+  document.getElementById("bedtime-sabori-list").appendChild(li);
+  try {
+    const at = nowLocalTimestamp();
+    // 「開始〜終了を同時指定」する専用APIは作らず、既存の発動ログAPIをその場で
+    // trigger→returnと連続で叩くことで代用している(トークンとエンドポイントの節約)。
+    const { id } = await api("/api/activation-logs", {
+      method: "POST",
+      body: JSON.stringify({ triggered_at: at, note }),
+    });
+    await api(`/api/activation-logs/${id}/return`, {
+      method: "PUT",
+      body: JSON.stringify({ returned_at: at }),
+    });
+    loadActivationList();
+  } catch (err) {
+    li.remove();
+    showToast("記録に失敗しました。もう一度お試しください");
+  }
+});
+
+document.getElementById("bedtime-sabori-next").addEventListener("click", () => {
+  document.getElementById("bedtime-step-sabori").classList.add("hidden");
+  document.getElementById("bedtime-sabori-list").innerHTML = "";
   document.getElementById("bedtime-step2").classList.remove("hidden");
 });
 
@@ -3237,6 +3333,26 @@ guardedClick(document.getElementById("sleep-btn"), async () => {
 });
 
 guardedClick(document.getElementById("settings-sleep-wake-btn"), wakeUp);
+
+document.getElementById("wake-mood-buttons").querySelectorAll(".mood-scale-btn").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    wakeMoodScore = setBedtimeMoodScore(document.getElementById("wake-mood-buttons"), parseInt(btn.dataset.score, 10));
+  });
+});
+
+document.getElementById("wake-mood-close").addEventListener("click", closeWakeMoodPanel);
+document.getElementById("wake-mood-backdrop").addEventListener("click", closeWakeMoodPanel);
+
+document.getElementById("wake-mood-save").addEventListener("click", async () => {
+  const score = wakeMoodScore;
+  closeWakeMoodPanel();
+  if (score == null) return;
+  try {
+    await saveMoodScoreOnly(score);
+  } catch (err) {
+    showToast("気分の記録に失敗しました。もう一度お試しください");
+  }
+});
 
 // ---------- calendar (events) ----------
 
@@ -4430,8 +4546,20 @@ async function hydrateFromCache() {
     loadCalendar(),
   ]);
   backgroundResults.filter((r) => r.status === "rejected").forEach((r) => console.error("init load failed:", r.reason));
+
+  // 就寝リマインダーpush(main.pyのbedtime-reminder)のタップから、アプリ未起動時は
+  // /#bedtime付きの新規ウィンドウとして開かれる。既存ウィンドウ再利用時はSWからのpostMessageで拾う。
+  if (location.hash === "#bedtime") {
+    history.replaceState(null, "", location.pathname + location.search);
+    openBedtimePanel();
+  }
 })();
 
 if ("serviceWorker" in navigator) {
   navigator.serviceWorker.register("/service-worker.js").catch(() => {});
+  navigator.serviceWorker.addEventListener("message", (event) => {
+    if (event.data && event.data.type === "navigate" && event.data.url && event.data.url.includes("#bedtime")) {
+      openBedtimePanel();
+    }
+  });
 }

@@ -758,6 +758,33 @@
     <p class="meta hidden" id="bedtime-carryover-empty">No tasks left</p>
     <button type="button" id="bedtime-step1-next">Next</button>
   </div>
+  <div id="bedtime-step-mood" class="hidden">
+    <h4>Today's mood</h4>
+    <div class="mood-scale-buttons" id="bedtime-mood-buttons">
+      <button type="button" class="mood-scale-btn" data-score="1">1</button>
+      <button type="button" class="mood-scale-btn" data-score="2">2</button>
+      <button type="button" class="mood-scale-btn" data-score="3">3</button>
+      <button type="button" class="mood-scale-btn" data-score="4">4</button>
+      <button type="button" class="mood-scale-btn" data-score="5">5</button>
+      <button type="button" class="mood-scale-btn" data-score="6">6</button>
+      <button type="button" class="mood-scale-btn" data-score="7">7</button>
+      <button type="button" class="mood-scale-btn" data-score="8">8</button>
+      <button type="button" class="mood-scale-btn" data-score="9">9</button>
+      <button type="button" class="mood-scale-btn" data-score="10">10</button>
+    </div>
+    <div class="mood-scale-labels"><span>1: Rough</span><span>10: Great</span></div>
+    <button type="button" id="bedtime-mood-next">Next</button>
+  </div>
+  <div id="bedtime-step-sabori" class="hidden">
+    <h4>Any slacking off today? (optional)</h4>
+    <p class="meta">Log as many as you like, in your own words</p>
+    <form id="bedtime-sabori-form" class="add-form">
+      <input type="text" id="bedtime-sabori-note" placeholder="e.g. napped instead of studying">
+      <button type="submit">+ Add</button>
+    </form>
+    <ul id="bedtime-sabori-list" class="list"></ul>
+    <button type="button" id="bedtime-sabori-next">Next</button>
+  </div>
   <div id="bedtime-step2" class="hidden">
     <h4>Tomorrow's tasks</h4>
     <button type="button" id="bedtime-copy-week-btn" class="secondary copyweek-trigger-btn">Copy last week's study blocks</button>
@@ -768,6 +795,29 @@
     <ul id="bedtime-added-list" class="list"></ul>
     <button type="button" id="bedtime-step2-done">Done</button>
   </div>
+</div>
+
+<div id="wake-mood-backdrop" class="backdrop hidden"></div>
+<div id="wake-mood-panel" class="add-panel hidden">
+  <div class="panel-header">
+    <h3>Good morning</h3>
+    <button type="button" id="wake-mood-close" class="panel-close" aria-label="Close">×</button>
+  </div>
+  <h4>How are you feeling?</h4>
+  <div class="mood-scale-buttons" id="wake-mood-buttons">
+    <button type="button" class="mood-scale-btn" data-score="1">1</button>
+    <button type="button" class="mood-scale-btn" data-score="2">2</button>
+    <button type="button" class="mood-scale-btn" data-score="3">3</button>
+    <button type="button" class="mood-scale-btn" data-score="4">4</button>
+    <button type="button" class="mood-scale-btn" data-score="5">5</button>
+    <button type="button" class="mood-scale-btn" data-score="6">6</button>
+    <button type="button" class="mood-scale-btn" data-score="7">7</button>
+    <button type="button" class="mood-scale-btn" data-score="8">8</button>
+    <button type="button" class="mood-scale-btn" data-score="9">9</button>
+    <button type="button" class="mood-scale-btn" data-score="10">10</button>
+  </div>
+  <div class="mood-scale-labels"><span>1: Rough</span><span>10: Great</span></div>
+  <button type="button" id="wake-mood-save">Save</button>
 </div>
 
 <div id="copyweek-backdrop" class="backdrop hidden"></div>
