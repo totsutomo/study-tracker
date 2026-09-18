@@ -2180,6 +2180,17 @@ async function loadGoalProgress() {
   document.getElementById("weekly-goal-input").value = weekGoalHours || "";
   document.getElementById("monthly-goal-input").value = monthGoalHours || "";
 
+  const activityEcho = document.getElementById("today-activity-echo");
+  const echoParts = [];
+  if (p.today_drill_count) echoParts.push(`Drill ${p.today_drill_count}`);
+  if (p.today_vocab_count) echoParts.push(`Vocab ${p.today_vocab_count}`);
+  if (echoParts.length) {
+    activityEcho.textContent = `🔗 Today's cross-app activity: ${echoParts.join(" ・ ")}`;
+    activityEcho.classList.remove("hidden");
+  } else {
+    activityEcho.classList.add("hidden");
+  }
+
   loadMoodPanel();
 }
 

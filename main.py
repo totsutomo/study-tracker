@@ -974,6 +974,14 @@ def study_log_progress():
         "SELECT COALESCE(SUM(minutes), 0) FROM study_logs WHERE logged_at >= datetime('now', 'start of month')"
     ).fetchone()[0]
     all_time_total = conn.execute("SELECT COALESCE(SUM(minutes), 0) FROM study_logs").fetchone()[0]
+    # 達成率%はタイマーのminutes放置に弱い(2026-09-19の監査で確認済み)。数字自体は直さず、
+    # 他アプリの実績を並べて表示するだけの参考情報として今日分のcount系だけ追加で返す。
+    today_activity = conn.execute(
+        "SELECT "
+        "SUM(CASE WHEN start_trigger LIKE 'vocab-app:%' THEN COALESCE(count, 0) ELSE 0 END), "
+        "SUM(CASE WHEN start_trigger LIKE 'drill-tracker:%' THEN COALESCE(count, 0) ELSE 0 END) "
+        "FROM study_logs WHERE logged_at >= datetime('now', 'start of day')"
+    ).fetchone()
     settings = _read_settings(conn)
     conn.close()
     return {
@@ -981,6 +989,8 @@ def study_log_progress():
         "week_minutes": week_total,
         "month_minutes": month_total,
         "total_minutes": all_time_total,
+        "today_vocab_count": today_activity[0] or 0,
+        "today_drill_count": today_activity[1] or 0,
         **settings,
     }
 
