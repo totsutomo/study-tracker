@@ -22,6 +22,19 @@ tabButtons.forEach((btn) => {
 document.getElementById("daily-min-banner").addEventListener("click", () => switchTab("tab-study"));
 document.getElementById("screen-budget-banner").addEventListener("click", () => switchTab("tab-study"));
 
+// Ctrl+数字でタブバーの並び順通りに切り替える(重複表示されているデスクトップ/モバイル navから
+// タブIDの並びだけ重複排除して使う)。PWAとしてインストールした場合はブラウザのタブ切替
+// ショートカットと衝突しないが、通常のブラウザタブ内で開いている場合はブラウザ側が
+// 先取りすることがある。
+document.addEventListener("keydown", (e) => {
+  if (!(e.ctrlKey || e.metaKey) || !/^[1-9]$/.test(e.key)) return;
+  const orderedTabIds = [...new Set([...tabButtons].map((b) => b.dataset.tab))];
+  const targetTabId = orderedTabIds[Number(e.key) - 1];
+  if (!targetTabId) return;
+  e.preventDefault();
+  switchTab(targetTabId);
+});
+
 // ---------- collapsible history sections ----------
 // 生ログの一覧(学習ログ履歴・発動ログ履歴・睡眠履歴)は普段あまり見ない情報でスクロールを
 // 稼ぐだけだったため、既存の「完了済みToDo」の折りたたみと同じ見た目・挙動でデフォルト非表示にする。
@@ -607,6 +620,38 @@ async function loadTodos() {
   renderTodos();
 }
 
+// 期限(due_date/due_time)を過ぎても未完了・未スキップのまま残っているToDoは、次にアプリを
+// 開いた時に警告した上で自動的にスキップ扱いにする(いつまでも一覧に残り続けて埋もれるのを防ぐ)。
+// isOverdue()は既にdone/skippedを除外しているので、ここでの対象はまだ手つかずの期限切れのみ。
+async function autoSkipOverdueTodos() {
+  const overdue = allTodos.filter((t) => !t.done && !t.skipped && isOverdue(t));
+  if (overdue.length === 0) return;
+  alert(
+    overdue.length === 1
+      ? `期限切れのためスキップしました:\n・${overdue[0].title}`
+      : `期限切れのため${overdue.length}件をスキップしました:\n${overdue.map((t) => `・${t.title}`).join("\n")}`
+  );
+  let anyRecurring = false;
+  await Promise.allSettled(
+    overdue.map((t) =>
+      api(`/api/todos/${t.id}/skip`, { method: "POST" })
+        .then(() => {
+          t.skipped = true;
+          t.done = false;
+          if (t.recurrence) anyRecurring = true;
+        })
+        .catch((err) => console.error("auto-skip failed:", err))
+    )
+  );
+  // 繰り返しToDoは/skip側で次回分の行がサーバーに追加生成されるため、その分を拾うために再取得する
+  if (anyRecurring) {
+    loadTodos();
+  } else {
+    renderTodos();
+  }
+  loadTodoStats();
+}
+
 ["todo-search", "todo-filter-category", "todo-filter-today"].forEach((id) => {
   document.getElementById(id).addEventListener("input", renderTodos);
 });
@@ -1180,6 +1225,13 @@ document.getElementById("start-begin-btn").addEventListener("click", () => {
   beginSession(subject, todoId, startMode, targetMs, clockOnly, trigger, keepAwake, resetOnReopen);
 });
 
+// このパネルが開いている間はEnterでStartを押したことにする(数値入力にフォーカスがあっても同様)
+startPanel.addEventListener("keydown", (e) => {
+  if (e.key !== "Enter") return;
+  e.preventDefault();
+  document.getElementById("start-begin-btn").click();
+});
+
 // ---------- focus timer (start / pause / resume / stop / minimize) ----------
 
 let timerInterval = null;
@@ -1748,6 +1800,10 @@ async function finishSession(elapsedMinutes) {
   const subject = timerSubject;
   const todoId = activeTodoId;
   const startTrigger = sessionStartTrigger;
+  // ToDoから開始したセッションは、後で「タスク完了にする?」にNoと答えても
+  // 何を勉強したか(ToDoのタイトル)がログに残るよう、resetSessionState()でactiveTodoIdが
+  // 消える前にタイトルを控えておく
+  const linkedTodo = todoId ? allTodos.find((x) => x.id === todoId) : null;
   resetSessionState();
   // タイマー画面はresetSessionState()で既に閉じている(体感即時)。ここから先の保存は裏で進める
   const logPromise = api("/api/study-logs", {
@@ -1755,6 +1811,7 @@ async function finishSession(elapsedMinutes) {
     body: JSON.stringify({
       subject,
       minutes: elapsedMinutes,
+      note: linkedTodo ? linkedTodo.title : null,
       logged_at: `${localDatetimeNow().replace("T", " ")}:00`,
       start_trigger: startTrigger,
     }),
@@ -2464,7 +2521,7 @@ async function loadStudyLogList() {
   logs.slice(0, 20).forEach((l) => {
     const li = document.createElement("li");
     const modeLabel = vocabAppModeLabel(l.start_trigger);
-    const detailText = vocabAppDetailText(l);
+    const detailText = l.note || vocabAppDetailText(l);
     li.innerHTML = `
       <span class="log-icon" style="background:${colorFor(l.subject)}"></span>
       <span class="log-info">
@@ -4354,6 +4411,8 @@ async function hydrateFromCache() {
   const criticalResults = await Promise.allSettled([loadTodos(), loadTodoStats(), loadCountdown()]);
   criticalResults.filter((r) => r.status === "rejected").forEach((r) => console.error("init load failed:", r.reason));
   document.getElementById("boot-loading")?.classList.add("hidden");
+
+  await autoSkipOverdueTodos();
 
   const backgroundResults = await Promise.allSettled([
     loadStudySummary(),
