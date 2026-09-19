@@ -2184,6 +2184,7 @@ async function loadGoalProgress() {
   const echoParts = [];
   if (p.today_drill_count) echoParts.push(`Drill ${p.today_drill_count}`);
   if (p.today_vocab_count) echoParts.push(`Vocab ${p.today_vocab_count}`);
+  if (p.today_reading_pages) echoParts.push(`Reading ${p.today_reading_pages}p`);
   if (echoParts.length) {
     activityEcho.textContent = `🔗 Today's cross-app activity: ${echoParts.join(" ・ ")}`;
     activityEcho.classList.remove("hidden");

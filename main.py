@@ -978,8 +978,9 @@ def study_log_progress():
     # 他アプリの実績を並べて表示するだけの参考情報として今日分のcount系だけ追加で返す。
     today_activity = conn.execute(
         "SELECT "
-        "SUM(CASE WHEN start_trigger LIKE 'vocab-app:%' THEN COALESCE(count, 0) ELSE 0 END), "
-        "SUM(CASE WHEN start_trigger LIKE 'drill-tracker:%' THEN COALESCE(count, 0) ELSE 0 END) "
+        "SUM(CASE WHEN start_trigger IN ('vocab-app:review', 'vocab-app:news') THEN COALESCE(count, 0) ELSE 0 END), "
+        "SUM(CASE WHEN start_trigger LIKE 'drill-tracker:%' THEN COALESCE(count, 0) ELSE 0 END), "
+        "SUM(CASE WHEN start_trigger = 'vocab-app:reading' THEN COALESCE(count, 0) ELSE 0 END) "
         "FROM study_logs WHERE logged_at >= datetime('now', 'start of day')"
     ).fetchone()
     settings = _read_settings(conn)
@@ -991,6 +992,7 @@ def study_log_progress():
         "total_minutes": all_time_total,
         "today_vocab_count": today_activity[0] or 0,
         "today_drill_count": today_activity[1] or 0,
+        "today_reading_pages": today_activity[2] or 0,
         **settings,
     }
 
