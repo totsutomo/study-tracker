@@ -65,6 +65,13 @@ def nz_month_bound() -> str:
     return local_start.strftime("%Y-%m-%d %H:%M:%S")
 
 
+def nz_week_bound() -> str:
+    """「NZの今週月曜日」の0時を同様の文字列として返す(暦週、月曜始まり)。
+    study_log_weekly()のweek_start算出(d.weekday()基準)と同じ「月曜始まりの週」の定義に揃えている。"""
+    monday = nz_now_naive().replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=nz_today().weekday())
+    return monday.strftime("%Y-%m-%d %H:%M:%S")
+
+
 init_db()
 
 def _env_token(name: str) -> str | None:
@@ -1036,7 +1043,7 @@ def _read_settings(conn):
 def study_log_progress():
     conn = get_connection()
     today_bound = nz_day_bound()
-    week_bound = nz_day_bound(offset_days=-6)
+    week_bound = nz_week_bound()
     month_bound = nz_month_bound()
     today_total = conn.execute(
         "SELECT COALESCE(SUM(minutes), 0) FROM study_logs WHERE logged_at >= ?", (today_bound,)
@@ -1183,7 +1190,7 @@ def activation_log_days(year: int, month: int):
 def activation_log_stats():
     conn = get_connection()
     week_count = conn.execute(
-        "SELECT COUNT(*) FROM activation_logs WHERE triggered_at >= ?", (nz_day_bound(offset_days=-6),)
+        "SELECT COUNT(*) FROM activation_logs WHERE triggered_at >= ?", (nz_week_bound(),)
     ).fetchone()[0]
     month_count = conn.execute(
         "SELECT COUNT(*) FROM activation_logs WHERE triggered_at >= ?", (nz_month_bound(),)
