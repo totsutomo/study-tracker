@@ -1762,6 +1762,7 @@ document.addEventListener("visibilitychange", () => {
     // background could sit stale on screen for a long time after switching back. Force an
     // immediate re-check here so returning to the tab never shows outdated "studying now" info.
     checkPeerSession();
+    refreshIfDayChanged();
   }
 });
 
@@ -2638,15 +2639,10 @@ async function loadStudyLogList() {
   });
 }
 
-// ---------- goals ----------
-
-let lastCountdown = null;
+// ---------- big-goal countdown (起動画面の「あと◯◯日」。旧Goalタブ廃止後も単独で残す) ----------
 
 function renderCountdown(c) {
-  lastCountdown = c;
-  document.getElementById("countdown").innerHTML =
-    `Until ${escapeHtml(c.label)}<br><span class="days">${c.days_left} days</span>`;
-  // 起動画面の「あと◯◯日」にも同じ値を反映する(同じAPIを二重に叩かないよう共用)
+  // 起動画面の「あと◯◯日」に反映する(旧Goalタブの#countdown表示は廃止済み)
   const bootDays = document.getElementById("boot-goal-days");
   if (bootDays) bootDays.textContent = c.days_left;
   const bootLabel = document.getElementById("boot-goal-label");
@@ -2658,87 +2654,156 @@ async function loadCountdown() {
   renderCountdown(c);
 }
 
-document.getElementById("countdown-edit-toggle").addEventListener("click", () => {
-  const form = document.getElementById("countdown-edit-form");
-  const opening = form.classList.contains("hidden");
-  form.classList.toggle("hidden");
-  if (opening && lastCountdown) {
-    document.getElementById("countdown-edit-label").value = lastCountdown.label;
-    document.getElementById("countdown-edit-date").value = lastCountdown.target_date;
-  }
-});
+// ---------- scores (diary / eiken writing) ----------
 
-guardedSubmit(document.getElementById("countdown-edit-form"), async (e) => {
-  const label = document.getElementById("countdown-edit-label").value.trim();
-  const targetDate = document.getElementById("countdown-edit-date").value;
-  if (!label || !targetDate) return;
-  document.getElementById("countdown-edit-form").classList.add("hidden");
-  try {
-    await api("/api/settings", {
-      method: "PUT",
-      body: JSON.stringify({ countdown_label: label, countdown_target_date: targetDate }),
-    });
-    loadCountdown();
-  } catch (err) {
-    showToast("カウントダウンの保存に失敗しました。もう一度お試しください");
-  }
-});
+let diaryScoreView = "overall"; // "overall" | "categories"
+let lastDiaryScoreRows = [];
 
-function updateGoalProgress(goals) {
-  const doneCount = goals.filter((g) => g.done).length;
-  const pct = goals.length ? Math.round((doneCount / goals.length) * 100) : 0;
-  document.getElementById("goal-progress").textContent =
-    goals.length ? `Achieved: ${doneCount}/${goals.length} (${pct}%)` : "";
+function formatMonthDay(dateStr) {
+  const [, m, d] = dateStr.split("-");
+  return `${Number(m)}/${Number(d)}`;
 }
 
-async function loadGoals() {
-  const goals = await api("/api/goals");
-  const list = document.getElementById("goal-list");
-  list.innerHTML = "";
-  goals.forEach((g) => {
-    const li = document.createElement("li");
-    if (g.done) li.classList.add("done");
-    li.innerHTML = `
-      <input type="checkbox" ${g.done ? "checked" : ""}>
-      <span>${escapeHtml(g.title)}</span>
-      <button class="delete-btn" title="Delete">×</button>
-    `;
-    li.querySelector("input").addEventListener("click", async () => {
-      const prevDone = g.done;
-      await optimistic(
-        () => { g.done = g.done ? 0 : 1; li.classList.toggle("done", !!g.done); updateGoalProgress(goals); },
-        () => { g.done = prevDone; li.classList.toggle("done", !!g.done); updateGoalProgress(goals); },
-        () => api(`/api/goals/${g.id}/toggle`, { method: "POST" }),
-      );
+async function loadScoresTab() {
+  const [diaryRows, writingRows] = await Promise.all([
+    api("/api/diary-scores?days=30"),
+    api("/api/eiken-writing-scores?days=90"),
+  ]);
+  lastDiaryScoreRows = diaryRows;
+  renderDiaryScoreStats(diaryRows);
+  renderDiaryScoreChart(diaryRows);
+  renderWritingScoreStats(writingRows);
+  renderWritingScoreChart(writingRows);
+}
+
+function renderDiaryScoreStats(rows) {
+  const avgEl = document.getElementById("scores-diary-avg");
+  const latestEl = document.getElementById("scores-diary-latest");
+  if (!rows.length) {
+    avgEl.textContent = "--";
+    latestEl.textContent = "--";
+    return;
+  }
+  const avg = rows.reduce((sum, r) => sum + r.overall, 0) / rows.length;
+  avgEl.textContent = Math.round(avg);
+  latestEl.textContent = Math.round(rows[rows.length - 1].overall);
+}
+
+function renderWritingScoreStats(rows) {
+  const el = document.getElementById("scores-writing-latest");
+  if (!rows.length) {
+    el.textContent = "--";
+    return;
+  }
+  const latest = rows[rows.length - 1];
+  el.textContent = `${latest.summary_total16 ?? "--"} · ${latest.essay_total16 ?? "--"}`;
+}
+
+function renderDiaryScoreChart(rows) {
+  const container = document.getElementById("diary-score-chart");
+  if (!rows.length) {
+    container.innerHTML = `<p class="meta">No diary scores yet</p>`;
+    return;
+  }
+  const chartW = 700, chartH = 180, padTop = 10, padBottom = 20, padX = 12;
+  const plotH = chartH - padTop - padBottom;
+  const plotW = chartW - padX * 2;
+  const stepX = rows.length > 1 ? plotW / (rows.length - 1) : 0;
+  const xs = rows.map((_, i) => padX + i * stepX);
+
+  const seriesDefs = diaryScoreView === "overall"
+    ? [{ key: "overall", color: "#4f7cdb", max: 100, width: 2, dots: true }]
+    : [
+        { key: "task", color: "#4f7cdb", max: 25, width: 1.5 },
+        { key: "coherence", color: "#4a9c72", max: 25, width: 1.5 },
+        { key: "lexical", color: "#e0a030", max: 25, width: 1.5 },
+        { key: "grammar", color: "#e5555c", max: 25, width: 1.5 },
+      ];
+
+  const paths = seriesDefs.map((s) => {
+    let d = "";
+    rows.forEach((r, i) => {
+      const y = padTop + plotH - (r[s.key] / s.max) * plotH;
+      d += `${i === 0 ? "M" : "L"}${xs[i].toFixed(1)},${y.toFixed(1)} `;
     });
-    li.querySelector(".delete-btn").addEventListener("click", async () => {
-      const idx = goals.indexOf(g);
-      li.remove();
-      goals.splice(idx, 1);
-      updateGoalProgress(goals);
-      try {
-        await api(`/api/goals/${g.id}`, { method: "DELETE" });
-      } catch (err) {
-        showToast("削除に失敗しました。もう一度お試しください");
-        loadGoals();
-      }
+    return `<path d="${d.trim()}" fill="none" stroke="${s.color}" stroke-width="${s.width}" stroke-linecap="round" stroke-linejoin="round"></path>`;
+  }).join("");
+
+  const dots = seriesDefs
+    .filter((s) => s.dots)
+    .map((s) => rows.map((r, i) => {
+      const y = padTop + plotH - (r[s.key] / s.max) * plotH;
+      return `<circle cx="${xs[i].toFixed(1)}" cy="${y.toFixed(1)}" r="3" fill="${s.color}"></circle>`;
+    }).join(""))
+    .join("");
+
+  const labelEvery = Math.max(1, Math.ceil(rows.length / 5));
+  const labels = rows.map((r, i) => {
+    if (i % labelEvery !== 0 && i !== rows.length - 1) return "";
+    return `<text x="${xs[i].toFixed(1)}" y="${chartH - 4}" font-size="10" fill="var(--text-muted)" text-anchor="middle">${formatMonthDay(r.date)}</text>`;
+  }).join("");
+
+  container.innerHTML = `<svg viewBox="0 0 ${chartW} ${chartH}" width="100%" height="150" preserveAspectRatio="none">${paths}${dots}${labels}</svg>`;
+}
+
+function renderWritingScoreChart(rows) {
+  const container = document.getElementById("writing-score-chart");
+  if (!rows.length) {
+    container.innerHTML = `<p class="meta">まだ記録なし</p>`;
+    return;
+  }
+  const chartW = 700, chartH = 180, padTop = 10, padBottom = 20, padX = 12;
+  const plotH = chartH - padTop - padBottom;
+  const plotW = chartW - padX * 2;
+  const stepX = rows.length > 1 ? plotW / (rows.length - 1) : 0;
+  const xs = rows.map((_, i) => padX + i * stepX);
+
+  function seriesPath(key) {
+    let d = "";
+    let drawing = false;
+    rows.forEach((r, i) => {
+      const v = r[key];
+      if (v == null) { drawing = false; return; }
+      const y = padTop + plotH - (v / 16) * plotH;
+      d += `${drawing ? "L" : "M"}${xs[i].toFixed(1)},${y.toFixed(1)} `;
+      drawing = true;
     });
-    list.appendChild(li);
+    return d.trim();
+  }
+  function seriesDots(key, color) {
+    return rows.map((r, i) => {
+      const v = r[key];
+      if (v == null) return "";
+      const y = padTop + plotH - (v / 16) * plotH;
+      return `<circle cx="${xs[i].toFixed(1)}" cy="${y.toFixed(1)}" r="3.5" fill="${color}"></circle>`;
+    }).join("");
+  }
+
+  const summaryPath = seriesPath("summary_total16");
+  const essayPath = seriesPath("essay_total16");
+
+  const labelEvery = Math.max(1, Math.ceil(rows.length / 5));
+  const labels = rows.map((r, i) => {
+    if (i % labelEvery !== 0 && i !== rows.length - 1) return "";
+    return `<text x="${xs[i].toFixed(1)}" y="${chartH - 4}" font-size="10" fill="var(--text-muted)" text-anchor="middle">${formatMonthDay(r.date)}</text>`;
+  }).join("");
+
+  container.innerHTML = `
+    <svg viewBox="0 0 ${chartW} ${chartH}" width="100%" height="150" preserveAspectRatio="none">
+      ${summaryPath ? `<path d="${summaryPath}" fill="none" stroke="#4a9c72" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>` : ""}
+      ${essayPath ? `<path d="${essayPath}" fill="none" stroke="#4f7cdb" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>` : ""}
+      ${seriesDots("summary_total16", "#4a9c72")}
+      ${seriesDots("essay_total16", "#4f7cdb")}
+      ${labels}
+    </svg>`;
+}
+
+document.querySelectorAll("#diary-score-toggle .period-btn").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    diaryScoreView = btn.dataset.view;
+    document.querySelectorAll("#diary-score-toggle .period-btn").forEach((b) => b.classList.toggle("active", b === btn));
+    renderDiaryScoreChart(lastDiaryScoreRows);
   });
-  updateGoalProgress(goals);
-}
-
-guardedSubmit(document.getElementById("goal-form"), async (e) => {
-  const title = document.getElementById("goal-title").value.trim();
-  if (!title) return;
-  document.getElementById("goal-title").value = "";
-  try {
-    await api("/api/goals", { method: "POST", body: JSON.stringify({ title }) });
-    loadGoals();
-  } catch (err) {
-    document.getElementById("goal-title").value = title;
-    showToast(`「${title}」の追加に失敗しました。もう一度お試しください`);
-  }
 });
 
 // ---------- activation logs ----------
@@ -3460,6 +3525,32 @@ let calWeekStart = null; // ISO date (Monday), used when calViewMode === "week"
 // カレンダーを開いた瞬間に「今日の予定」が見えるよう、常に今日をデフォルト選択にしておく。
 let selectedCalDate = todayStr();
 let calEventsCache = [];
+let lastKnownToday = todayStr();
+
+// PWAはタブを閉じない限りバックグラウンドでもプロセスが生き続けるため、日付を跨いで前面に
+// 戻ってきても「今日」に依存した表示(進捗バナー・カレンダーの今日ハイライト等)が古いまま
+// 固定されてしまう(2026-09-21、日付跨ぎバグの一因として発覚)。定期的 + フォアグラウンド
+// 復帰のたびにブラウザ側の日付が変わっていないか確認し、変わっていれば今日依存の表示だけ
+// 再読み込みする。カレンダーが既に「今日」以外を表示中(ユーザーが手動でナビゲート済み)の
+// 場合は選択日を勝手に動かさない。
+async function refreshIfDayChanged() {
+  const nowToday = todayStr();
+  if (nowToday === lastKnownToday) return;
+  const wasShowingToday = selectedCalDate === lastKnownToday;
+  lastKnownToday = nowToday;
+  if (wasShowingToday) {
+    const now = new Date();
+    selectedCalDate = nowToday;
+    calYear = now.getFullYear();
+    calMonth = now.getMonth() + 1;
+    if (calViewMode === "week") calWeekStart = mondayOf(nowToday);
+  }
+  loadGoalProgress();
+  loadTodos();
+  loadTodoStats();
+  if (typeof loadCalendar === "function") loadCalendar();
+}
+setInterval(refreshIfDayChanged, 60000);
 let calTodosCache = [];
 let calStudyDaysCache = new Set();
 let calActivationDaysCache = new Set();
@@ -4624,7 +4715,7 @@ async function hydrateFromCache() {
     loadActivityHeatmap(),
     loadGoalProgress(),
     loadScreenBudget(),
-    loadGoals(),
+    loadScoresTab(),
     loadActivationActive(),
     loadActivationList(),
     loadActivationStats(),

@@ -54,13 +54,6 @@ CREATE TABLE IF NOT EXISTS push_subscriptions (
     created_at TEXT DEFAULT (datetime('now'))
 );
 
-CREATE TABLE IF NOT EXISTS goals (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    title TEXT NOT NULL,
-    done INTEGER DEFAULT 0,
-    created_at TEXT DEFAULT (datetime('now'))
-);
-
 CREATE TABLE IF NOT EXISTS categories (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL UNIQUE
@@ -91,6 +84,36 @@ CREATE TABLE IF NOT EXISTS mood_logs (
 );
 
 CREATE INDEX IF NOT EXISTS idx_mood_logs_date ON mood_logs(date);
+
+-- 日記(Obsidian Diaryスキル)・英検準1級ライティング(Obsidian eiken-writingスキル)の採点結果。
+-- 採点の実体はObsidianのfrontmatterにあり、ここはCompassでグラフ表示するためのミラー(採点skill側からPOSTされる)。
+CREATE TABLE IF NOT EXISTS diary_scores (
+    date TEXT PRIMARY KEY,
+    style TEXT,
+    task REAL NOT NULL,
+    coherence REAL NOT NULL,
+    lexical REAL NOT NULL,
+    grammar REAL NOT NULL,
+    overall REAL NOT NULL,
+    logged_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS eiken_writing_scores (
+    date TEXT PRIMARY KEY,
+    summary_content REAL,
+    summary_structure REAL,
+    summary_vocab REAL,
+    summary_grammar REAL,
+    summary_total16 INTEGER,
+    summary_word_count INTEGER,
+    essay_content REAL,
+    essay_structure REAL,
+    essay_vocab REAL,
+    essay_grammar REAL,
+    essay_total16 INTEGER,
+    essay_word_count INTEGER,
+    logged_at TEXT DEFAULT (datetime('now'))
+);
 
 CREATE TABLE IF NOT EXISTS sleep_logs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

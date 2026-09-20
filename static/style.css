@@ -1425,6 +1425,25 @@ body.focus-open #tabbar {
   margin: 0;
 }
 
+/* モバイルでは.chart-card自体はここまで未定義(md+側の定義のみ)だったため、
+   Scoresタブのカードがモバイルで枠なしになってしまう。ベース定義を追加し、
+   md+側は既存のmax-width頭打ちだけを上乗せする形にする(Study側の見た目は変えない) */
+.chart-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-card);
+  padding: 14px 16px;
+  margin-bottom: 12px;
+  box-sizing: border-box;
+}
+
+.chart-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
 .period-toggle {
   display: flex;
   gap: 2px;
@@ -2275,13 +2294,20 @@ body.focus-open #tabbar {
      width:100%で伸びるため)横だけでなく縦にも間延びしてバランスが崩れる。
      他のカード類とサイズ感を揃えるため、ここで幅を頭打ちにする */
   .chart-card {
-    background: var(--card);
-    border: 1px solid var(--border);
     border-radius: var(--radius-lg);
-    box-shadow: var(--shadow-card);
     padding: 16px 20px;
-    margin-bottom: 12px;
     max-width: 820px;
+  }
+
+  .chart-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px;
+    max-width: 820px;
+  }
+
+  .chart-grid .chart-card {
+    max-width: none;
   }
 
   .study-history-row {

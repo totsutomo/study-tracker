@@ -57,12 +57,12 @@
     </svg>
     <span>Mood</span>
   </button>
-  <button class="tab-btn" data-tab="tab-goal">
+  <button class="tab-btn" data-tab="tab-scores">
     <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor"
          stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-      <circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1"/>
+      <polyline points="4 16 9 10 13 13 20 4"/><polyline points="15 4 20 4 20 9"/>
     </svg>
-    <span>Goal</span>
+    <span>Scores</span>
   </button>
 </nav>
 <div class="app-main-col">
@@ -434,21 +434,39 @@
     <ul id="sleep-log-list" class="list"></ul>
   </section>
 
-  <section id="tab-goal" class="tab-panel">
-    <h2>Goal Progress</h2>
-    <div id="countdown"></div>
-    <button type="button" id="countdown-edit-toggle" class="quick-date-btn">Edit big goal</button>
-    <form id="countdown-edit-form" class="add-form hidden">
-      <input type="text" id="countdown-edit-label" placeholder="Goal name (e.g. Eiken Pre-1 / CEFR C1 goal (end of study abroad))" required>
-      <input type="date" id="countdown-edit-date" required>
-      <button type="submit">Save</button>
-    </form>
-    <ul id="goal-list" class="list"></ul>
-    <form id="goal-form" class="add-form">
-      <input type="text" id="goal-title" placeholder="Item to achieve (e.g. 1800 vocabulary words)" required>
-      <button type="submit">+ Add</button>
-    </form>
-    <div id="goal-progress"></div>
+  <section id="tab-scores" class="tab-panel">
+    <h2>Scores</h2>
+
+    <div class="stats-header">
+      <div class="stat-cell"><span class="stat-label">Diary avg (30d)</span><span class="stat-value" id="scores-diary-avg">--</span></div>
+      <div class="stat-cell"><span class="stat-label">Diary latest</span><span class="stat-value" id="scores-diary-latest">--</span></div>
+      <div class="stat-cell"><span class="stat-label">Writing (summary / essay)</span><span class="stat-value" id="scores-writing-latest">--</span></div>
+    </div>
+
+    <div class="chart-grid">
+      <div class="chart-card">
+        <div class="chart-header-row">
+          <h3>Diary score</h3>
+          <div class="period-toggle" id="diary-score-toggle">
+            <button type="button" class="period-btn active" data-view="overall">Overall</button>
+            <button type="button" class="period-btn" data-view="categories">By category</button>
+          </div>
+        </div>
+        <div id="diary-score-chart"></div>
+        <p class="meta">"By category" shows task / coherence / lexical / grammar separately</p>
+      </div>
+
+      <div class="chart-card">
+        <div class="chart-header-row">
+          <h3>Eiken Pre-1 writing score</h3>
+        </div>
+        <div id="writing-score-chart"></div>
+        <div class="chart-legend">
+          <span class="legend-item"><span class="legend-dot" style="background:#4a9c72;"></span>Summary</span>
+          <span class="legend-item"><span class="legend-dot" style="background:#4f7cdb;"></span>Essay</span>
+        </div>
+      </div>
+    </div>
   </section>
 
   <section id="tab-calendar" class="tab-panel">
@@ -872,12 +890,12 @@
     </svg>
     <span>Mood</span>
   </button>
-  <button class="tab-btn" data-tab="tab-goal">
+  <button class="tab-btn" data-tab="tab-scores">
     <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor"
          stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-      <circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1"/>
+      <polyline points="4 16 9 10 13 13 20 4"/><polyline points="15 4 20 4 20 9"/>
     </svg>
-    <span>Goal</span>
+    <span>Scores</span>
   </button>
 </nav>
 

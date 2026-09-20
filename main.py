@@ -9,6 +9,7 @@ import secrets
 import zipfile
 from datetime import date, datetime, timedelta
 from urllib.parse import quote
+from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
@@ -19,6 +20,50 @@ from pywebpush import WebPushException, webpush
 from database import get_connection, init_db, row_to_dict, rows_to_dicts
 
 app = FastAPI(title="Compass")
+
+# サーバー(Render)はUTCで動くが、とっつーは常にNZ(Pacific/Auckland、標準時UTC+12/
+# 夏時間UTC+13)にいる単一ユーザー向けアプリ。study_logs.logged_at/activation_logs.
+# triggered_at/todos.due_date等はいずれも「クライアントローカル時刻」(タイムゾーン
+# 情報なしのNZ wall-clock文字列)としてクライアント側から送られてくる設計(各Pydantic
+# モデルのコメント参照)。一方でPythonのdatetime.now()/date.today()やSQLiteの
+# datetime('now')/date('now')はサーバーの時計(UTC)を返すため、これらの値と
+# 「今日」「今週」等の境界をそのまま比較すると、NZとUTCの12〜13時間のズレの分だけ
+# 判定がずれる(2026-09-21、日付跨ぎ判定バグの根本原因)。この境界判定には必ず
+# nz_now()/nz_today()/nz_day_bound()/nz_month_bound()(UTC変換はしない、NZの
+# wall-clockのまま)を使い、SQL側にはバインドパラメータとして渡す(SQL関数の
+# 'now'には頼らない)。判定対象が「NZ時刻としての意味を持たない絶対時刻の経過」
+# (例: pending_changesの猶予時間、フォーカスセッションの残り時間)である箇所は
+# 対象外(サーバー時計同士の比較で正しく動くため変更不要)。
+NZ_TZ = ZoneInfo("Pacific/Auckland")
+
+
+def nz_now() -> datetime:
+    """timezone-awareなNZの現在時刻。"""
+    return datetime.now(NZ_TZ)
+
+
+def nz_today() -> date:
+    return nz_now().date()
+
+
+def nz_now_naive() -> datetime:
+    """study_logs.logged_at等、クライアントローカル(タイムゾーン情報なし)形式の
+    列と直接比較できる、tzinfoなしのNZ現在時刻。"""
+    return nz_now().replace(tzinfo=None)
+
+
+def nz_day_bound(offset_days: int = 0) -> str:
+    """「NZの今日+offset_days」の0時を、logged_at等(クライアントローカル文字列)
+    と比較できる文字列("YYYY-MM-DD HH:MM:SS")として返す。"""
+    local_midnight = nz_now_naive().replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=offset_days)
+    return local_midnight.strftime("%Y-%m-%d %H:%M:%S")
+
+
+def nz_month_bound() -> str:
+    """「NZの今月1日」の0時を同様の文字列として返す。"""
+    local_start = nz_now_naive().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    return local_start.strftime("%Y-%m-%d %H:%M:%S")
+
 
 init_db()
 
@@ -183,8 +228,30 @@ class VocabSessionActiveSync(BaseModel):
     mode: str | None = None  # "review" | "reading" | "news"。バッジ表示用、記録には使わない
 
 
-class GoalCreate(BaseModel):
-    title: str
+class DiaryScoreCreate(BaseModel):
+    date: str  # "YYYY-MM-DD"
+    style: str | None = None
+    task: float
+    coherence: float
+    lexical: float
+    grammar: float
+    overall: float
+
+
+class EikenWritingScoreCreate(BaseModel):
+    date: str  # "YYYY-MM-DD"
+    summary_content: float | None = None
+    summary_structure: float | None = None
+    summary_vocab: float | None = None
+    summary_grammar: float | None = None
+    summary_total16: int | None = None
+    summary_word_count: int | None = None
+    essay_content: float | None = None
+    essay_structure: float | None = None
+    essay_vocab: float | None = None
+    essay_grammar: float | None = None
+    essay_total16: int | None = None
+    essay_word_count: int | None = None
 
 
 class EventCreate(BaseModel):
@@ -408,8 +475,8 @@ def toggle_todo(todo_id: int):
         (new_done, todo_id),
     )
     if new_done and recurrence:
-        base = date.fromisoformat(due_date) if due_date else date.today()
-        base = max(base, date.today())
+        base = date.fromisoformat(due_date) if due_date else nz_today()
+        base = max(base, nz_today())
         next_due = next_occurrence(base, recurrence)
         if next_due is not None:
             conn.execute(
@@ -445,8 +512,8 @@ def skip_todo(todo_id: int):
     # 完了(toggle_todo)と同じ扱い: スキップも「この回は終わり」を意味するので、
     # 繰り返し予定なら次回分を生成する(このtodoを消さずに繰り越さない、というのが要件のため)
     if new_skipped and recurrence:
-        base = date.fromisoformat(due_date) if due_date else date.today()
-        base = max(base, date.today())
+        base = date.fromisoformat(due_date) if due_date else nz_today()
+        base = max(base, nz_today())
         next_due = next_occurrence(base, recurrence)
         if next_due is not None:
             conn.execute(
@@ -543,9 +610,10 @@ def study_log_summary():
         """
         SELECT subject, SUM(minutes) AS total_minutes
         FROM study_logs
-        WHERE logged_at >= datetime('now', '-7 days')
+        WHERE logged_at >= ?
         GROUP BY subject
-        """
+        """,
+        (nz_day_bound(offset_days=-7),),
     )
     result = rows_to_dicts(cur)
     conn.close()
@@ -557,9 +625,9 @@ def study_log_trigger_stats(days: int = 30):
     conn = get_connection()
     cur = conn.execute(
         "SELECT start_trigger, COUNT(*) AS count FROM study_logs "
-        "WHERE start_trigger IS NOT NULL AND logged_at >= datetime('now', ?, 'start of day') "
+        "WHERE start_trigger IS NOT NULL AND logged_at >= ? "
         "GROUP BY start_trigger ORDER BY count DESC",
-        (f"-{days} days",),
+        (nz_day_bound(offset_days=-days),),
     )
     result = rows_to_dicts(cur)
     conn.close()
@@ -698,9 +766,9 @@ def get_study_heatmap(days: int = 180):
         "(start_trigger NOT LIKE 'vocab-app:%' AND start_trigger NOT LIKE 'drill-tracker:%') "
         "THEN minutes ELSE 0 END) AS compass_minutes "
         "FROM study_logs "
-        "WHERE date(logged_at) >= date('now', ?) "
+        "WHERE date(logged_at) >= ? "
         "GROUP BY d ORDER BY d",
-        (f"-{days} days",),
+        ((nz_today() - timedelta(days=days)).isoformat(),),
     ).fetchall()
     conn.close()
     return [
@@ -797,10 +865,11 @@ def study_log_daily():
         """
         SELECT date(logged_at) AS d, subject, SUM(minutes) AS total_minutes
         FROM study_logs
-        WHERE logged_at >= datetime('now', '-13 days', 'start of day')
+        WHERE logged_at >= ?
         GROUP BY d, subject
         ORDER BY d
-        """
+        """,
+        (nz_day_bound(offset_days=-13),),
     )
     result = rows_to_dicts(cur)
     conn.close()
@@ -815,8 +884,8 @@ def list_mood_logs(days: int = 14):
     conn = get_connection()
     cur = conn.execute(
         "SELECT id, date, score, note, reason, logged_at FROM mood_logs "
-        "WHERE date >= date('now', ?) ORDER BY logged_at ASC",
-        (f"-{days - 1} days",),
+        "WHERE date >= ? ORDER BY logged_at ASC",
+        ((nz_today() - timedelta(days=days - 1)).isoformat(),),
     )
     result = rows_to_dicts(cur)
     conn.close()
@@ -830,11 +899,13 @@ def mood_log_stats():
     conn = get_connection()
     week_avg = conn.execute(
         "SELECT AVG(day_avg) FROM (SELECT AVG(score) AS day_avg FROM mood_logs "
-        "WHERE date >= date('now', '-6 days') GROUP BY date)"
+        "WHERE date >= ? GROUP BY date)",
+        ((nz_today() - timedelta(days=6)).isoformat(),),
     ).fetchone()[0]
     month_avg = conn.execute(
         "SELECT AVG(day_avg) FROM (SELECT AVG(score) AS day_avg FROM mood_logs "
-        "WHERE date >= date('now', 'start of month') GROUP BY date)"
+        "WHERE date >= ? GROUP BY date)",
+        (nz_today().replace(day=1).isoformat(),),
     ).fetchone()[0]
     conn.close()
     return {
@@ -848,9 +919,9 @@ def mood_log_reason_stats(days: int = 30):
     conn = get_connection()
     cur = conn.execute(
         "SELECT reason, COUNT(*) AS count, AVG(score) AS avg_score FROM mood_logs "
-        "WHERE reason IS NOT NULL AND date >= date('now', ?) "
+        "WHERE reason IS NOT NULL AND date >= ? "
         "GROUP BY reason ORDER BY avg_score ASC",
-        (f"-{days} days",),
+        ((nz_today() - timedelta(days=days)).isoformat(),),
     )
     result = rows_to_dicts(cur)
     conn.close()
@@ -869,8 +940,8 @@ def mood_log_low_mood_achievement(days: int = 30):
         return {"status": "not_configured", "low_mood_days": 0, "achieved_days": 0, "rate": None}
 
     mood_rows = conn.execute(
-        "SELECT date, score FROM mood_logs WHERE date >= date('now', ?)",
-        (f"-{days} days",),
+        "SELECT date, score FROM mood_logs WHERE date >= ?",
+        ((nz_today() - timedelta(days=days)).isoformat(),),
     ).fetchall()
     scores_by_date = {}
     for d, score in mood_rows:
@@ -885,8 +956,8 @@ def mood_log_low_mood_achievement(days: int = 30):
 
     study_rows = conn.execute(
         "SELECT date(logged_at) AS d, SUM(minutes) AS total_minutes FROM study_logs "
-        "WHERE logged_at >= datetime('now', ?, 'start of day') GROUP BY d",
-        (f"-{days} days",),
+        "WHERE logged_at >= ? GROUP BY d",
+        (nz_day_bound(offset_days=-days),),
     ).fetchall()
     minutes_by_date = dict(study_rows)
     conn.close()
@@ -928,11 +999,11 @@ def study_log_weekly():
         """
         SELECT date(logged_at) AS d, subject, SUM(minutes) AS total_minutes
         FROM study_logs
-        WHERE logged_at >= datetime('now', ?, 'start of day')
+        WHERE logged_at >= ?
         GROUP BY d, subject
         ORDER BY d
         """,
-        (f"-{WEEKLY_CHART_WEEKS * 7 - 1} days",),
+        (nz_day_bound(offset_days=-(WEEKLY_CHART_WEEKS * 7 - 1)),),
     )
     rows = rows_to_dicts(cur)
     conn.close()
@@ -964,14 +1035,17 @@ def _read_settings(conn):
 @app.get("/api/study-logs/progress")
 def study_log_progress():
     conn = get_connection()
+    today_bound = nz_day_bound()
+    week_bound = nz_day_bound(offset_days=-6)
+    month_bound = nz_month_bound()
     today_total = conn.execute(
-        "SELECT COALESCE(SUM(minutes), 0) FROM study_logs WHERE logged_at >= datetime('now', 'start of day')"
+        "SELECT COALESCE(SUM(minutes), 0) FROM study_logs WHERE logged_at >= ?", (today_bound,)
     ).fetchone()[0]
     week_total = conn.execute(
-        "SELECT COALESCE(SUM(minutes), 0) FROM study_logs WHERE logged_at >= datetime('now', '-6 days', 'start of day')"
+        "SELECT COALESCE(SUM(minutes), 0) FROM study_logs WHERE logged_at >= ?", (week_bound,)
     ).fetchone()[0]
     month_total = conn.execute(
-        "SELECT COALESCE(SUM(minutes), 0) FROM study_logs WHERE logged_at >= datetime('now', 'start of month')"
+        "SELECT COALESCE(SUM(minutes), 0) FROM study_logs WHERE logged_at >= ?", (month_bound,)
     ).fetchone()[0]
     all_time_total = conn.execute("SELECT COALESCE(SUM(minutes), 0) FROM study_logs").fetchone()[0]
     # 達成率%はタイマーのminutes放置に弱い(2026-09-19の監査で確認済み)。数字自体は直さず、
@@ -981,7 +1055,7 @@ def study_log_progress():
         "SUM(CASE WHEN start_trigger IN ('vocab-app:review', 'vocab-app:news') THEN COALESCE(count, 0) ELSE 0 END), "
         "SUM(CASE WHEN start_trigger LIKE 'drill-tracker:%' THEN COALESCE(count, 0) ELSE 0 END), "
         "SUM(CASE WHEN start_trigger = 'vocab-app:reading' THEN COALESCE(count, 0) ELSE 0 END) "
-        "FROM study_logs WHERE logged_at >= datetime('now', 'start of day')"
+        "FROM study_logs WHERE logged_at >= ?", (today_bound,)
     ).fetchone()
     settings = _read_settings(conn)
     conn.close()
@@ -1109,10 +1183,10 @@ def activation_log_days(year: int, month: int):
 def activation_log_stats():
     conn = get_connection()
     week_count = conn.execute(
-        "SELECT COUNT(*) FROM activation_logs WHERE triggered_at >= datetime('now', '-6 days', 'start of day')"
+        "SELECT COUNT(*) FROM activation_logs WHERE triggered_at >= ?", (nz_day_bound(offset_days=-6),)
     ).fetchone()[0]
     month_count = conn.execute(
-        "SELECT COUNT(*) FROM activation_logs WHERE triggered_at >= datetime('now', 'start of month')"
+        "SELECT COUNT(*) FROM activation_logs WHERE triggered_at >= ?", (nz_month_bound(),)
     ).fetchone()[0]
     total_count = conn.execute("SELECT COUNT(*) FROM activation_logs").fetchone()[0]
     conn.close()
@@ -1124,8 +1198,8 @@ def activation_log_post_return_stats(days: int = 30):
     conn = get_connection()
     cur = conn.execute(
         "SELECT returned_at FROM activation_logs "
-        "WHERE returned_at IS NOT NULL AND triggered_at >= datetime('now', ?, 'start of day')",
-        (f"-{days} days",),
+        "WHERE returned_at IS NOT NULL AND triggered_at >= ?",
+        (nz_day_bound(offset_days=-days),),
     )
     minutes_list = [_post_return_minutes(conn, row[0]) for row in cur.fetchall()]
     conn.close()
@@ -1140,9 +1214,9 @@ def activation_log_mood_reasons(days: int = 30):
     cur = conn.execute(
         "SELECT mood_reason, COUNT(*) AS count FROM activation_logs "
         "WHERE mood = 'heavy' AND mood_reason IS NOT NULL "
-        "AND triggered_at >= datetime('now', ? , 'start of day') "
+        "AND triggered_at >= ? "
         "GROUP BY mood_reason ORDER BY count DESC",
-        (f"-{days} days",),
+        (nz_day_bound(offset_days=-days),),
     )
     result = rows_to_dicts(cur)
     conn.close()
@@ -1240,8 +1314,8 @@ def sleep_log_stats(days: int = 30):
     conn = get_connection()
     cur = conn.execute(
         "SELECT (julianday(wake_at) - julianday(bedtime_at)) * 24 * 60 AS minutes FROM sleep_logs "
-        "WHERE wake_at IS NOT NULL AND bedtime_at >= datetime('now', ?, 'start of day')",
-        (f"-{days} days",),
+        "WHERE wake_at IS NOT NULL AND bedtime_at >= ?",
+        (nz_day_bound(offset_days=-days),),
     )
     minutes_list = [row[0] for row in cur.fetchall()]
     conn.close()
@@ -1349,8 +1423,8 @@ def screen_time_daily(days: int = 14):
     conn = get_connection()
     cur = conn.execute(
         "SELECT date, SUM(total_minutes) AS total_minutes FROM screen_time_logs "
-        "WHERE date >= date('now', ?) GROUP BY date ORDER BY date",
-        (f"-{days - 1} days",),
+        "WHERE date >= ? GROUP BY date ORDER BY date",
+        ((nz_today() - timedelta(days=days - 1)).isoformat(),),
     )
     result = rows_to_dicts(cur)
     conn.close()
@@ -1362,14 +1436,15 @@ def screen_time_mood_correlation(days: int = 30):
     # スクリーンタイムが多い日と少ない日で気分平均に差があるかを見る(中央値で2群に分ける簡易分析)。
     # daily()と同じ理由でデバイス合算のSUMにする。
     conn = get_connection()
+    since = (nz_today() - timedelta(days=days)).isoformat()
     screen_rows = conn.execute(
         "SELECT date, SUM(total_minutes) AS total_minutes FROM screen_time_logs "
-        "WHERE date >= date('now', ?) GROUP BY date",
-        (f"-{days} days",),
+        "WHERE date >= ? GROUP BY date",
+        (since,),
     ).fetchall()
     mood_rows = conn.execute(
-        "SELECT date, score FROM mood_logs WHERE date >= date('now', ?)",
-        (f"-{days} days",),
+        "SELECT date, score FROM mood_logs WHERE date >= ?",
+        (since,),
     ).fetchall()
     conn.close()
 
@@ -1994,49 +2069,86 @@ def cancel_pending_change(change_id: int, token: str | None = None):
     return {"ok": True}
 
 
-# ---------- goals ----------
+# ---------- scores (diary / eiken writing) ----------
+# 採点の実体はObsidian側(diary/eiken-writing skill)のfrontmatter。ここはCompassでグラフ表示する
+# ためのミラーで、採点skillが確定時にPOSTしてくる想定(スキル経由以外での更新はない)。
 
-@app.get("/api/goals")
-def list_goals():
+@app.get("/api/diary-scores")
+def list_diary_scores(days: int = 30):
     conn = get_connection()
-    cur = conn.execute("SELECT * FROM goals ORDER BY created_at ASC")
+    cur = conn.execute(
+        "SELECT date, style, task, coherence, lexical, grammar, overall FROM diary_scores "
+        "WHERE date >= ? ORDER BY date ASC",
+        ((nz_today() - timedelta(days=days)).isoformat(),),
+    )
     result = rows_to_dicts(cur)
     conn.close()
     return result
 
 
-@app.post("/api/goals")
-def create_goal(goal: GoalCreate):
+@app.post("/api/diary-scores")
+def upsert_diary_score(score: DiaryScoreCreate):
     conn = get_connection()
-    cur = conn.execute("INSERT INTO goals (title) VALUES (?)", (goal.title,))
-    conn.commit()
-    new_id = cur.lastrowid
-    conn.close()
-    return {"id": new_id}
-
-
-@app.post("/api/goals/{goal_id}/toggle")
-def toggle_goal(goal_id: int):
-    conn = get_connection()
-    row = conn.execute("SELECT done FROM goals WHERE id = ?", (goal_id,)).fetchone()
-    if row is None:
-        conn.close()
-        raise HTTPException(status_code=404, detail="goal not found")
-    new_done = 0 if row[0] else 1
-    conn.execute("UPDATE goals SET done = ? WHERE id = ?", (new_done, goal_id))
-    conn.commit()
-    conn.close()
-    return {"id": goal_id, "done": bool(new_done)}
-
-
-@app.delete("/api/goals/{goal_id}")
-def delete_goal(goal_id: int):
-    conn = get_connection()
-    conn.execute("DELETE FROM goals WHERE id = ?", (goal_id,))
+    conn.execute(
+        """
+        INSERT INTO diary_scores (date, style, task, coherence, lexical, grammar, overall)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(date) DO UPDATE SET
+            style = excluded.style, task = excluded.task, coherence = excluded.coherence,
+            lexical = excluded.lexical, grammar = excluded.grammar, overall = excluded.overall,
+            logged_at = datetime('now')
+        """,
+        (score.date, score.style, score.task, score.coherence, score.lexical, score.grammar, score.overall),
+    )
     conn.commit()
     conn.close()
     return {"ok": True}
 
+
+@app.get("/api/eiken-writing-scores")
+def list_eiken_writing_scores(days: int = 90):
+    conn = get_connection()
+    cur = conn.execute(
+        "SELECT * FROM eiken_writing_scores WHERE date >= ? ORDER BY date ASC",
+        ((nz_today() - timedelta(days=days)).isoformat(),),
+    )
+    result = rows_to_dicts(cur)
+    conn.close()
+    return result
+
+
+@app.post("/api/eiken-writing-scores")
+def upsert_eiken_writing_score(score: EikenWritingScoreCreate):
+    conn = get_connection()
+    conn.execute(
+        """
+        INSERT INTO eiken_writing_scores (
+            date, summary_content, summary_structure, summary_vocab, summary_grammar,
+            summary_total16, summary_word_count, essay_content, essay_structure,
+            essay_vocab, essay_grammar, essay_total16, essay_word_count
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(date) DO UPDATE SET
+            summary_content = excluded.summary_content, summary_structure = excluded.summary_structure,
+            summary_vocab = excluded.summary_vocab, summary_grammar = excluded.summary_grammar,
+            summary_total16 = excluded.summary_total16, summary_word_count = excluded.summary_word_count,
+            essay_content = excluded.essay_content, essay_structure = excluded.essay_structure,
+            essay_vocab = excluded.essay_vocab, essay_grammar = excluded.essay_grammar,
+            essay_total16 = excluded.essay_total16, essay_word_count = excluded.essay_word_count,
+            logged_at = datetime('now')
+        """,
+        (
+            score.date, score.summary_content, score.summary_structure, score.summary_vocab,
+            score.summary_grammar, score.summary_total16, score.summary_word_count,
+            score.essay_content, score.essay_structure, score.essay_vocab, score.essay_grammar,
+            score.essay_total16, score.essay_word_count,
+        ),
+    )
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+# ---------- big-goal countdown (起動画面の「あと◯◯日」。旧Goalタブ廃止後も単独で残す) ----------
 
 DEFAULT_COUNTDOWN_LABEL = "Eiken Pre-1 / CEFR C1 goal (end of study abroad)"
 DEFAULT_COUNTDOWN_TARGET_DATE = date(2026, 11, 30)
@@ -2052,7 +2164,7 @@ def goal_countdown():
     d = {row[0]: row[1] for row in rows}
     label = d.get("countdown_label") or DEFAULT_COUNTDOWN_LABEL
     target = date.fromisoformat(d["countdown_target_date"]) if d.get("countdown_target_date") else DEFAULT_COUNTDOWN_TARGET_DATE
-    days_left = (target - date.today()).days
+    days_left = (target - nz_today()).days
     return {"target_date": target.isoformat(), "days_left": days_left, "label": label}
 
 
@@ -2376,7 +2488,12 @@ def push_check(token: str | None = None):
         raise HTTPException(status_code=500, detail="VAPID keys not configured")
 
     conn = get_connection()
-    now = datetime.now()
+    # due_date/due_time/events.date/triggered_at等はいずれもNZのwall-clock(タイムゾーン
+    # 情報なし)で保存されているため、この関数内の「今」は原則nowで代表させ、NZローカルの
+    # naive datetimeとして扱う(nz_now_naive()参照)。focus_target_end_atだけは例外で、
+    # サーバー時計(UTC)のdatetime.now()同士の絶対時刻比較のため、now_utcを別に使う。
+    now = nz_now_naive()
+    now_utc = datetime.now()
     sent_count = 0
 
     todo_rows = rows_to_dicts(conn.execute(
@@ -2454,35 +2571,35 @@ def push_check(token: str | None = None):
                     "UPDATE activation_logs SET reminded_at = datetime('now') WHERE id = ?", (act["id"],)
                 )
 
-    if int(conn.execute("SELECT CAST(strftime('%H', 'now') AS INTEGER)").fetchone()[0]) >= ACTIVATION_ENCOURAGEMENT_HOUR:
-        today_str = conn.execute("SELECT date('now')").fetchone()[0]
+    if now.hour >= ACTIVATION_ENCOURAGEMENT_HOUR:
+        today_str = nz_today().isoformat()
+        window_start = nz_day_bound(offset_days=-ACTIVATION_ENCOURAGEMENT_WINDOW_DAYS)
+        today_bound = nz_day_bound()
         last_notified_row = conn.execute(
             "SELECT value FROM settings WHERE key = 'activation_encouragement_notified_date'"
         ).fetchone()
         if not last_notified_row or last_notified_row[0] != today_str:
             avg_count = conn.execute(
                 "SELECT COUNT(*) * 1.0 / ? FROM activation_logs "
-                "WHERE triggered_at >= datetime('now', ?, 'start of day') "
-                "AND triggered_at < datetime('now', 'start of day')",
-                (ACTIVATION_ENCOURAGEMENT_WINDOW_DAYS, f"-{ACTIVATION_ENCOURAGEMENT_WINDOW_DAYS} days"),
+                "WHERE triggered_at >= ? AND triggered_at < ?",
+                (ACTIVATION_ENCOURAGEMENT_WINDOW_DAYS, window_start, today_bound),
             ).fetchone()[0]
             today_count = conn.execute(
-                "SELECT COUNT(*) FROM activation_logs WHERE triggered_at >= datetime('now', 'start of day')"
+                "SELECT COUNT(*) FROM activation_logs WHERE triggered_at >= ?", (today_bound,)
             ).fetchone()[0]
             avg_first_min = conn.execute(
                 "SELECT AVG(first_min) FROM ("
                 "SELECT MIN(CAST(strftime('%H', triggered_at) AS INTEGER) * 60 "
                 "+ CAST(strftime('%M', triggered_at) AS INTEGER)) AS first_min "
                 "FROM activation_logs "
-                "WHERE triggered_at >= datetime('now', ?, 'start of day') "
-                "AND triggered_at < datetime('now', 'start of day') "
+                "WHERE triggered_at >= ? AND triggered_at < ? "
                 "GROUP BY date(triggered_at))",
-                (f"-{ACTIVATION_ENCOURAGEMENT_WINDOW_DAYS} days",),
+                (window_start, today_bound),
             ).fetchone()[0]
             today_first_min = conn.execute(
                 "SELECT MIN(CAST(strftime('%H', triggered_at) AS INTEGER) * 60 "
                 "+ CAST(strftime('%M', triggered_at) AS INTEGER)) "
-                "FROM activation_logs WHERE triggered_at >= datetime('now', 'start of day')"
+                "FROM activation_logs WHERE triggered_at >= ?", (today_bound,)
             ).fetchone()[0]
 
             notably_fewer = avg_count >= 1 and today_count <= avg_count * 0.5
@@ -2507,7 +2624,7 @@ def push_check(token: str | None = None):
                     )
 
     now_hm = now.hour * 60 + now.minute
-    today_str = conn.execute("SELECT date('now')").fetchone()[0]
+    today_str = nz_today().isoformat()
 
     if now_hm >= BEDTIME_REMINDER_HOUR * 60 + BEDTIME_REMINDER_MINUTE:
         last_notified_row = conn.execute(
@@ -2564,7 +2681,7 @@ def push_check(token: str | None = None):
     ).fetchall()}
     focus_end_at = focus_rows.get("focus_target_end_at")
     if focus_end_at and focus_rows.get("focus_target_notified") != "1":
-        if datetime.fromisoformat(focus_end_at) <= now:
+        if datetime.fromisoformat(focus_end_at) <= now_utc:
             sent = _send_push_to_all(conn, {
                 "title": "Compass",
                 "body": f"{focus_rows.get('focus_target_subject') or 'Study'}: time's up",
