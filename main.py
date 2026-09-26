@@ -7,7 +7,7 @@ import json
 import os
 import secrets
 import zipfile
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
@@ -385,17 +385,30 @@ def todo_stats():
     total = conn.execute("SELECT COUNT(*) FROM todos WHERE skipped = 0").fetchone()[0]
     done_count = conn.execute("SELECT COUNT(*) FROM todos WHERE done = 1 AND skipped = 0").fetchone()[0]
     skipped_count = conn.execute("SELECT COUNT(*) FROM todos WHERE skipped = 1").fetchone()[0]
-    cur = conn.execute(
-        """
-        SELECT date(completed_at) AS d, COUNT(*) AS c
-        FROM todos
-        WHERE done = 1 AND completed_at >= datetime('now', '-6 days')
-        GROUP BY d
-        ORDER BY d
-        """
+    # completed_atはSQLiteのdatetime('now')で入る「UTC」の時刻なので、そのままdate()で区切ると
+    # NZの午前中(UTCではまだ前日)に完了したToDoが前日の棒に入る。NZの暦日で7日分(今日+過去6日)を
+    # UTCに直して取り出し、日付の振り分けはPython側でNZ時刻に変換してから行う
+    since_utc = (
+        datetime.strptime(nz_day_bound(-6), "%Y-%m-%d %H:%M:%S")
+        .replace(tzinfo=NZ_TZ)
+        .astimezone(timezone.utc)
+        .strftime("%Y-%m-%d %H:%M:%S")
     )
-    daily = rows_to_dicts(cur)
+    rows = conn.execute(
+        "SELECT completed_at FROM todos WHERE done = 1 AND completed_at >= ?", (since_utc,)
+    ).fetchall()
     conn.close()
+    counts: dict[str, int] = {}
+    for (completed_at,) in rows:
+        nz_date = (
+            datetime.strptime(completed_at[:19], "%Y-%m-%d %H:%M:%S")
+            .replace(tzinfo=timezone.utc)
+            .astimezone(NZ_TZ)
+            .date()
+            .isoformat()
+        )
+        counts[nz_date] = counts.get(nz_date, 0) + 1
+    daily = [{"d": d, "c": c} for d, c in sorted(counts.items())]
     rate = round(done_count / total * 100) if total else 0
     return {"total": total, "done": done_count, "skipped": skipped_count, "rate": rate, "daily": daily}
 
@@ -1601,10 +1614,10 @@ def get_screen_budget_params(token: str | None = None):
 
 def _compute_screen_budget_status(conn, date: str) -> dict:
     # dateはJpBlocker/FocusGuardなど呼び出し側のローカル日付("YYYY-MM-DD")を必須で受け取る。
-    # study_logs.logged_at/todos.due_dateはサーバー時刻(UTC)基準の値が混在しており、
-    # とっつーのいるNZ(UTC+12、DST期はUTC+13)とは最大13時間ずれる。ここでは'+12 hours'で
-    # 近似してNZの日付境界に寄せている(DST期は最大1時間分、日付境界付近の記録がずれ得る
-    # 既知の誤差。詳細はObsidian開発ログ参照)。
+    # タイマー経由のstudy_logs.logged_atはクライアントがNZのローカル時刻で送ってくる(app.jsの
+    # localDatetimeNow)ので、date(logged_at)がそのままNZの日付になる。以前はUTCとみなして
+    # '+12 hours'で補正していたが、実際には二重補正になっており、NZの正午以降の勉強が翌日分に
+    # 数えられていた(2026-09-26修正)。
     _apply_due_screen_budget_changes(conn)
     params = _read_screen_budget_params(conn)
 
@@ -1612,7 +1625,7 @@ def _compute_screen_budget_status(conn, date: str) -> dict:
     # 手動ログ入力(タイマーを使わず分数を直接入力)は実績を盛れてしまうため対象外にする。
     study_minutes = conn.execute(
         "SELECT COALESCE(SUM(minutes), 0) FROM study_logs "
-        "WHERE start_trigger IS NOT NULL AND date(logged_at, '+12 hours') = ?",
+        "WHERE start_trigger IS NOT NULL AND date(logged_at) = ?",
         (date,),
     ).fetchone()[0]
 
