@@ -133,6 +133,19 @@ CREATE TABLE IF NOT EXISTS hitotsubashi_writing_scores (
     PRIMARY KEY (date, session)
 );
 
+-- Stack(カードアプリ、2026-09-27〜)から送られる1日・科目ごとの復習成績。Scoresタブに表示する。
+-- 正答率 = correct / reviews(Good・Easyを押した割合)、習得 = 復習間隔21日以上のカード枚数。
+CREATE TABLE IF NOT EXISTS stack_scores (
+    date TEXT NOT NULL,
+    subject TEXT NOT NULL,
+    reviews INTEGER NOT NULL,
+    correct INTEGER NOT NULL,
+    mastered INTEGER NOT NULL,
+    total INTEGER NOT NULL,
+    logged_at TEXT DEFAULT (datetime('now')),
+    PRIMARY KEY (date, subject)
+);
+
 CREATE TABLE IF NOT EXISTS sleep_logs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     bedtime_at TEXT NOT NULL,

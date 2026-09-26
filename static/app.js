@@ -1947,7 +1947,7 @@ function renderActivityHeatmap(byDate) {
 
   const scoreOf = (row) => {
     if (!row) return 0;
-    return row.compass_minutes + row.vocab_minutes + row.drill_count * 3; // drillは1問≒3分相当の重み付け目安
+    return row.compass_minutes + row.vocab_minutes + (row.stack_minutes ?? 0) + row.drill_count * 3; // drillは1問≒3分相当の重み付け目安
   };
   const maxScore = Math.max(1, ...Object.values(byDate).map(scoreOf));
 
@@ -1984,6 +1984,7 @@ function renderActivityHeatmap(byDate) {
       const parts = [];
       if (row?.compass_minutes) parts.push(`Compass ${row.compass_minutes}min`);
       if (row?.vocab_minutes) parts.push(`Vocab ${row.vocab_minutes}min`);
+      if (row?.stack_minutes) parts.push(`Cards ${row.stack_minutes}min`);
       if (row?.drill_count) parts.push(`Drill ${row.drill_count} problems`);
       document.getElementById("activity-heatmap-detail").textContent =
         parts.length ? `${iso}: ${parts.join(" / ")}` : `${iso}: no activity`;
@@ -2674,11 +2675,14 @@ function formatWritingSessionLabel(row) {
 }
 
 async function loadScoresTab() {
-  const [diaryRows, writingRows, hitotsubashiRows] = await Promise.all([
+  const [diaryRows, writingRows, hitotsubashiRows, stackRows] = await Promise.all([
     api("/api/diary-scores?days=30"),
     api("/api/eiken-writing-scores?days=90"),
     api("/api/hitotsubashi-writing-scores?days=90"),
+    api("/api/stack-scores?days=90"),
   ]);
+  lastStackScoreRows = stackRows;
+  renderStackScores(stackRows);
   lastDiaryScoreRows = diaryRows;
   lastHitotsubashiScoreRows = hitotsubashiRows;
   renderDiaryScoreStats(diaryRows);
@@ -2810,6 +2814,75 @@ function renderWritingScoreChart(rows) {
       ${labels}
     </svg>`;
 }
+
+// ---------- Stack(カードアプリ)の成績: 科目ごとの正答率(Good・Easyの割合)と習得数(間隔21日以上) ----------
+
+let stackScoreView = "accuracy"; // "accuracy" | "mastered"
+let lastStackScoreRows = [];
+const STACK_SUBJECT_COLORS = ["#4f7cdb", "#e0a030", "#4a9c72", "#9b6bd6", "#e5555c"];
+
+function stackEscape(s) {
+  return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+}
+
+function renderStackScores(rows) {
+  const statsEl = document.getElementById("stack-score-stats");
+  const container = document.getElementById("stack-score-chart");
+  const legend = document.getElementById("stack-score-legend");
+  if (!rows.length) {
+    statsEl.innerHTML = "";
+    container.innerHTML = `<p class="meta">まだ記録なし(Stackで復習すると自動で入ります)</p>`;
+    legend.innerHTML = "";
+    return;
+  }
+  const subjects = [...new Set(rows.map((r) => r.subject))];
+  const color = (s) => STACK_SUBJECT_COLORS[subjects.indexOf(s) % STACK_SUBJECT_COLORS.length];
+  const dates = [...new Set(rows.map((r) => r.date))].sort();
+
+  // 科目ごとの最新の値(正答率は直近7日の合計から出す。1日だけだと枚数が少なくブレるため)
+  const last = new Date(`${dates[dates.length - 1]}T00:00:00`);
+  last.setDate(last.getDate() - 6);
+  const weekAgo = formatLocalDate(last);
+  statsEl.innerHTML = subjects.map((s) => {
+    const own = rows.filter((r) => r.subject === s);
+    const latest = own[own.length - 1];
+    const recent = own.filter((r) => r.date >= weekAgo);
+    const rev = recent.reduce((n, r) => n + r.reviews, 0);
+    const cor = recent.reduce((n, r) => n + r.correct, 0);
+    const acc = rev ? `${Math.round((cor / rev) * 100)}%` : "--";
+    return `<div class="stat-cell"><span class="stat-label"><span class="legend-dot" style="background:${color(s)};"></span> ${stackEscape(s)} · 7d</span>` +
+      `<span class="stat-value">${acc}</span><span class="stat-label">${latest.mastered}/${latest.total} mastered</span></div>`;
+  }).join("");
+
+  const chartW = 700, chartH = 180, padTop = 10, padBottom = 20, padX = 12;
+  const plotH = chartH - padTop - padBottom;
+  const plotW = chartW - padX * 2;
+  const stepX = dates.length > 1 ? plotW / (dates.length - 1) : 0;
+  const xOf = (d) => padX + dates.indexOf(d) * stepX;
+  const valueOf = (r) => (stackScoreView === "accuracy" ? (r.reviews ? (r.correct / r.reviews) * 100 : null) : r.mastered);
+  const maxV = stackScoreView === "accuracy" ? 100 : Math.max(1, ...rows.map((r) => r.mastered));
+  const yOf = (v) => padTop + plotH - (v / maxV) * plotH;
+
+  const paths = subjects.map((s) => {
+    const pts = rows.filter((r) => r.subject === s).map((r) => [xOf(r.date), valueOf(r)]).filter(([, v]) => v !== null);
+    const d = pts.map(([x, v], i) => `${i === 0 ? "M" : "L"}${x.toFixed(1)},${yOf(v).toFixed(1)}`).join(" ");
+    const dots = pts.map(([x, v]) => `<circle cx="${x.toFixed(1)}" cy="${yOf(v).toFixed(1)}" r="3" fill="${color(s)}"></circle>`).join("");
+    return `<path d="${d}" fill="none" stroke="${color(s)}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>${dots}`;
+  }).join("");
+  const labelEvery = Math.max(1, Math.ceil(dates.length / 5));
+  const labels = dates.map((d, i) => (i % labelEvery !== 0 && i !== dates.length - 1) ? "" :
+    `<text x="${xOf(d).toFixed(1)}" y="${chartH - 4}" font-size="10" fill="var(--text-muted)" text-anchor="middle">${formatMonthDay(d)}</text>`).join("");
+  container.innerHTML = `<svg viewBox="0 0 ${chartW} ${chartH}" width="100%" height="150" preserveAspectRatio="none">${paths}${labels}</svg>`;
+  legend.innerHTML = subjects.map((s) => `<span class="legend-item"><span class="legend-dot" style="background:${color(s)};"></span>${stackEscape(s)}</span>`).join("");
+}
+
+document.querySelectorAll("#stack-score-toggle .period-btn").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    stackScoreView = btn.dataset.view;
+    document.querySelectorAll("#stack-score-toggle .period-btn").forEach((b) => b.classList.toggle("active", b === btn));
+    renderStackScores(lastStackScoreRows);
+  });
+});
 
 function renderHitotsubashiScoreStats(rows) {
   const el = document.getElementById("scores-hitotsubashi-latest");

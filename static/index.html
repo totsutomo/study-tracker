@@ -459,6 +459,20 @@
 
       <div class="chart-card">
         <div class="chart-header-row">
+          <h3>Cards (Stack)</h3>
+          <div class="period-toggle" id="stack-score-toggle">
+            <button type="button" class="period-btn active" data-view="accuracy">Accuracy</button>
+            <button type="button" class="period-btn" data-view="mastered">Mastered</button>
+          </div>
+        </div>
+        <div class="stats-header" id="stack-score-stats"></div>
+        <div id="stack-score-chart"></div>
+        <div class="chart-legend" id="stack-score-legend"></div>
+        <p class="meta">Accuracy = Good / Easy share of reviews · Mastered = cards with an interval of 21+ days</p>
+      </div>
+
+      <div class="chart-card">
+        <div class="chart-header-row">
           <h3>Hitotsubashi writing score</h3>
           <div class="period-toggle" id="hitotsubashi-score-toggle">
             <button type="button" class="period-btn active" data-view="overall">Overall</button>

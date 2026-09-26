@@ -105,6 +105,10 @@ VOCAB_APP_ORIGIN = os.environ.get("VOCAB_APP_ORIGIN", "https://vocab-app-blue-xi
 # クライアントバンドルに渡すため「見えても仕方ない」前提)。
 DRILL_TRACKER_TOKEN = _env_token("DRILL_TRACKER_TOKEN")
 DRILL_TRACKER_ORIGIN = os.environ.get("DRILL_TRACKER_ORIGIN", "https://drill-tracker.onrender.com")
+# Stack(カードアプリ、Vercel、別オリジン)からの復習セッション・成績の自動記録を認証する共有トークン。
+# 信頼境界はVOCAB_APP_TOKENと同じ(クライアントバンドルに埋め込まれる=「見えても仕方ない」前提)。
+STACK_APP_TOKEN = _env_token("STACK_APP_TOKEN")
+STACK_APP_ORIGIN = os.environ.get("STACK_APP_ORIGIN", "https://stack-cards.vercel.app")
 # 美緒専用の承認ページ(/approve)のトークン。DEVICE_TOKENと分けているのは信頼境界が
 # 違うため(こちらは美緒だけが使う想定で、とっつーのAndroid端末は使わない)。
 # 環境変数名は移行前の PIN_CUSTODY_TOKEN のまま据え置いている(Render側の値を
@@ -215,6 +219,24 @@ class VocabAppStudyLogCreate(BaseModel):
     # ような開始〜終了ページ範囲を表示するため(2026-08-31)
     page_start: int | None = None
     page_end: int | None = None
+
+
+class StackStudyLogCreate(BaseModel):
+    # Stackの復習1回分(科目ごと)。start_triggerは "stack:review" として記録する
+    subject: str
+    minutes: int
+    count: int | None = None  # 復習したカード枚数
+    unit: str | None = "cards"
+    logged_at: str | None = None  # "YYYY-MM-DD HH:MM:SS", client(Stack)local time
+
+
+class StackScoreUpsert(BaseModel):
+    date: str  # "YYYY-MM-DD"(Stack側の端末ローカル日付)
+    subject: str
+    reviews: int
+    correct: int
+    mastered: int
+    total: int
 
 
 class DrillTrackerSyncCreate(BaseModel):
@@ -783,6 +805,88 @@ def create_drill_study_log(log: DrillTrackerSyncCreate, token: str | None = None
     return JSONResponse(content={"id": new_id}, headers=_drill_cors_headers())
 
 
+def _stack_cors_headers() -> dict[str, str]:
+    return {
+        "Access-Control-Allow-Origin": STACK_APP_ORIGIN,
+        "Access-Control-Allow-Methods": "POST, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type",
+    }
+
+
+def _check_stack_token(token: str | None) -> None:
+    if not STACK_APP_TOKEN or token != STACK_APP_TOKEN:
+        raise HTTPException(status_code=403, detail="invalid token", headers=_stack_cors_headers())
+
+
+@app.options("/api/study-logs/stack-sync")
+def stack_sync_preflight():
+    return JSONResponse(content=None, headers=_stack_cors_headers())
+
+
+# Stackの復習セッション(科目ごと)を学習ログに記録する。Stack側は届かなかった分をためて後から送り直すため、
+# logged_atには復習した時点の時刻が入ってくる(2026-09-27)。
+@app.post("/api/study-logs/stack-sync")
+def create_stack_study_log(log: StackStudyLogCreate, token: str | None = None):
+    _check_stack_token(token)
+    if not (0 <= log.minutes <= MAX_VOCAB_SESSION_MINUTES):
+        raise HTTPException(status_code=400, detail="minutes out of range", headers=_stack_cors_headers())
+    if log.count is not None and not (0 <= log.count <= MAX_VOCAB_SESSION_COUNT):
+        raise HTTPException(status_code=400, detail="count out of range", headers=_stack_cors_headers())
+    conn = get_connection()
+    if log.logged_at:
+        cur = conn.execute(
+            "INSERT INTO study_logs (subject, minutes, start_trigger, count, unit, logged_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (log.subject, log.minutes, "stack:review", log.count, log.unit, log.logged_at),
+        )
+    else:
+        cur = conn.execute(
+            "INSERT INTO study_logs (subject, minutes, start_trigger, count, unit) VALUES (?, ?, ?, ?, ?)",
+            (log.subject, log.minutes, "stack:review", log.count, log.unit),
+        )
+    conn.commit()
+    new_id = cur.lastrowid
+    conn.close()
+    return JSONResponse(content={"id": new_id}, headers=_stack_cors_headers())
+
+
+@app.options("/api/stack-scores")
+def stack_scores_preflight():
+    return JSONResponse(content=None, headers=_stack_cors_headers())
+
+
+# Stackの1日・科目ごとの成績(正答率・習得数)。同じ日・科目は上書き(その日の最新の値にする)
+@app.post("/api/stack-scores")
+def upsert_stack_score(score: StackScoreUpsert, token: str | None = None):
+    _check_stack_token(token)
+    if score.reviews < 0 or score.correct < 0 or score.correct > score.reviews or score.mastered < 0 or score.total < 0:
+        raise HTTPException(status_code=400, detail="invalid score", headers=_stack_cors_headers())
+    conn = get_connection()
+    conn.execute(
+        """
+        INSERT INTO stack_scores (date, subject, reviews, correct, mastered, total) VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT(date, subject) DO UPDATE SET
+            reviews = excluded.reviews, correct = excluded.correct, mastered = excluded.mastered,
+            total = excluded.total, logged_at = datetime('now')
+        """,
+        (score.date, score.subject, score.reviews, score.correct, score.mastered, score.total),
+    )
+    conn.commit()
+    conn.close()
+    return JSONResponse(content={"ok": True}, headers=_stack_cors_headers())
+
+
+@app.get("/api/stack-scores")
+def list_stack_scores(days: int = 90):
+    conn = get_connection()
+    cur = conn.execute(
+        "SELECT date, subject, reviews, correct, mastered, total FROM stack_scores WHERE date >= ? ORDER BY date ASC, subject ASC",
+        ((nz_today() - timedelta(days=days)).isoformat(),),
+    )
+    result = rows_to_dicts(cur)
+    conn.close()
+    return result
+
+
 # 3アプリ統合ヒートマップ(Studyタブ)用の日次集計。start_triggerのプレフィックスで
 # 発生元アプリを判定する: "vocab-app:*" / "drill-tracker:*" / それ以外はCompass純正
 # (手動記録・フォーカスセッション等)。新規テーブルは作らずstudy_logsだけで完結させる。
@@ -795,8 +899,9 @@ def get_study_heatmap(days: int = 180):
         "SUM(CASE WHEN start_trigger LIKE 'vocab-app:%' THEN minutes ELSE 0 END) AS vocab_minutes, "
         "SUM(CASE WHEN start_trigger LIKE 'drill-tracker:%' THEN COALESCE(count, 0) ELSE 0 END) AS drill_count, "
         "SUM(CASE WHEN start_trigger IS NULL OR "
-        "(start_trigger NOT LIKE 'vocab-app:%' AND start_trigger NOT LIKE 'drill-tracker:%') "
-        "THEN minutes ELSE 0 END) AS compass_minutes "
+        "(start_trigger NOT LIKE 'vocab-app:%' AND start_trigger NOT LIKE 'drill-tracker:%' AND start_trigger NOT LIKE 'stack:%') "
+        "THEN minutes ELSE 0 END) AS compass_minutes, "
+        "SUM(CASE WHEN start_trigger LIKE 'stack:%' THEN minutes ELSE 0 END) AS stack_minutes "
         "FROM study_logs "
         "WHERE date(logged_at) >= ? "
         "GROUP BY d ORDER BY d",
@@ -809,6 +914,7 @@ def get_study_heatmap(days: int = 180):
             "vocab_minutes": row[1] or 0,
             "drill_count": row[2] or 0,
             "compass_minutes": row[3] or 0,
+            "stack_minutes": row[4] or 0,
         }
         for row in rows
     ]
