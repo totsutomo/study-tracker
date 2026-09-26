@@ -440,7 +440,8 @@
     <div class="stats-header">
       <div class="stat-cell"><span class="stat-label">Diary avg (30d)</span><span class="stat-value" id="scores-diary-avg">--</span></div>
       <div class="stat-cell"><span class="stat-label">Diary latest</span><span class="stat-value" id="scores-diary-latest">--</span></div>
-      <div class="stat-cell"><span class="stat-label">Writing (summary / essay)</span><span class="stat-value" id="scores-writing-latest">--</span></div>
+      <div class="stat-cell"><span class="stat-label">Hitotsubashi</span><span class="stat-value" id="scores-hitotsubashi-latest">--</span></div>
+      <div class="stat-cell"><span class="stat-label">Eiken</span><span class="stat-value" id="scores-writing-latest">--</span></div>
     </div>
 
     <div class="chart-grid">
@@ -458,7 +459,19 @@
 
       <div class="chart-card">
         <div class="chart-header-row">
-          <h3>Eiken Pre-1 writing score</h3>
+          <h3>Hitotsubashi writing score</h3>
+          <div class="period-toggle" id="hitotsubashi-score-toggle">
+            <button type="button" class="period-btn active" data-view="overall">Overall</button>
+            <button type="button" class="period-btn" data-view="categories">By category</button>
+          </div>
+        </div>
+        <div id="hitotsubashi-score-chart"></div>
+        <div class="chart-legend" id="hitotsubashi-score-legend"></div>
+      </div>
+
+      <div class="chart-card">
+        <div class="chart-header-row">
+          <h3>Eiken Pre-1 writing score (until 2026-09-26)</h3>
         </div>
         <div id="writing-score-chart"></div>
         <div class="chart-legend">

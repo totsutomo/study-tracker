@@ -2654,10 +2654,12 @@ async function loadCountdown() {
   renderCountdown(c);
 }
 
-// ---------- scores (diary / eiken writing) ----------
+// ---------- scores (diary / hitotsubashi writing / eiken writing) ----------
 
 let diaryScoreView = "overall"; // "overall" | "categories"
 let lastDiaryScoreRows = [];
+let hitotsubashiScoreView = "overall"; // "overall" | "categories"
+let lastHitotsubashiScoreRows = [];
 
 function formatMonthDay(dateStr) {
   const [, m, d] = dateStr.split("-");
@@ -2672,13 +2674,17 @@ function formatWritingSessionLabel(row) {
 }
 
 async function loadScoresTab() {
-  const [diaryRows, writingRows] = await Promise.all([
+  const [diaryRows, writingRows, hitotsubashiRows] = await Promise.all([
     api("/api/diary-scores?days=30"),
     api("/api/eiken-writing-scores?days=90"),
+    api("/api/hitotsubashi-writing-scores?days=90"),
   ]);
   lastDiaryScoreRows = diaryRows;
+  lastHitotsubashiScoreRows = hitotsubashiRows;
   renderDiaryScoreStats(diaryRows);
   renderDiaryScoreChart(diaryRows);
+  renderHitotsubashiScoreStats(hitotsubashiRows);
+  renderHitotsubashiScoreChart(hitotsubashiRows);
   renderWritingScoreStats(writingRows);
   renderWritingScoreChart(writingRows);
 }
@@ -2804,6 +2810,68 @@ function renderWritingScoreChart(rows) {
       ${labels}
     </svg>`;
 }
+
+function renderHitotsubashiScoreStats(rows) {
+  const el = document.getElementById("scores-hitotsubashi-latest");
+  el.textContent = rows.length ? Math.round(rows[rows.length - 1].overall) : "--";
+}
+
+// 一橋ライティングは各観点0-100点。Overallは総合点に出題形式ごとの色の点を重ね、形式別の得意・不得意を見分けられるようにする
+const HITOTSUBASHI_FORMAT_COLORS = { picture: "#e0a030", message: "#4a9c72", choice: "#9b6bd6", opinion: "#e5555c" };
+
+function renderHitotsubashiScoreChart(rows) {
+  const container = document.getElementById("hitotsubashi-score-chart");
+  const legend = document.getElementById("hitotsubashi-score-legend");
+  const legendItem = (color, label) => `<span class="legend-item"><span class="legend-dot" style="background:${color};"></span>${label}</span>`;
+  if (!rows.length) {
+    container.innerHTML = `<p class="meta">まだ記録なし</p>`;
+    legend.innerHTML = "";
+    return;
+  }
+  const chartW = 700, chartH = 180, padTop = 10, padBottom = 20, padX = 12;
+  const plotH = chartH - padTop - padBottom;
+  const plotW = chartW - padX * 2;
+  const stepX = rows.length > 1 ? plotW / (rows.length - 1) : 0;
+  const xs = rows.map((_, i) => padX + i * stepX);
+  const yOf = (v) => padTop + plotH - (v / 100) * plotH;
+
+  const seriesDefs = hitotsubashiScoreView === "overall"
+    ? [{ key: "overall", color: "#4f7cdb", width: 2, label: "Overall" }]
+    : [
+        { key: "content", color: "#4f7cdb", width: 1.5, label: "Content" },
+        { key: "organization", color: "#4a9c72", width: 1.5, label: "Organization" },
+        { key: "language", color: "#e5555c", width: 1.5, label: "Language" },
+      ];
+
+  const paths = seriesDefs.map((s) => {
+    const d = rows.map((r, i) => `${i === 0 ? "M" : "L"}${xs[i].toFixed(1)},${yOf(r[s.key]).toFixed(1)}`).join(" ");
+    return `<path d="${d}" fill="none" stroke="${s.color}" stroke-width="${s.width}" stroke-linecap="round" stroke-linejoin="round"></path>`;
+  }).join("");
+
+  const dots = hitotsubashiScoreView === "overall"
+    ? rows.map((r, i) => `<circle cx="${xs[i].toFixed(1)}" cy="${yOf(r.overall).toFixed(1)}" r="3.5" fill="${HITOTSUBASHI_FORMAT_COLORS[r.format] ?? "#4f7cdb"}"></circle>`).join("")
+    : "";
+
+  const labelEvery = Math.max(1, Math.ceil(rows.length / 5));
+  const labels = rows.map((r, i) => {
+    if (i % labelEvery !== 0 && i !== rows.length - 1) return "";
+    return `<text x="${xs[i].toFixed(1)}" y="${chartH - 4}" font-size="10" fill="var(--text-muted)" text-anchor="middle">${formatWritingSessionLabel(r)}</text>`;
+  }).join("");
+
+  container.innerHTML = `<svg viewBox="0 0 ${chartW} ${chartH}" width="100%" height="150" preserveAspectRatio="none">${paths}${dots}${labels}</svg>`;
+  legend.innerHTML = hitotsubashiScoreView === "overall"
+    ? [["picture", "Picture"], ["message", "Message"], ["choice", "Choice"], ["opinion", "Opinion"]]
+        .map(([f, label]) => legendItem(HITOTSUBASHI_FORMAT_COLORS[f], label)).join("")
+    : seriesDefs.map((s) => legendItem(s.color, s.label)).join("");
+}
+
+document.querySelectorAll("#hitotsubashi-score-toggle .period-btn").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    hitotsubashiScoreView = btn.dataset.view;
+    document.querySelectorAll("#hitotsubashi-score-toggle .period-btn").forEach((b) => b.classList.toggle("active", b === btn));
+    renderHitotsubashiScoreChart(lastHitotsubashiScoreRows);
+  });
+});
 
 document.querySelectorAll("#diary-score-toggle .period-btn").forEach((btn) => {
   btn.addEventListener("click", () => {

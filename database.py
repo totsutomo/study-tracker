@@ -118,6 +118,21 @@ CREATE TABLE IF NOT EXISTS eiken_writing_scores (
     PRIMARY KEY (date, session)
 );
 
+-- 一橋 自由英作文(Obsidian hitotsubashi-writingスキル、2026-09-26〜)の採点結果。英検ライティングの後継。
+-- formatは出題形式(picture/message/choice/opinion)。各観点0-100、overallは3観点の平均。
+CREATE TABLE IF NOT EXISTS hitotsubashi_writing_scores (
+    date TEXT NOT NULL,
+    session INTEGER NOT NULL DEFAULT 1,
+    format TEXT,
+    content REAL NOT NULL,
+    organization REAL NOT NULL,
+    language REAL NOT NULL,
+    overall REAL NOT NULL,
+    word_count INTEGER,
+    logged_at TEXT DEFAULT (datetime('now')),
+    PRIMARY KEY (date, session)
+);
+
 CREATE TABLE IF NOT EXISTS sleep_logs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     bedtime_at TEXT NOT NULL,

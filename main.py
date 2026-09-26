@@ -262,6 +262,17 @@ class EikenWritingScoreCreate(BaseModel):
     essay_word_count: int | None = None
 
 
+class HitotsubashiWritingScoreCreate(BaseModel):
+    date: str  # "YYYY-MM-DD"
+    session: int = 1  # 同日の何回目か(Obsidianのファイル名 YYYY-MM-DD-2.md → 2)
+    format: str | None = None  # picture / message / choice / opinion
+    content: float
+    organization: float
+    language: float
+    overall: float
+    word_count: int | None = None
+
+
 class EventCreate(BaseModel):
     title: str
     category: str | None = None
@@ -2090,8 +2101,8 @@ def cancel_pending_change(change_id: int, token: str | None = None):
     return {"ok": True}
 
 
-# ---------- scores (diary / eiken writing) ----------
-# 採点の実体はObsidian側(diary/eiken-writing skill)のfrontmatter。ここはCompassでグラフ表示する
+# ---------- scores (diary / eiken writing / hitotsubashi writing) ----------
+# 採点の実体はObsidian側(diary/eiken-writing/hitotsubashi-writing skill)のfrontmatter。ここはCompassでグラフ表示する
 # ためのミラーで、採点skillが確定時にPOSTしてくる想定(スキル経由以外での更新はない)。
 
 @app.get("/api/diary-scores")
@@ -2162,6 +2173,41 @@ def upsert_eiken_writing_score(score: EikenWritingScoreCreate):
             score.summary_grammar, score.summary_total16, score.summary_word_count,
             score.essay_content, score.essay_structure, score.essay_vocab, score.essay_grammar,
             score.essay_total16, score.essay_word_count,
+        ),
+    )
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+@app.get("/api/hitotsubashi-writing-scores")
+def list_hitotsubashi_writing_scores(days: int = 90):
+    conn = get_connection()
+    cur = conn.execute(
+        "SELECT * FROM hitotsubashi_writing_scores WHERE date >= ? ORDER BY date ASC, session ASC",
+        ((nz_today() - timedelta(days=days)).isoformat(),),
+    )
+    result = rows_to_dicts(cur)
+    conn.close()
+    return result
+
+
+@app.post("/api/hitotsubashi-writing-scores")
+def upsert_hitotsubashi_writing_score(score: HitotsubashiWritingScoreCreate):
+    conn = get_connection()
+    conn.execute(
+        """
+        INSERT INTO hitotsubashi_writing_scores (
+            date, session, format, content, organization, language, overall, word_count
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(date, session) DO UPDATE SET
+            format = excluded.format, content = excluded.content, organization = excluded.organization,
+            language = excluded.language, overall = excluded.overall, word_count = excluded.word_count,
+            logged_at = datetime('now')
+        """,
+        (
+            score.date, score.session, score.format, score.content, score.organization,
+            score.language, score.overall, score.word_count,
         ),
     )
     conn.commit()
