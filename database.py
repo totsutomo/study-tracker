@@ -98,8 +98,10 @@ CREATE TABLE IF NOT EXISTS diary_scores (
     logged_at TEXT DEFAULT (datetime('now'))
 );
 
+-- sessionは同日の何回目か(1始まり)。Obsidian側のファイル名 YYYY-MM-DD.md → 1、YYYY-MM-DD-2.md → 2 に対応。
 CREATE TABLE IF NOT EXISTS eiken_writing_scores (
-    date TEXT PRIMARY KEY,
+    date TEXT NOT NULL,
+    session INTEGER NOT NULL DEFAULT 1,
     summary_content REAL,
     summary_structure REAL,
     summary_vocab REAL,
@@ -112,7 +114,8 @@ CREATE TABLE IF NOT EXISTS eiken_writing_scores (
     essay_grammar REAL,
     essay_total16 INTEGER,
     essay_word_count INTEGER,
-    logged_at TEXT DEFAULT (datetime('now'))
+    logged_at TEXT DEFAULT (datetime('now')),
+    PRIMARY KEY (date, session)
 );
 
 CREATE TABLE IF NOT EXISTS sleep_logs (
@@ -340,6 +343,44 @@ def _migrate(conn):
             "SELECT date, 'phone', total_minutes, by_app, updated_at FROM screen_time_logs_old"
         )
         conn.execute("DROP TABLE screen_time_logs_old")
+
+    # eiken_writing_scoresをdate単独PKから(date, session)の複合PKへ移行(2026-09-26、1日複数回の練習に対応)。
+    # screen_time_logsと同じリネーム→作り直し→コピー手順。既存行は全て session=1 として移す。
+    eiken_cols = [row[1] for row in conn.execute("PRAGMA table_info(eiken_writing_scores)").fetchall()]
+    if eiken_cols and "session" not in eiken_cols:
+        score_cols = (
+            "summary_content, summary_structure, summary_vocab, summary_grammar, "
+            "summary_total16, summary_word_count, essay_content, essay_structure, "
+            "essay_vocab, essay_grammar, essay_total16, essay_word_count, logged_at"
+        )
+        conn.execute("ALTER TABLE eiken_writing_scores RENAME TO eiken_writing_scores_old")
+        conn.execute(
+            """
+            CREATE TABLE eiken_writing_scores (
+                date TEXT NOT NULL,
+                session INTEGER NOT NULL DEFAULT 1,
+                summary_content REAL,
+                summary_structure REAL,
+                summary_vocab REAL,
+                summary_grammar REAL,
+                summary_total16 INTEGER,
+                summary_word_count INTEGER,
+                essay_content REAL,
+                essay_structure REAL,
+                essay_vocab REAL,
+                essay_grammar REAL,
+                essay_total16 INTEGER,
+                essay_word_count INTEGER,
+                logged_at TEXT DEFAULT (datetime('now')),
+                PRIMARY KEY (date, session)
+            )
+            """
+        )
+        conn.execute(
+            f"INSERT INTO eiken_writing_scores (date, session, {score_cols}) "
+            f"SELECT date, 1, {score_cols} FROM eiken_writing_scores_old"
+        )
+        conn.execute("DROP TABLE eiken_writing_scores_old")
 
     # 犬育成機能を廃止したため、既存環境(ローカルdata.db・本番Turso)に残っているテーブル・設定を掃除する
     conn.execute("DROP TABLE IF EXISTS pet_feedings")

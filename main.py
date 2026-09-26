@@ -247,6 +247,7 @@ class DiaryScoreCreate(BaseModel):
 
 class EikenWritingScoreCreate(BaseModel):
     date: str  # "YYYY-MM-DD"
+    session: int = 1  # 同日の何回目か(Obsidianのファイル名 YYYY-MM-DD-2.md → 2)
     summary_content: float | None = None
     summary_structure: float | None = None
     summary_vocab: float | None = None
@@ -2116,7 +2117,7 @@ def upsert_diary_score(score: DiaryScoreCreate):
 def list_eiken_writing_scores(days: int = 90):
     conn = get_connection()
     cur = conn.execute(
-        "SELECT * FROM eiken_writing_scores WHERE date >= ? ORDER BY date ASC",
+        "SELECT * FROM eiken_writing_scores WHERE date >= ? ORDER BY date ASC, session ASC",
         ((nz_today() - timedelta(days=days)).isoformat(),),
     )
     result = rows_to_dicts(cur)
@@ -2130,11 +2131,11 @@ def upsert_eiken_writing_score(score: EikenWritingScoreCreate):
     conn.execute(
         """
         INSERT INTO eiken_writing_scores (
-            date, summary_content, summary_structure, summary_vocab, summary_grammar,
+            date, session, summary_content, summary_structure, summary_vocab, summary_grammar,
             summary_total16, summary_word_count, essay_content, essay_structure,
             essay_vocab, essay_grammar, essay_total16, essay_word_count
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(date) DO UPDATE SET
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(date, session) DO UPDATE SET
             summary_content = excluded.summary_content, summary_structure = excluded.summary_structure,
             summary_vocab = excluded.summary_vocab, summary_grammar = excluded.summary_grammar,
             summary_total16 = excluded.summary_total16, summary_word_count = excluded.summary_word_count,
@@ -2144,7 +2145,7 @@ def upsert_eiken_writing_score(score: EikenWritingScoreCreate):
             logged_at = datetime('now')
         """,
         (
-            score.date, score.summary_content, score.summary_structure, score.summary_vocab,
+            score.date, score.session, score.summary_content, score.summary_structure, score.summary_vocab,
             score.summary_grammar, score.summary_total16, score.summary_word_count,
             score.essay_content, score.essay_structure, score.essay_vocab, score.essay_grammar,
             score.essay_total16, score.essay_word_count,

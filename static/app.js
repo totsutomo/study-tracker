@@ -2664,6 +2664,13 @@ function formatMonthDay(dateStr) {
   return `${Number(m)}/${Number(d)}`;
 }
 
+// 英検ライティングは1日に複数回練習することがあるので、2回目以降は「9/26②」のように丸数字を付ける
+function formatWritingSessionLabel(row) {
+  const base = formatMonthDay(row.date);
+  const n = row.session ?? 1;
+  return n > 1 && n <= 20 ? base + String.fromCharCode(0x2460 + n - 1) : base;
+}
+
 async function loadScoresTab() {
   const [diaryRows, writingRows] = await Promise.all([
     api("/api/diary-scores?days=30"),
@@ -2785,7 +2792,7 @@ function renderWritingScoreChart(rows) {
   const labelEvery = Math.max(1, Math.ceil(rows.length / 5));
   const labels = rows.map((r, i) => {
     if (i % labelEvery !== 0 && i !== rows.length - 1) return "";
-    return `<text x="${xs[i].toFixed(1)}" y="${chartH - 4}" font-size="10" fill="var(--text-muted)" text-anchor="middle">${formatMonthDay(r.date)}</text>`;
+    return `<text x="${xs[i].toFixed(1)}" y="${chartH - 4}" font-size="10" fill="var(--text-muted)" text-anchor="middle">${formatWritingSessionLabel(r)}</text>`;
   }).join("");
 
   container.innerHTML = `
