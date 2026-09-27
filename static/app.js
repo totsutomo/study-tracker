@@ -167,6 +167,37 @@ async function api(path, options = {}, retries = 3) {
   }
 }
 
+// 上のキャッシュを使ったstale-while-revalidateの汎用版(2026-09-28)。前回取得した内容があれば
+// まずそれでrender→サーバーの最新が届いたらもう一度render。renderは最大2回呼ばれる前提で書くこと。
+// サーバーの方が先に返ってきた場合は、古いキャッシュで上書きしないよう描画を捨てる。
+// サーバー取得に失敗した時は、キャッシュで描けていればエラーにしない(古くても何も出ないよりまし)。
+async function apiCached(path, render) {
+  let fresh = false;
+  let paintedFromCache = false;
+  cacheGet(path).then((data) => {
+    if (fresh || data === undefined) return;
+    try {
+      render(data);
+      paintedFromCache = true;
+    } catch (err) {
+      console.error(`cache render failed: ${path}`, err);
+    }
+  });
+  let data;
+  try {
+    data = await api(path);
+  } catch (err) {
+    if (paintedFromCache) {
+      console.error(`refresh failed, keeping cached view: ${path}`, err);
+      return undefined;
+    }
+    throw err;
+  }
+  fresh = true;
+  render(data);
+  return data;
+}
+
 // フォームの二重送信防止: 送信ボタンをリクエスト中は無効化し、
 // 「反応が無いように見えてもう一度押す」→2重に記録される、を防ぐ。
 function guardedSubmit(form, handler) {
@@ -688,9 +719,10 @@ async function loadTodos() {
 // 期限(due_date/due_time)を過ぎても未完了・未スキップのまま残っているToDoは、次にアプリを
 // 開いた時に警告した上で自動的にスキップ扱いにする(いつまでも一覧に残り続けて埋もれるのを防ぐ)。
 // isOverdue()は既にdone/skippedを除外しているので、ここでの対象はまだ手つかずの期限切れのみ。
+// 戻り値はスキップした件数(呼び出し元が他の表示を取り直すかの判断に使う)
 async function autoSkipOverdueTodos() {
   const overdue = allTodos.filter((t) => !t.done && !t.skipped && isOverdue(t));
-  if (overdue.length === 0) return;
+  if (overdue.length === 0) return 0;
   alert(
     overdue.length === 1
       ? `期限切れのためスキップしました:\n・${overdue[0].title}`
@@ -715,6 +747,7 @@ async function autoSkipOverdueTodos() {
     renderTodos();
   }
   loadTodoStats();
+  return overdue.length;
 }
 
 ["todo-search", "todo-filter-category", "todo-filter-today"].forEach((id) => {
@@ -916,8 +949,22 @@ function colorFor(subjectName) {
   return categoryColorMap[subjectName] || "#6b7280";
 }
 
-async function loadCategories() {
-  const cats = await api("/api/categories");
+// preferCache: 起動時用。前回のカテゴリーが端末に残っていればそれで即描画して返り、
+// 最新の取得は裏で続ける(起動処理全体がこの1往復を待たされないように、2026-09-28)。
+// カテゴリーを編集した直後など、最新を確実に反映したい呼び出し元は従来通りawaitで待てる。
+async function loadCategories({ preferCache = false } = {}) {
+  if (preferCache) {
+    const cached = await cacheGet("/api/categories");
+    if (cached) {
+      applyCategories(cached);
+      api("/api/categories").then(applyCategories).catch((err) => console.error("categories refresh failed:", err));
+      return;
+    }
+  }
+  applyCategories(await api("/api/categories"));
+}
+
+function applyCategories(cats) {
   allCategories = cats;
 
   categoryColorMap = {};
@@ -2135,10 +2182,11 @@ function monthDayLabel(isoDate) {
 const HEATMAP_WEEKS = 18; // 直近18週分(約4ヶ月)。GitHub contribution graph相当
 
 async function loadActivityHeatmap() {
-  const raw = await api(`/api/study-logs/heatmap?days=${HEATMAP_WEEKS * 7 + 7}`);
-  const byDate = {};
-  raw.forEach((row) => { byDate[row.date] = row; });
-  renderActivityHeatmap(byDate);
+  await apiCached(`/api/study-logs/heatmap?days=${HEATMAP_WEEKS * 7 + 7}`, (raw) => {
+    const byDate = {};
+    raw.forEach((row) => { byDate[row.date] = row; });
+    renderActivityHeatmap(byDate);
+  });
 }
 
 // 3アプリ(Compass純正/vocab-app/drill-tracker)分の活動を1マス=1日のGitHub風グリッドで表示。
@@ -2215,8 +2263,14 @@ async function loadStudyChart() {
   }
 }
 
+// 前回キャッシュの描画が遅れて届いた時に、既に切り替え済みの日/週グラフを上書きしないためのガード
 async function loadDailyChart() {
-  const raw = await api("/api/study-logs/daily");
+  await apiCached("/api/study-logs/daily", (raw) => {
+    if (chartGranularity === "day") renderDailyChart(raw);
+  });
+}
+
+function renderDailyChart(raw) {
   const dates = last14Dates();
   const subjectNames = allCategories.map((c) => c.name);
   raw.forEach((row) => {
@@ -2239,7 +2293,12 @@ async function loadDailyChart() {
 }
 
 async function loadWeeklyChart() {
-  const raw = await api("/api/study-logs/weekly");
+  await apiCached("/api/study-logs/weekly", (raw) => {
+    if (chartGranularity !== "day") renderWeeklyChart(raw);
+  });
+}
+
+function renderWeeklyChart(raw) {
   const weeks = lastNWeekStarts(WEEKLY_CHART_WEEKS);
   const subjectNames = allCategories.map((c) => c.name);
   raw.forEach((row) => {
@@ -2348,7 +2407,11 @@ function formatDuration(minutes) {
 }
 
 async function loadGoalProgress() {
-  const p = await api("/api/study-logs/progress");
+  await apiCached("/api/study-logs/progress", renderGoalProgress);
+  loadMoodPanel();
+}
+
+function renderGoalProgress(p) {
   document.getElementById("stat-today").textContent = formatDuration(p.today_minutes);
   document.getElementById("stat-month").textContent = formatDuration(p.month_minutes);
   document.getElementById("stat-total").textContent = formatDuration(p.total_minutes);
@@ -2409,8 +2472,6 @@ async function loadGoalProgress() {
   } else {
     activityEcho.classList.add("hidden");
   }
-
-  loadMoodPanel();
 }
 
 // ---------- screen budget (JpBlocker×FocusGuardのスマホ利用時間連動、B案) ----------
@@ -2784,8 +2845,12 @@ document.getElementById("goal-edit-btn").addEventListener("click", () => {
 // ---------- summary & log list ----------
 
 async function loadStudySummary() {
+  await apiCached("/api/study-logs/summary", renderStudySummary);
+}
+
+function renderStudySummary(rows) {
   // 0分の行(改名前の古いカテゴリー名「数学」など)は情報がないので出さない(2026-09-27)
-  const summary = (await api("/api/study-logs/summary")).filter((s) => s.total_minutes > 0);
+  const summary = rows.filter((s) => s.total_minutes > 0);
   const list = document.getElementById("study-summary");
   list.innerHTML = "";
   if (summary.length === 0) {
@@ -2833,7 +2898,10 @@ function vocabAppDetailText(log) {
 }
 
 async function loadStudyLogList() {
-  const logs = await api("/api/study-logs");
+  await apiCached("/api/study-logs", renderStudyLogList);
+}
+
+function renderStudyLogList(logs) {
   const list = document.getElementById("study-log-list");
   list.innerHTML = "";
   updateStudyLogHeader(logs.length);
@@ -2913,17 +2981,17 @@ async function loadScoresTab() {
     // vocab-appの同期サーバーをCompassのサーバー経由で読みに行く(main.pyの/api/vocab-stats参照)
     ["/api/vocab-stats?days=90", "vocab-stats-chart", renderVocabStats],
   ];
-  const results = await Promise.allSettled(cards.map(([path]) => api(path)));
-  results.forEach((result, i) => {
-    const [path, chartId, render] = cards[i];
-    if (result.status === "fulfilled") {
-      render(result.value);
-    } else {
-      console.error(`scores load failed: ${path}`, result.reason);
+  // 前回の内容を先に描いてからサーバーの最新で描き直す(apiCached)。前回分が出ていれば、
+  // 更新に失敗してもエラー表示で消さずにそのまま残す。
+  await Promise.all(cards.map(async ([path, chartId, render]) => {
+    try {
+      await apiCached(path, render);
+    } catch (err) {
+      console.error(`scores load failed: ${path}`, err);
       document.getElementById(chartId).innerHTML =
-        `<p class="meta">Couldn't load this card (${escapeHtml(String(result.reason?.message || result.reason))})</p>`;
+        `<p class="meta">Couldn't load this card (${escapeHtml(String(err?.message || err))})</p>`;
     }
-  });
+  }));
 }
 
 function renderDiaryScoreStats(rows) {
@@ -4013,9 +4081,14 @@ let calTodosCache = [];
 let calStudyDaysCache = new Set();
 let calActivationDaysCache = new Set();
 let calMinAchievedDaysCache = new Set();
-// 上記キャッシュが現時点でどの月("YYYY-M")のデータを含んでいるかの記録。月⇔週の切り替えのたびに
-// 同じ月を再フェッチしていた無駄をなくすため(2026-08-16)。
-let calCachedMonthKeys = new Set();
+// 月("YYYY-M")ごとの予定・記録マークの手持ちデータ。上のcalXxxCache(描画用)は、今表示している
+// 期間に必要な月の分だけをここから組み立て直したもの(rebuildCalCaches)。以前は描画用キャッシュが
+// 「最後に取った月」の分しか持たず、週表示が月をまたぐ(例: 9/28〜10/4)と取得完了まで画面が
+// 切り替わらなかった(2026-09-28)。月単位で持つことで、手持ちの分は即描画→足りない分は後から埋める。
+const calMonthData = new Map();
+// 同じ月への取得が重なった時に、後から返ってきた古い方の結果で上書きしないための通し番号
+const calMonthFetchSeq = new Map();
+let calTodosFetchSeq = 0;
 const CAL_HOUR_HEIGHT = 52; // px per hour in the week time grid
 
 function timeToMinutes(t) {
@@ -4059,31 +4132,66 @@ function formatCalDetailTitle(dateStr) {
   return dateStr === todayStr() ? `${label} · Today` : label;
 }
 
+function calMonthPaths(key) {
+  const [y, m] = key.split("-").map(Number);
+  return [
+    `/api/events?year=${y}&month=${m}`,
+    `/api/study-logs/days?year=${y}&month=${m}`,
+    `/api/activation-logs/days?year=${y}&month=${m}`,
+    `/api/study-logs/minimum-achieved-days?year=${y}&month=${m}`,
+  ];
+}
+
+// 端末のIndexedDBに前回分が残っていれば、まだ手持ちが無い月にだけ入れる(サーバーの結果は上書きしない)
+async function hydrateCalMonthFromCache(key) {
+  if (calMonthData.has(key)) return false;
+  const [events, studyDays, activationDays, minAchievedDays] = await Promise.all(calMonthPaths(key).map(cacheGet));
+  if (events === undefined || calMonthData.has(key)) return false;
+  calMonthData.set(key, {
+    events,
+    studyDays: studyDays || [],
+    activationDays: activationDays || [],
+    minAchievedDays: minAchievedDays || [],
+  });
+  return true;
+}
+
+async function fetchCalMonth(key) {
+  const seq = (calMonthFetchSeq.get(key) || 0) + 1;
+  calMonthFetchSeq.set(key, seq);
+  const [events, studyDays, activationDays, minAchievedDays] = await Promise.all(calMonthPaths(key).map((p) => api(p)));
+  if (calMonthFetchSeq.get(key) !== seq) return;
+  calMonthData.set(key, { events, studyDays, activationDays, minAchievedDays });
+}
+
+async function fetchCalTodos() {
+  const seq = ++calTodosFetchSeq;
+  const todos = await api("/api/todos");
+  if (seq !== calTodosFetchSeq) return;
+  calTodosCache = todos.filter((t) => t.due_date);
+}
+
+function rebuildCalCaches() {
+  const parts = [...neededCalMonthKeys()].map((k) => calMonthData.get(k)).filter(Boolean);
+  calEventsCache = parts.flatMap((p) => p.events);
+  calStudyDaysCache = new Set(parts.flatMap((p) => p.studyDays));
+  calActivationDaysCache = new Set(parts.flatMap((p) => p.activationDays));
+  calMinAchievedDaysCache = new Set(parts.flatMap((p) => p.minAchievedDays));
+}
+
 // 予定タブは起動時にアクティブでないため後回しにされがちで、実際に開いたときに
 // 空のグリッドがしばらく表示されてから埋まる、という遅さの原因になっていた。
-// 月表示(起動直後の既定値)に限って、ToDoタブと同じくキャッシュから先に描画しておく。
+// ToDoタブと同じく、前回取得したキャッシュから先に描画しておく(月・週どちらでも)。
 async function hydrateCalendarFromCache() {
-  if (calViewMode === "week") return false;
-  const [events, todos, studyDays, activationDays, minAchievedDays] = await Promise.all([
-    cacheGet(`/api/events?year=${calYear}&month=${calMonth}`),
-    cacheGet("/api/todos"),
-    cacheGet(`/api/study-logs/days?year=${calYear}&month=${calMonth}`),
-    cacheGet(`/api/activation-logs/days?year=${calYear}&month=${calMonth}`),
-    cacheGet(`/api/study-logs/minimum-achieved-days?year=${calYear}&month=${calMonth}`),
-  ]);
-  if (!events && !todos) return false;
+  const results = await Promise.all([...neededCalMonthKeys()].map(hydrateCalMonthFromCache));
+  if (!calTodosCache.length) {
+    const todos = await cacheGet("/api/todos");
+    if (todos && !calTodosCache.length) calTodosCache = todos.filter((t) => t.due_date);
+  }
+  if (!results.some(Boolean)) return false;
   try {
-    document.getElementById("cal-month-label").textContent = `${CAL_MONTH_EN[calMonth - 1]} ${calYear}`;
-    calEventsCache = events || [];
-    calTodosCache = (todos || []).filter((t) => t.due_date);
-    calStudyDaysCache = new Set(studyDays || []);
-    calActivationDaysCache = new Set(activationDays || []);
-    calMinAchievedDaysCache = new Set(minAchievedDays || []);
-    document.getElementById("cal-weekday-row").classList.remove("hidden");
-    document.getElementById("cal-grid").classList.remove("hidden");
-    document.getElementById("cal-week-view").classList.add("hidden");
-    renderCalGrid();
-    renderCalDayDetail();
+    updateCalMonthLabel();
+    renderCalendarView();
     return true;
   } catch (err) {
     console.error("hydrate calendar failed:", err);
@@ -4123,6 +4231,7 @@ function updateCalMonthLabel() {
 // グリッド/週タイムグリッドの描画+表示切り替えだけを行う(データ取得はしない)。
 // 既にcalXxxCacheが必要な月をカバーしている場合はloadCalendar()を経由せずこれだけ呼べばいい。
 function renderCalendarView() {
+  rebuildCalCaches();
   const isWeek = calViewMode === "week";
   document.getElementById("cal-weekday-row").classList.toggle("hidden", isWeek);
   document.getElementById("cal-grid").classList.toggle("hidden", isWeek);
@@ -4137,60 +4246,51 @@ function renderCalendarView() {
   renderCalDayDetail();
 }
 
-async function loadCalendar() {
-  loadTodayPanel(); // 予定の追加・編集・削除はすべてここを通るので、ToDoタブ横の「今日の予定」もここで追従させる
-  const monthKeys = neededCalMonthKeys();
+// 1. 手持ち(メモリ→無ければ端末キャッシュ)で即描画 2. サーバーから今の表示期間を取り直して再描画
+// 3. 前後の期間を裏で先読み、の順。予定の追加・編集・削除の後もここを通るので、表示中の期間は毎回必ず取り直す。
+// refreshTodayPanel=false は月/週の移動・切り替えなど、データを変えていない呼び出し用。
+async function loadCalendar({ refreshTodayPanel = true } = {}) {
+  if (refreshTodayPanel) loadTodayPanel(); // 予定の追加・編集・削除はすべてここを通るので、ToDoタブ横の「今日の予定」もここで追従させる
   updateCalMonthLabel();
-  if (calViewMode === "week") {
-    const [eventLists, todos, studyDayLists, activationDayLists, minAchievedDayLists] = await Promise.all([
-      Promise.all(
-        [...monthKeys].map((key) => {
-          const [y, m] = key.split("-").map(Number);
-          return api(`/api/events?year=${y}&month=${m}`);
-        })
-      ),
-      api("/api/todos"),
-      Promise.all(
-        [...monthKeys].map((key) => {
-          const [y, m] = key.split("-").map(Number);
-          return api(`/api/study-logs/days?year=${y}&month=${m}`);
-        })
-      ),
-      Promise.all(
-        [...monthKeys].map((key) => {
-          const [y, m] = key.split("-").map(Number);
-          return api(`/api/activation-logs/days?year=${y}&month=${m}`);
-        })
-      ),
-      Promise.all(
-        [...monthKeys].map((key) => {
-          const [y, m] = key.split("-").map(Number);
-          return api(`/api/study-logs/minimum-achieved-days?year=${y}&month=${m}`);
-        })
-      ),
-    ]);
-    calEventsCache = eventLists.flat();
-    calTodosCache = todos.filter((t) => t.due_date);
-    calStudyDaysCache = new Set(studyDayLists.flat());
-    calActivationDaysCache = new Set(activationDayLists.flat());
-    calMinAchievedDaysCache = new Set(minAchievedDayLists.flat());
-  } else {
-    const [events, todos, studyDays, activationDays, minAchievedDays] = await Promise.all([
-      api(`/api/events?year=${calYear}&month=${calMonth}`),
-      api("/api/todos"),
-      api(`/api/study-logs/days?year=${calYear}&month=${calMonth}`),
-      api(`/api/activation-logs/days?year=${calYear}&month=${calMonth}`),
-      api(`/api/study-logs/minimum-achieved-days?year=${calYear}&month=${calMonth}`),
-    ]);
-    calEventsCache = events;
-    calTodosCache = todos.filter((t) => t.due_date);
-    calStudyDaysCache = new Set(studyDays);
-    calActivationDaysCache = new Set(activationDays);
-    calMinAchievedDaysCache = new Set(minAchievedDays);
+  const monthKeys = [...neededCalMonthKeys()];
+  if (monthKeys.some((k) => !calMonthData.has(k))) {
+    await Promise.all(monthKeys.map(hydrateCalMonthFromCache));
   }
-
-  calCachedMonthKeys = monthKeys;
   renderCalendarView();
+
+  await Promise.all([fetchCalTodos(), ...monthKeys.map(fetchCalMonth)]);
+  renderCalendarView();
+  scheduleCalPrefetch();
+}
+
+// 隣の月(週表示なら前後の週が含まれる月)を先に取っておき、←→やスワイプで移動した瞬間に描けるようにする。
+// 起動直後の一斉読み込みと競合しないよう少し遅らせ、手持ちがある月は取り直さない
+// (表示した時点でloadCalendarが取り直すので、ここで古くても実害はない)。
+let calPrefetchTimer = null;
+function scheduleCalPrefetch() {
+  clearTimeout(calPrefetchTimer);
+  calPrefetchTimer = setTimeout(() => {
+    const keys = new Set();
+    if (calViewMode === "week") {
+      [addDaysToDate(calWeekStart, -7), addDaysToDate(calWeekStart, 13)].forEach((d) => {
+        const dt = new Date(d + "T00:00:00");
+        keys.add(`${dt.getFullYear()}-${dt.getMonth() + 1}`);
+      });
+    } else {
+      [-1, 1].forEach((delta) => {
+        const dt = new Date(calYear, calMonth - 1 + delta, 1);
+        keys.add(`${dt.getFullYear()}-${dt.getMonth() + 1}`);
+      });
+    }
+    keys.forEach((k) => {
+      if (calMonthData.has(k)) return;
+      fetchCalMonth(k)
+        .then(() => {
+          if (neededCalMonthKeys().has(k)) renderCalendarView();
+        })
+        .catch((err) => console.error(`calendar prefetch failed: ${k}`, err));
+    });
+  }, 1500);
 }
 
 // セル幅に余裕のあるPC(md+)では、1件+「+N件」に丸めず何件かそのまま表示できる。
@@ -4529,7 +4629,7 @@ function calGoPrev() {
     }
   }
   selectedCalDate = defaultCalSelection();
-  loadCalendar();
+  loadCalendar({ refreshTodayPanel: false });
 }
 
 function calGoNext() {
@@ -4543,7 +4643,7 @@ function calGoNext() {
     }
   }
   selectedCalDate = defaultCalSelection();
-  loadCalendar();
+  loadCalendar({ refreshTodayPanel: false });
 }
 
 document.getElementById("cal-prev").addEventListener("click", calGoPrev);
@@ -4600,16 +4700,9 @@ document.querySelectorAll("#cal-view-toggle .cal-view-btn").forEach((btn) => {
       calYear = anchor.getFullYear();
       calMonth = anchor.getMonth() + 1;
     }
-    // 月⇔週の切り替え先が既にキャッシュ済みの月なら、APIを叩き直さず描画だけやり直す
-    // (切り替えるたびに毎回全件再取得していたのが「切り替えが遅い」の原因だった、2026-08-16)。
-    const needed = neededCalMonthKeys();
-    const alreadyCached = [...needed].every((k) => calCachedMonthKeys.has(k));
-    updateCalMonthLabel();
-    if (alreadyCached) {
-      renderCalendarView();
-    } else {
-      loadCalendar();
-    }
+    // 手持ちのデータで即座に描き替え、足りない月だけ後から埋める(loadCalendar参照)。
+    // 以前は足りない月があると取得完了まで画面が切り替わらなかった(2026-09-28)。
+    loadCalendar({ refreshTodayPanel: false });
   });
 });
 
@@ -5148,7 +5241,9 @@ async function hydrateFromCache() {
   }
   hydrateCalendarFromCache(); // 予定タブを開いた瞬間に空グリッドが見えないよう先読み。critical groupは待たない
 
-  await loadCategories(); // study-buttons and the chart's subject list depend on categories being loaded first
+  // study-buttons and the chart's subject list depend on categories being loaded first.
+  // 前回分が端末にあればそれで先に進む(最新の取得は裏で続く)。
+  await loadCategories({ preferCache: true });
   restoreSession();
   startPeerSessionPolling(); // "studying on another device" banner; own timer (if any) already restored above
   // PC/タブレットの利用時間はこの端末を操作していなくても裏で増えていくため、
@@ -5156,17 +5251,11 @@ async function hydrateFromCache() {
   // peer-session-bannerと同じ30秒ポーリングで補う。
   setInterval(loadScreenBudget, 30000);
 
-  // 起動画面は「最初に表示されるToDoタブに必要な分」だけ待って閉じる。残り12件は起動画面の裏でバックグラウンド読み込みを続け、届き次第
-  // 各セクションに反映される。以前は15件すべてが揃うまで真っ暗な起動画面のままだったため、
-  // 体感の読み込み時間が実際より長くなっていた。キャッシュがあれば上でスピナーは既に
-  // 消えているが、ここで最新データに必ず上書きするので正しさは変わらない。
-  const criticalResults = await Promise.allSettled([loadTodos(), loadTodoStats()]);
-  criticalResults.filter((r) => r.status === "rejected").forEach((r) => console.error("init load failed:", r.reason));
-  document.getElementById("boot-loading")?.classList.add("hidden");
-
-  await autoSkipOverdueTodos();
-
-  const backgroundResults = await Promise.allSettled([
+  // 以前は「ToDo→期限切れスキップ→残り15件」と段階ごとに前の完了を待っていたため、Scores・
+  // 勉強ログ・カレンダーは最初の2段が終わるまで読み込みが始まりすらしなかった(2026-09-28)。
+  // 今は全部同時に読み始め、起動画面だけは最初に見えるToDoタブの分が揃った時点で閉じる。
+  const critical = Promise.allSettled([loadTodos(), loadTodoStats()]);
+  const background = Promise.allSettled([
     loadTodayPanel(),
     loadStudySummary(),
     loadStudyLogList(),
@@ -5181,8 +5270,19 @@ async function hydrateFromCache() {
     loadActivationPostReturnStats(),
     loadActivationMoodReasons(),
     loadSleepActive(),
-    loadCalendar(),
+    loadCalendar({ refreshTodayPanel: false }),
   ]);
+
+  const criticalResults = await critical;
+  criticalResults.filter((r) => r.status === "rejected").forEach((r) => console.error("init load failed:", r.reason));
+  document.getElementById("boot-loading")?.classList.add("hidden");
+
+  // スキップしたToDoは「今日の予定」やカレンダーにも出ているので、それらは同時読み込みの後で取り直す
+  if (await autoSkipOverdueTodos()) {
+    background.then(() => loadCalendar());
+  }
+
+  const backgroundResults = await background;
   backgroundResults.filter((r) => r.status === "rejected").forEach((r) => console.error("init load failed:", r.reason));
 
   // 就寝リマインダーpush(main.pyのbedtime-reminder)のタップから、アプリ未起動時は
