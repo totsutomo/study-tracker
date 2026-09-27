@@ -25,3 +25,5 @@ services:
         sync: false
       - key: VOCAB_APP_ORIGIN
         sync: false
+      - key: VOCAB_APP_SYNC_TOKEN
+        sync: false

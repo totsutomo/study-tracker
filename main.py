@@ -6,6 +6,9 @@ import io
 import json
 import os
 import secrets
+import time
+import urllib.error
+import urllib.request
 import zipfile
 from datetime import date, datetime, timedelta, timezone
 from urllib.parse import quote
@@ -100,6 +103,10 @@ VOCAB_APP_TOKEN = _env_token("VOCAB_APP_TOKEN")
 # 全体に許可すると、todos/events/pending-changes等トークンなしの既存エンドポイントまで
 # 一括でvocab-appの生JSから読み書き可能になってしまうため、意図的にグローバル許可はしない)。
 VOCAB_APP_ORIGIN = os.environ.get("VOCAB_APP_ORIGIN", "https://vocab-app-blue-xi.vercel.app")
+# 逆向き(Compass→vocab-app)の読み取り用。ScoresタブのVocabカードが、vocab-appの同期サーバー
+# (/api/sync, /api/sync-activity)から単語の習得状況と評価ボタンの記録を取ってくる(2026-09-28)。
+# vocab-app側のSYNC_TOKEN(=VITE_SYNC_TOKEN)と同じ値。未設定ならカードに「未設定」と出すだけ
+VOCAB_APP_SYNC_TOKEN = _env_token("VOCAB_APP_SYNC_TOKEN")
 # drill-tracker(Render、別オリジン)からのattempt自動記録を認証する共有トークン。
 # 用途・信頼境界はVOCAB_APP_TOKENと同じ(サーバー側だがdrill-tracker側でconfig.js経由で
 # クライアントバンドルに渡すため「見えても仕方ない」前提)。
@@ -390,6 +397,18 @@ def next_occurrence(base: date, recurrence: str) -> date | None:
     return None
 
 
+def next_due_after_close(due_date: str | None, recurrence: str) -> date | None:
+    """完了/スキップした繰り返しtodoの次回分の期限日。
+    期限が今日以降なら「期限の翌日以降」の最初の該当曜日。期限が過去(期限切れの自動スキップ等)
+    なら「今日を含む」最初の該当曜日。以前はmax(期限, 今日)の翌日から探していたため、
+    日付が変わった直後に前日分を自動スキップすると今日の分が飛ばされ明日の分が作られていた(2026-09-28)。"""
+    today = nz_today()
+    base = date.fromisoformat(due_date) if due_date else today
+    if base < today:
+        return next_occurrence(today - timedelta(days=1), recurrence)
+    return next_occurrence(base, recurrence)
+
+
 # ---------- todos ----------
 
 @app.get("/api/todos")
@@ -543,9 +562,7 @@ def toggle_todo(todo_id: int):
         (new_done, todo_id),
     )
     if new_done and recurrence:
-        base = date.fromisoformat(due_date) if due_date else nz_today()
-        base = max(base, nz_today())
-        next_due = next_occurrence(base, recurrence)
+        next_due = next_due_after_close(due_date, recurrence)
         if next_due is not None:
             conn.execute(
                 "INSERT INTO todos (title, category, priority, due_date, due_time, recurrence, notify_offset_minutes, note) "
@@ -582,9 +599,7 @@ def skip_todo(todo_id: int, reason: str | None = None):
     # 完了(toggle_todo)と同じ扱い: スキップも「この回は終わり」を意味するので、
     # 繰り返し予定なら次回分を生成する(このtodoを消さずに繰り越さない、というのが要件のため)
     if new_skipped and recurrence:
-        base = date.fromisoformat(due_date) if due_date else nz_today()
-        base = max(base, nz_today())
-        next_due = next_occurrence(base, recurrence)
+        next_due = next_due_after_close(due_date, recurrence)
         if next_due is not None:
             conn.execute(
                 "INSERT INTO todos (title, category, priority, due_date, due_time, recurrence, notify_offset_minutes, note) "
@@ -901,6 +916,73 @@ def list_stack_scores(days: int = 90):
     result = rows_to_dicts(cur)
     conn.close()
     return result
+
+
+# vocab-appの統計(ScoresタブのVocabカード)。Stackのように向こうから毎日送ってもらう方式にしなかったのは、
+# 習得状況は単語データから、評価の割合はvocab-app側に残る日別記録からいつでも計算し直せるため
+# (DBに写しを持つ必要がなく、Renderが止まっている間の分も欠けない)。
+VOCAB_MATURE_INTERVAL_DAYS = 21  # vocab-app src/types.tsのMATURE_INTERVAL_DAYSと揃える
+VOCAB_STATS_CACHE_SECONDS = 60  # タブを開き直すたびに単語データ全体を取りに行かないように
+_vocab_stats_cache: dict = {"at": 0.0, "value": None}
+
+
+def _fetch_vocab_app_json(path: str) -> dict:
+    req = urllib.request.Request(
+        f"{VOCAB_APP_ORIGIN}{path}", headers={"Authorization": f"Bearer {VOCAB_APP_SYNC_TOKEN}"}
+    )
+    with urllib.request.urlopen(req, timeout=15) as res:
+        return json.loads(res.read().decode("utf-8"))
+
+
+def _vocab_rating_days(rating_log: dict, days: int) -> list[dict]:
+    # ratingLogの形: { "YYYY-MM-DD": { 端末ID: { at, r: [again, hard, good, easy], l: [同] } } }
+    # r=卒業済みカードへの評価、l=新規・学習中カードへの評価。vocab-appのgoodEasyRateと同じく両方を合算する
+    cutoff = (nz_today() - timedelta(days=days)).isoformat()
+    rows = []
+    for day in sorted(rating_log):
+        if day < cutoff:
+            continue
+        counts = [0, 0, 0, 0]
+        for entry in rating_log[day].values():
+            for key in ("r", "l"):
+                for i, n in enumerate((entry.get(key) or [])[:4]):
+                    counts[i] += n or 0
+        total = sum(counts)
+        if total:
+            rows.append({"date": day, "again": counts[0], "hard": counts[1], "good": counts[2], "easy": counts[3], "total": total})
+    return rows
+
+
+@app.get("/api/vocab-stats")
+def vocab_stats(days: int = 90):
+    if not VOCAB_APP_SYNC_TOKEN:
+        return {"configured": False}
+    now = time.time()
+    cached = _vocab_stats_cache["value"]
+    if cached is None or now - _vocab_stats_cache["at"] > VOCAB_STATS_CACHE_SECONDS:
+        try:
+            words = _fetch_vocab_app_json("/api/sync").get("words") or []
+            activity = _fetch_vocab_app_json("/api/sync-activity")
+        except (urllib.error.URLError, TimeoutError, ValueError) as e:
+            raise HTTPException(status_code=502, detail=f"vocab-app unreachable: {e}")
+        new = learning = mastered = 0
+        for w in words:
+            if w.get("isNew"):
+                new += 1
+            elif w.get("learningPhase") is None and (w.get("interval") or 0) >= VOCAB_MATURE_INTERVAL_DAYS:
+                mastered += 1
+            else:
+                learning += 1
+        cached = {
+            "words": {"total": len(words), "new": new, "learning": learning, "mastered": mastered},
+            "rating_log": activity.get("ratingLog") or {},
+        }
+        _vocab_stats_cache.update(at=now, value=cached)
+    return {
+        "configured": True,
+        "words": cached["words"],
+        "ratings": _vocab_rating_days(cached["rating_log"], days),
+    }
 
 
 # 3アプリ統合ヒートマップ(Studyタブ)用の日次集計。start_triggerのプレフィックスで

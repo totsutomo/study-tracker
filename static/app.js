@@ -2910,6 +2910,8 @@ async function loadScoresTab() {
       lastStackScoreRows = rows;
       renderStackScores(rows);
     }],
+    // vocab-appの同期サーバーをCompassのサーバー経由で読みに行く(main.pyの/api/vocab-stats参照)
+    ["/api/vocab-stats?days=90", "vocab-stats-chart", renderVocabStats],
   ];
   const results = await Promise.allSettled(cards.map(([path]) => api(path)));
   results.forEach((result, i) => {
@@ -3055,6 +3057,78 @@ document.querySelectorAll("#stack-score-toggle .period-btn").forEach((btn) => {
     renderStackScores(lastStackScoreRows);
   });
 });
+
+// vocab-appの統計タブ(Mastery breakdown / Good・Easy)と同じ区分・同じ色
+const VOCAB_MASTERY_SEGMENTS = [
+  ["new", "New", "#9aa0a6"],
+  ["learning", "Learning", "#38bdf8"],
+  ["mastered", "Mastered", "#10b981"],
+];
+
+function renderVocabStats(data) {
+  const cellsEl = document.getElementById("vocab-stats-cells");
+  const barEl = document.getElementById("vocab-mastery-bar");
+  const container = document.getElementById("vocab-stats-chart");
+  if (!data.configured) {
+    cellsEl.innerHTML = "";
+    barEl.innerHTML = "";
+    container.innerHTML = `<p class="meta">vocab-appとの接続が未設定(サーバーの環境変数VOCAB_APP_SYNC_TOKENにvocab-appのSYNC_TOKENを入れると表示されます)</p>`;
+    return;
+  }
+  const { words, ratings } = data;
+  const pct = (n, d) => (d ? `${Math.round((n / d) * 100)}%` : "--");
+  // 1日だけだと枚数が少なくブレるので、Stackカードと同じく直近7日の合計から出す
+  const weekAgoDate = new Date();
+  weekAgoDate.setDate(weekAgoDate.getDate() - 6);
+  const weekAgo = formatLocalDate(weekAgoDate);
+  const recent = ratings.filter((r) => r.date >= weekAgo);
+  const recentTotal = recent.reduce((n, r) => n + r.total, 0);
+  const recentGood = recent.reduce((n, r) => n + r.good + r.easy, 0);
+  cellsEl.innerHTML = [
+    ["Words", words.total, ""],
+    ["Mastered", words.mastered, pct(words.mastered, words.total)],
+    ["Good / Easy · 7d", pct(recentGood, recentTotal), recentTotal ? `${recentTotal} ratings` : ""],
+  ].map(([label, value, sub]) =>
+    `<div class="stat-cell"><span class="stat-label">${label}</span><span class="stat-value">${value}</span>` +
+    (sub ? `<span class="stat-label">${sub}</span>` : "") + `</div>`).join("");
+
+  const segs = VOCAB_MASTERY_SEGMENTS.map(([key, label, color]) => ({ label, color, count: words[key] }));
+  barEl.innerHTML = words.total
+    ? `<div style="display:flex;height:10px;border-radius:5px;overflow:hidden;margin:8px 0 4px;">` +
+      segs.filter((s) => s.count).map((s) =>
+        `<div title="${s.label} ${s.count}" style="flex:${s.count};background:${s.color};"></div>`).join("") +
+      `</div><div class="chart-legend">` +
+      segs.map((s) => `<span class="legend-item"><span class="legend-dot" style="background:${s.color};"></span>${s.label} ${s.count}</span>`).join("") +
+      `</div>`
+    : "";
+
+  if (!ratings.length) {
+    container.innerHTML = `<p class="meta">まだ評価の記録なし(vocab-appで復習すると入ります)</p>`;
+    return;
+  }
+  const chartW = 700, chartH = 180, padTop = 10, padBottom = 20, padX = 12;
+  const plotH = chartH - padTop - padBottom;
+  const plotW = chartW - padX * 2;
+  const stepX = ratings.length > 1 ? plotW / (ratings.length - 1) : 0;
+  // 1日分しかない時は線が引けないので、点を真ん中に置く
+  const xOf = (i) => (ratings.length > 1 ? padX + i * stepX : chartW / 2);
+  const yOf = (r) => padTop + plotH - ((r.good + r.easy) / r.total) * plotH;
+  const color = "#10b981";
+  const d = ratings.map((r, i) => `${i === 0 ? "M" : "L"}${xOf(i).toFixed(1)},${yOf(r).toFixed(1)}`).join(" ");
+  const dots = ratings.map((r, i) =>
+    `<circle cx="${xOf(i).toFixed(1)}" cy="${yOf(r).toFixed(1)}" r="3" fill="${color}"><title>${r.date}: ${pct(r.good + r.easy, r.total)} (${r.total})</title></circle>`).join("");
+  const labelEvery = Math.max(1, Math.ceil(ratings.length / 5));
+  const labels = ratings.map((r, i) => (i % labelEvery !== 0 && i !== ratings.length - 1) ? "" :
+    `<text x="${xOf(i).toFixed(1)}" y="${chartH - 4}" font-size="10" fill="var(--text-muted)" text-anchor="middle">${formatMonthDay(r.date)}</text>`).join("");
+  // 線1本だけだと高さが何%か読めないので、50%・100%の目盛り線を薄く引く
+  const grid = [50, 100].map((v) => {
+    const y = padTop + plotH - (v / 100) * plotH;
+    return `<line x1="${padX}" x2="${chartW - padX}" y1="${y}" y2="${y}" stroke="var(--border)" stroke-dasharray="3 3"></line>` +
+      `<text x="${padX}" y="${y - 3}" font-size="10" fill="var(--text-muted)">${v}%</text>`;
+  }).join("");
+  container.innerHTML = `<svg viewBox="0 0 ${chartW} ${chartH}" width="100%" height="150" preserveAspectRatio="none">${grid}` +
+    `<path d="${d}" fill="none" stroke="${color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>${dots}${labels}</svg>`;
+}
 
 function renderHitotsubashiScoreStats(rows) {
   const el = document.getElementById("scores-hitotsubashi-latest");

@@ -1446,6 +1446,13 @@ body.focus-open #tabbar {
   box-sizing: border-box;
 }
 
+/* カード下の補足説明。これまで未定義で本文と同じ大きさになり、グラフより目立っていた */
+.chart-card > p.meta {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin: 6px 0 0;
+}
+
 .chart-grid {
   display: flex;
   flex-direction: column;
