@@ -2887,7 +2887,7 @@ async function loadCountdown() {
   renderCountdown(c);
 }
 
-// ---------- scores (diary / hitotsubashi writing / eiken writing) ----------
+// ---------- scores (diary / hitotsubashi writing / stack) ----------
 
 let diaryScoreView = "overall"; // "overall" | "categories"
 let lastDiaryScoreRows = [];
@@ -2899,7 +2899,7 @@ function formatMonthDay(dateStr) {
   return `${Number(m)}/${Number(d)}`;
 }
 
-// 英検ライティングは1日に複数回練習することがあるので、2回目以降は「9/26②」のように丸数字を付ける
+// 一橋ライティングは1日に複数回練習することがあるので、2回目以降は「9/26②」のように丸数字を付ける
 function formatWritingSessionLabel(row) {
   const base = formatMonthDay(row.date);
   const n = row.session ?? 1;
@@ -2910,14 +2910,11 @@ async function loadScoresTab() {
   // 以前はPromise.allで4本まとめて待っていたため、1本でも失敗(例: サーバー再起動前で新APIが404)
   // するとタブ全体が空になっていた(2026-09-27)。カードごとに独立して読み込み、失敗したカードにだけ理由を出す。
   const cards = [
-    ["/api/diary-scores?days=30", "diary-score-chart", (rows) => {
+    // グラフは全期間(採点を遡って追加した7〜8月分も見えるように)、平均値は直近30日のまま
+    ["/api/diary-scores?days=3650", "diary-score-chart", (rows) => {
       lastDiaryScoreRows = rows;
       renderDiaryScoreStats(rows);
       renderDiaryScoreChart(rows);
-    }],
-    ["/api/eiken-writing-scores?days=90", "writing-score-chart", (rows) => {
-      renderWritingScoreStats(rows);
-      renderWritingScoreChart(rows);
     }],
     ["/api/hitotsubashi-writing-scores?days=90", "hitotsubashi-score-chart", (rows) => {
       lastHitotsubashiScoreRows = rows;
@@ -2950,19 +2947,12 @@ function renderDiaryScoreStats(rows) {
     latestEl.textContent = "--";
     return;
   }
-  const avg = rows.reduce((sum, r) => sum + r.overall, 0) / rows.length;
-  avgEl.textContent = Math.round(avg);
+  const cutoff = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
+  const recent = rows.filter((r) => r.date >= cutoff);
+  avgEl.textContent = recent.length
+    ? Math.round(recent.reduce((sum, r) => sum + r.overall, 0) / recent.length)
+    : "--";
   latestEl.textContent = Math.round(rows[rows.length - 1].overall);
-}
-
-function renderWritingScoreStats(rows) {
-  const el = document.getElementById("scores-writing-latest");
-  if (!rows.length) {
-    el.textContent = "--";
-    return;
-  }
-  const latest = rows[rows.length - 1];
-  el.textContent = `${latest.summary_total16 ?? "--"} · ${latest.essay_total16 ?? "--"}`;
 }
 
 function renderDiaryScoreChart(rows) {
@@ -3010,58 +3000,6 @@ function renderDiaryScoreChart(rows) {
   }).join("");
 
   container.innerHTML = `<svg viewBox="0 0 ${chartW} ${chartH}" width="100%" height="150" preserveAspectRatio="none">${paths}${dots}${labels}</svg>`;
-}
-
-function renderWritingScoreChart(rows) {
-  const container = document.getElementById("writing-score-chart");
-  if (!rows.length) {
-    container.innerHTML = `<p class="meta">まだ記録なし</p>`;
-    return;
-  }
-  const chartW = 700, chartH = 180, padTop = 10, padBottom = 20, padX = 12;
-  const plotH = chartH - padTop - padBottom;
-  const plotW = chartW - padX * 2;
-  const stepX = rows.length > 1 ? plotW / (rows.length - 1) : 0;
-  const xs = rows.map((_, i) => padX + i * stepX);
-
-  function seriesPath(key) {
-    let d = "";
-    let drawing = false;
-    rows.forEach((r, i) => {
-      const v = r[key];
-      if (v == null) { drawing = false; return; }
-      const y = padTop + plotH - (v / 16) * plotH;
-      d += `${drawing ? "L" : "M"}${xs[i].toFixed(1)},${y.toFixed(1)} `;
-      drawing = true;
-    });
-    return d.trim();
-  }
-  function seriesDots(key, color) {
-    return rows.map((r, i) => {
-      const v = r[key];
-      if (v == null) return "";
-      const y = padTop + plotH - (v / 16) * plotH;
-      return `<circle cx="${xs[i].toFixed(1)}" cy="${y.toFixed(1)}" r="3.5" fill="${color}"></circle>`;
-    }).join("");
-  }
-
-  const summaryPath = seriesPath("summary_total16");
-  const essayPath = seriesPath("essay_total16");
-
-  const labelEvery = Math.max(1, Math.ceil(rows.length / 5));
-  const labels = rows.map((r, i) => {
-    if (i % labelEvery !== 0 && i !== rows.length - 1) return "";
-    return `<text x="${xs[i].toFixed(1)}" y="${chartH - 4}" font-size="10" fill="var(--text-muted)" text-anchor="middle">${formatWritingSessionLabel(r)}</text>`;
-  }).join("");
-
-  container.innerHTML = `
-    <svg viewBox="0 0 ${chartW} ${chartH}" width="100%" height="150" preserveAspectRatio="none">
-      ${summaryPath ? `<path d="${summaryPath}" fill="none" stroke="#4a9c72" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>` : ""}
-      ${essayPath ? `<path d="${essayPath}" fill="none" stroke="#4f7cdb" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>` : ""}
-      ${seriesDots("summary_total16", "#4a9c72")}
-      ${seriesDots("essay_total16", "#4f7cdb")}
-      ${labels}
-    </svg>`;
 }
 
 // ---------- Stack(カードアプリ)の成績: 科目ごとの正答率(Good・Easyの割合)と習得数(間隔21日以上) ----------
