@@ -413,11 +413,20 @@ def list_todos():
 @app.get("/api/todos/stats")
 def todo_stats():
     conn = get_connection()
-    # skipped(スキップ済み)は「やらないと決めた」ものなので達成率の分母から除外する。
-    # 含めてしまうと消化率が下がり続け、スキップ機能を作った意味(all-or-nothing対策)が薄れる
-    total = conn.execute("SELECT COUNT(*) FROM todos WHERE skipped = 0").fetchone()[0]
+    # 自分でスキップしたもの(skip_reason IS NULL)は「やらないと決めた」ものなので達成率の分母から除外する。
+    # 含めてしまうと消化率が下がり続け、スキップ機能を作った意味(all-or-nothing対策)が薄れる。
+    # 一方、期限切れで自動スキップされたもの(skip_reason='overdue')は「やり損ねた」なので分母に残す
+    # (2026-09-27。それ以前の自動スキップは区別できないため、従来通り除外扱いのまま)
+    total = conn.execute(
+        "SELECT COUNT(*) FROM todos WHERE skipped = 0 OR skip_reason = 'overdue'"
+    ).fetchone()[0]
     done_count = conn.execute("SELECT COUNT(*) FROM todos WHERE done = 1 AND skipped = 0").fetchone()[0]
-    skipped_count = conn.execute("SELECT COUNT(*) FROM todos WHERE skipped = 1").fetchone()[0]
+    skipped_count = conn.execute(
+        "SELECT COUNT(*) FROM todos WHERE skipped = 1 AND COALESCE(skip_reason, '') != 'overdue'"
+    ).fetchone()[0]
+    missed_count = conn.execute(
+        "SELECT COUNT(*) FROM todos WHERE skipped = 1 AND skip_reason = 'overdue'"
+    ).fetchone()[0]
     # completed_atはSQLiteのdatetime('now')で入る「UTC」の時刻なので、そのままdate()で区切ると
     # NZの午前中(UTCではまだ前日)に完了したToDoが前日の棒に入る。NZの暦日で7日分(今日+過去6日)を
     # UTCに直して取り出し、日付の振り分けはPython側でNZ時刻に変換してから行う
@@ -443,7 +452,14 @@ def todo_stats():
         counts[nz_date] = counts.get(nz_date, 0) + 1
     daily = [{"d": d, "c": c} for d, c in sorted(counts.items())]
     rate = round(done_count / total * 100) if total else 0
-    return {"total": total, "done": done_count, "skipped": skipped_count, "rate": rate, "daily": daily}
+    return {
+        "total": total,
+        "done": done_count,
+        "skipped": skipped_count,
+        "missed": missed_count,
+        "rate": rate,
+        "daily": daily,
+    }
 
 
 @app.post("/api/todos")
@@ -523,7 +539,7 @@ def toggle_todo(todo_id: int):
     new_done = 0 if done else 1
     completed_at = "datetime('now')" if new_done else "NULL"
     # done/skippedは同時に立たない状態にする(完了させたら「スキップ扱い」は解除する)
-    skipped_clause = ", skipped = 0, skipped_at = NULL" if new_done else ""
+    skipped_clause = ", skipped = 0, skipped_at = NULL, skip_reason = NULL" if new_done else ""
     conn.execute(
         f"UPDATE todos SET done = ?, completed_at = {completed_at}{skipped_clause} WHERE id = ?",
         (new_done, todo_id),
@@ -544,7 +560,9 @@ def toggle_todo(todo_id: int):
 
 
 @app.post("/api/todos/{todo_id}/skip")
-def skip_todo(todo_id: int):
+def skip_todo(todo_id: int, reason: str | None = None):
+    if reason not in (None, "overdue"):
+        raise HTTPException(status_code=422, detail="reason must be 'overdue' or omitted")
     conn = get_connection()
     row = conn.execute(
         "SELECT skipped, title, category, priority, due_date, due_time, recurrence, notify_offset_minutes, note "
@@ -560,8 +578,8 @@ def skip_todo(todo_id: int):
     # done/skippedは同時に立たない状態にする(スキップしたら「完了扱い」は解除する)
     done_clause = ", done = 0, completed_at = NULL" if new_skipped else ""
     conn.execute(
-        f"UPDATE todos SET skipped = ?, skipped_at = {skipped_at}{done_clause} WHERE id = ?",
-        (new_skipped, todo_id),
+        f"UPDATE todos SET skipped = ?, skipped_at = {skipped_at}, skip_reason = ?{done_clause} WHERE id = ?",
+        (new_skipped, reason if new_skipped else None, todo_id),
     )
     # 完了(toggle_todo)と同じ扱い: スキップも「この回は終わり」を意味するので、
     # 繰り返し予定なら次回分を生成する(このtodoを消さずに繰り越さない、というのが要件のため)

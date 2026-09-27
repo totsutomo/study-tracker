@@ -204,7 +204,8 @@ function guardedClick(el, handler) {
 // 保存失敗を知らせる非ブロッキング通知(2026-09-05導入)。楽観的更新の失敗時、
 // alert()だとその瞬間フォーカスを奪って別操作の邪魔になるため、自動で消える控えめな表示にする。
 let toastTimer = null;
-function showToast(message) {
+// action = { label, onClick } を渡すと「元に戻す」のようなボタン付きのトーストになる
+function showToast(message, action = null, durationMs = 4000) {
   let el = document.getElementById("toast-banner");
   if (!el) {
     el = document.createElement("div");
@@ -212,10 +213,61 @@ function showToast(message) {
     document.body.appendChild(el);
   }
   el.textContent = message;
+  el.classList.toggle("has-action", !!action);
+  if (action) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "toast-action";
+    btn.textContent = action.label;
+    btn.addEventListener("click", () => {
+      el.classList.remove("show");
+      action.onClick();
+    });
+    el.appendChild(btn);
+  }
   el.classList.add("show");
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => el.classList.remove("show"), 4000);
+  toastTimer = setTimeout(() => el.classList.remove("show"), durationMs);
 }
+
+// 取り消せる削除(2026-09-27): ゴミ箱ボタンは▶・スキップの隣にあり押し間違えやすいので、
+// 画面からは即消すがサーバーへのDELETEは5秒待ち、その間は「Undo」で戻せるようにする。
+// アプリを閉じる/切り替える(visibilityState=hidden)時点で待機中の削除は即送信する。
+const UNDO_WINDOW_MS = 5000;
+let pendingDeletes = [];
+
+function undoableDelete(message, { apply, revert, commit }) {
+  apply();
+  const entry = { done: false };
+  entry.run = async () => {
+    if (entry.done) return;
+    entry.done = true;
+    clearTimeout(entry.timer);
+    pendingDeletes = pendingDeletes.filter((e) => e !== entry);
+    try {
+      await commit();
+    } catch (err) {
+      revert();
+      showToast("保存に失敗しました。もう一度お試しください");
+    }
+  };
+  entry.timer = setTimeout(entry.run, UNDO_WINDOW_MS);
+  pendingDeletes.push(entry);
+  showToast(message, {
+    label: "Undo",
+    onClick: () => {
+      if (entry.done) return;
+      entry.done = true;
+      clearTimeout(entry.timer);
+      pendingDeletes = pendingDeletes.filter((e) => e !== entry);
+      revert();
+    },
+  }, UNDO_WINDOW_MS);
+}
+
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "hidden") pendingDeletes.slice().forEach((e) => e.run());
+});
 
 // 楽観的更新の共通処理(2026-09-05導入): サーバーの応答を待ってから画面を更新するのではなく、
 // 成功する前提でローカル状態を即座に書き換えて再描画し(apply)、保存(request)は裏で進める。
@@ -353,13 +405,13 @@ async function toggleTodoSkip(t) {
   );
 }
 
-async function deleteTodo(t) {
+function deleteTodo(t) {
   const idx = allTodos.indexOf(t);
-  await optimistic(
-    () => { if (idx !== -1) allTodos.splice(idx, 1); renderTodos(); },
-    () => { if (idx !== -1) allTodos.splice(idx, 0, t); renderTodos(); },
-    async () => { await api(`/api/todos/${t.id}`, { method: "DELETE" }); loadTodoStats(); },
-  );
+  undoableDelete(`Deleted "${t.title}"`, {
+    apply: () => { if (idx !== -1) allTodos.splice(idx, 1); renderTodos(); },
+    revert: () => { if (idx !== -1 && !allTodos.includes(t)) allTodos.splice(idx, 0, t); renderTodos(); },
+    commit: async () => { await api(`/api/todos/${t.id}`, { method: "DELETE" }); loadTodoStats(); },
+  });
 }
 
 // スワイプで完了⇄未完了(右)・スキップ⇄解除(左)を切り替えるジェスチャー。ボタン・チェックボックスの
@@ -634,7 +686,7 @@ async function autoSkipOverdueTodos() {
   let anyRecurring = false;
   await Promise.allSettled(
     overdue.map((t) =>
-      api(`/api/todos/${t.id}/skip`, { method: "POST" })
+      api(`/api/todos/${t.id}/skip?reason=overdue`, { method: "POST" })
         .then(() => {
           t.skipped = true;
           t.done = false;
@@ -669,7 +721,9 @@ function renderTodoStats(stats) {
     `)
     .join("");
   el.innerHTML = `
-    <p>Completed: ${stats.done}/${stats.total} (${stats.rate}%)${stats.skipped ? ` <span class="meta">(${stats.skipped} skipped, excluded)</span>` : ""}</p>
+    <p>Completed: ${stats.done}/${stats.total} (${stats.rate}%)</p>
+    ${stats.missed ? `<p class="meta">${stats.missed} missed (overdue, counted as not done)</p>` : ""}
+    ${stats.skipped ? `<p class="meta">${stats.skipped} skipped by choice (not counted)</p>` : ""}
     ${stats.daily.length ? `<p class="meta">Completions in the last 7 days</p>${barsHtml}` : ""}
   `;
 }
@@ -844,6 +898,8 @@ function renderCategoryItem(cat, list) {
     }
   });
   li.querySelector(".delete-btn").addEventListener("click", async () => {
+    // 科目ボタン・フィルターから丸ごと消えるので、設定画面での押し間違いに備えて確認を挟む(2026-09-27)
+    if (!confirm(`Delete the category "${cat.name}"?`)) return;
     const idx = allCategories.indexOf(cat);
     li.remove();
     if (idx !== -1) allCategories.splice(idx, 1);
@@ -1149,17 +1205,22 @@ function openStartPanel(subject, todoId) {
   }
   pendingStart = { subject, todoId };
   document.getElementById("start-subject-name").textContent = subject;
-  setStartMode("countup");
-  document.getElementById("start-duration-input").value = 25;
-  document.getElementById("start-clockonly").checked = false;
-  document.getElementById("start-keep-awake").checked = false;
-  document.getElementById("start-reset-on-reopen").checked = false;
+  // 前回その科目で選んだモード・時間・チェック項目を復元する(毎回選び直す手間を省く、2026-09-27)。
+  // 「きっかけ」は毎回その時の理由を記録するためのものなので、あえて復元しない
+  const prefs = loadStartPrefs(subject);
+  setStartMode(prefs.mode);
+  document.getElementById("start-duration-input").value = prefs.minutes;
+  document.getElementById("start-clockonly").checked = prefs.clockOnly;
+  document.getElementById("start-keep-awake").checked = prefs.keepAwake;
+  document.getElementById("start-reset-on-reopen").checked = prefs.resetOnReopen;
   startTrigger = null;
   document.querySelectorAll("#start-trigger-picker .reason-btn").forEach((b) => {
     b.classList.remove("active");
   });
   startBackdrop.classList.remove("hidden");
   startPanel.classList.remove("hidden");
+  // パネル内にフォーカスがないと下のEnter→Startが効かない(キーイベントがパネルに届かない)ため
+  document.getElementById("start-begin-btn").focus({ preventScroll: true });
 }
 
 function closeStartPanel() {
@@ -1170,6 +1231,29 @@ function closeStartPanel() {
 
 document.getElementById("start-close").addEventListener("click", closeStartPanel);
 startBackdrop.addEventListener("click", closeStartPanel);
+
+// 端末ごとの使い勝手の記憶なのでlocalStorageで十分(画面スリープ防止などは端末によって欲しい値が違う)
+const START_PREFS_KEY = "startPrefs";
+const DEFAULT_START_PREFS = { mode: "countup", minutes: 25, clockOnly: false, keepAwake: false, resetOnReopen: false };
+
+function loadStartPrefs(subject) {
+  try {
+    const all = JSON.parse(localStorage.getItem(START_PREFS_KEY) || "{}");
+    return { ...DEFAULT_START_PREFS, ...(all[subject] || {}) };
+  } catch {
+    return { ...DEFAULT_START_PREFS };
+  }
+}
+
+function saveStartPrefs(subject, prefs) {
+  try {
+    const all = JSON.parse(localStorage.getItem(START_PREFS_KEY) || "{}");
+    all[subject] = prefs;
+    localStorage.setItem(START_PREFS_KEY, JSON.stringify(all));
+  } catch {
+    // 保存できなくても開始自体は続ける
+  }
+}
 
 function setStartMode(mode) {
   startMode = mode;
@@ -1221,6 +1305,13 @@ document.getElementById("start-begin-btn").addEventListener("click", () => {
     }
   }
   const trigger = startTrigger;
+  saveStartPrefs(subject, {
+    mode: startMode,
+    minutes: parseInt(document.getElementById("start-duration-input").value, 10) || DEFAULT_START_PREFS.minutes,
+    clockOnly,
+    keepAwake,
+    resetOnReopen,
+  });
   closeStartPanel();
   beginSession(subject, todoId, startMode, targetMs, clockOnly, trigger, keepAwake, resetOnReopen);
 });
@@ -2618,21 +2709,23 @@ async function loadStudyLogList() {
       <span class="log-duration">${formatLogDuration(l.minutes)}</span>
       <button class="delete-btn" title="Delete">×</button>
     `;
-    li.querySelector(".delete-btn").addEventListener("click", async () => {
+    li.querySelector(".delete-btn").addEventListener("click", () => {
       const idx = logs.indexOf(l);
-      li.remove();
-      if (idx !== -1) logs.splice(idx, 1);
-      updateStudyLogHeader(logs.length);
-      try {
-        await api(`/api/study-logs/${l.id}`, { method: "DELETE" });
-        loadStudySummary();
-        loadStudyChart();
-        loadGoalProgress();
-        loadScreenBudget();
-      } catch (err) {
-        showToast("削除に失敗しました。もう一度お試しください");
-        loadStudyLogList();
-      }
+      undoableDelete(`Deleted ${l.subject} · ${formatLogDuration(l.minutes)}`, {
+        apply: () => {
+          li.remove();
+          if (idx !== -1) logs.splice(idx, 1);
+          updateStudyLogHeader(logs.length);
+        },
+        revert: () => loadStudyLogList(),
+        commit: async () => {
+          await api(`/api/study-logs/${l.id}`, { method: "DELETE" });
+          loadStudySummary();
+          loadStudyChart();
+          loadGoalProgress();
+          loadScreenBudget();
+        },
+      });
     });
     list.appendChild(li);
   });
@@ -2673,22 +2766,39 @@ function formatWritingSessionLabel(row) {
 }
 
 async function loadScoresTab() {
-  const [diaryRows, writingRows, hitotsubashiRows, stackRows] = await Promise.all([
-    api("/api/diary-scores?days=30"),
-    api("/api/eiken-writing-scores?days=90"),
-    api("/api/hitotsubashi-writing-scores?days=90"),
-    api("/api/stack-scores?days=90"),
-  ]);
-  lastStackScoreRows = stackRows;
-  renderStackScores(stackRows);
-  lastDiaryScoreRows = diaryRows;
-  lastHitotsubashiScoreRows = hitotsubashiRows;
-  renderDiaryScoreStats(diaryRows);
-  renderDiaryScoreChart(diaryRows);
-  renderHitotsubashiScoreStats(hitotsubashiRows);
-  renderHitotsubashiScoreChart(hitotsubashiRows);
-  renderWritingScoreStats(writingRows);
-  renderWritingScoreChart(writingRows);
+  // 以前はPromise.allで4本まとめて待っていたため、1本でも失敗(例: サーバー再起動前で新APIが404)
+  // するとタブ全体が空になっていた(2026-09-27)。カードごとに独立して読み込み、失敗したカードにだけ理由を出す。
+  const cards = [
+    ["/api/diary-scores?days=30", "diary-score-chart", (rows) => {
+      lastDiaryScoreRows = rows;
+      renderDiaryScoreStats(rows);
+      renderDiaryScoreChart(rows);
+    }],
+    ["/api/eiken-writing-scores?days=90", "writing-score-chart", (rows) => {
+      renderWritingScoreStats(rows);
+      renderWritingScoreChart(rows);
+    }],
+    ["/api/hitotsubashi-writing-scores?days=90", "hitotsubashi-score-chart", (rows) => {
+      lastHitotsubashiScoreRows = rows;
+      renderHitotsubashiScoreStats(rows);
+      renderHitotsubashiScoreChart(rows);
+    }],
+    ["/api/stack-scores?days=90", "stack-score-chart", (rows) => {
+      lastStackScoreRows = rows;
+      renderStackScores(rows);
+    }],
+  ];
+  const results = await Promise.allSettled(cards.map(([path]) => api(path)));
+  results.forEach((result, i) => {
+    const [path, chartId, render] = cards[i];
+    if (result.status === "fulfilled") {
+      render(result.value);
+    } else {
+      console.error(`scores load failed: ${path}`, result.reason);
+      document.getElementById(chartId).innerHTML =
+        `<p class="meta">Couldn't load this card (${escapeHtml(String(result.reason?.message || result.reason))})</p>`;
+    }
+  });
 }
 
 function renderDiaryScoreStats(rows) {
@@ -3101,19 +3211,19 @@ async function loadActivationList() {
       </span>
       <button class="delete-btn" title="Delete">×</button>
     `;
-    li.querySelector(".delete-btn").addEventListener("click", async () => {
-      li.remove();
-      try {
-        await api(`/api/activation-logs/${l.id}`, { method: "DELETE" });
-        loadActivationActive();
-        loadActivationStats();
-        loadActivationPostReturnStats();
-        loadActivationMoodReasons();
-        loadCalendar();
-      } catch (err) {
-        showToast("削除に失敗しました。もう一度お試しください");
-        loadActivationList();
-      }
+    li.querySelector(".delete-btn").addEventListener("click", () => {
+      undoableDelete("Deleted activation log", {
+        apply: () => li.remove(),
+        revert: () => loadActivationList(),
+        commit: async () => {
+          await api(`/api/activation-logs/${l.id}`, { method: "DELETE" });
+          loadActivationActive();
+          loadActivationStats();
+          loadActivationPostReturnStats();
+          loadActivationMoodReasons();
+          loadCalendar();
+        },
+      });
     });
     list.appendChild(li);
   });
@@ -3410,15 +3520,15 @@ function renderSleepLogList(logs) {
         showToast("保存に失敗しました。もう一度お試しください");
       }
     });
-    li.querySelector(".delete-btn").addEventListener("click", async () => {
-      li.remove();
-      try {
-        await api(`/api/sleep-logs/${l.id}`, { method: "DELETE" });
-        loadSleepActive();
-      } catch (err) {
-        showToast("削除に失敗しました。もう一度お試しください");
-        loadSleepPanel();
-      }
+    li.querySelector(".delete-btn").addEventListener("click", () => {
+      undoableDelete("Deleted sleep log", {
+        apply: () => li.remove(),
+        revert: () => loadSleepPanel(),
+        commit: async () => {
+          await api(`/api/sleep-logs/${l.id}`, { method: "DELETE" });
+          loadSleepActive();
+        },
+      });
     });
     list.appendChild(li);
   });
@@ -3476,17 +3586,15 @@ async function renderBedtimeCarryoverList() {
       li.remove();
       toggleBedtimeCarryoverEmpty();
     });
-    li.querySelector('[data-action="delete"]').addEventListener("click", async () => {
-      li.remove();
-      toggleBedtimeCarryoverEmpty();
-      try {
-        await api(`/api/todos/${t.id}`, { method: "DELETE" });
-        loadTodos();
-      } catch (err) {
-        list.appendChild(li);
-        toggleBedtimeCarryoverEmpty();
-        showToast(`「${t.title}」の削除に失敗しました。もう一度お試しください`);
-      }
+    li.querySelector('[data-action="delete"]').addEventListener("click", () => {
+      undoableDelete(`Deleted "${t.title}"`, {
+        apply: () => { li.remove(); toggleBedtimeCarryoverEmpty(); },
+        revert: () => { list.appendChild(li); toggleBedtimeCarryoverEmpty(); },
+        commit: async () => {
+          await api(`/api/todos/${t.id}`, { method: "DELETE" });
+          loadTodos();
+        },
+      });
     });
     list.appendChild(li);
   });
@@ -4139,14 +4247,14 @@ function renderCalDayDetail() {
     li.querySelector(".delete-btn").addEventListener("click", async (e) => {
       e.stopPropagation();
       if (ev.recurrence && !confirm("This is a recurring event. Delete the entire series?")) return;
-      li.remove();
-      try {
-        await api(`/api/events/${ev.id}`, { method: "DELETE" });
-      } catch (err) {
-        showToast("削除に失敗しました。もう一度お試しください");
-      } finally {
-        loadCalendar();
-      }
+      undoableDelete(`Deleted "${ev.title}"`, {
+        apply: () => li.remove(),
+        revert: () => loadCalendar(),
+        commit: async () => {
+          await api(`/api/events/${ev.id}`, { method: "DELETE" });
+          loadCalendar();
+        },
+      });
     });
     li.classList.add("clickable");
     li.addEventListener("click", () => openEventDetail(ev));
@@ -4879,6 +4987,131 @@ async function hydrateFromCache() {
     openBedtimePanel();
   }
 })();
+
+// ---------- keyboard shortcuts (2026-09-27) ----------
+// PCで開いている時用。1文字キーは入力欄に文字を打っている間は無効(Escだけは入力中でも効く)。
+// Ctrl+数字のタブ切替・開始パネルのEnterは上の方で個別に定義済み。
+
+const shortcutPanel = document.getElementById("shortcut-panel");
+const shortcutBackdrop = document.getElementById("shortcut-backdrop");
+
+function openShortcutPanel() {
+  shortcutPanel.classList.remove("hidden");
+  shortcutBackdrop.classList.remove("hidden");
+}
+
+function closeShortcutPanel() {
+  shortcutPanel.classList.add("hidden");
+  shortcutBackdrop.classList.add("hidden");
+}
+
+document.getElementById("shortcut-close").addEventListener("click", closeShortcutPanel);
+shortcutBackdrop.addEventListener("click", closeShortcutPanel);
+document.getElementById("shortcut-open-btn").addEventListener("click", () => {
+  document.getElementById("settings-close").click();
+  openShortcutPanel();
+});
+
+function isTypingTarget(el) {
+  return !!el && (el.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(el.tagName));
+}
+
+function visiblePanels() {
+  return [...document.querySelectorAll(".add-panel")].filter((p) => !p.classList.contains("hidden"));
+}
+
+function activeTabId() {
+  return document.querySelector(".tab-panel.active")?.id;
+}
+
+// S → 数字: 科目ミニメニューを開いて各ボタンに番号を振り、次に押された数字で開始パネルを開く
+let subjectPickTimer = null;
+
+function startSubjectPick() {
+  if (timerSubject) {
+    showToast("A timer is already running");
+    return;
+  }
+  switchTab("tab-study");
+  const menu = document.getElementById("study-fab-menu");
+  menu.classList.remove("hidden");
+  menu.classList.add("numbered");
+  clearTimeout(subjectPickTimer);
+  subjectPickTimer = setTimeout(endSubjectPick, 5000);
+}
+
+function endSubjectPick() {
+  clearTimeout(subjectPickTimer);
+  subjectPickTimer = null;
+  const menu = document.getElementById("study-fab-menu");
+  menu.classList.remove("numbered");
+}
+
+function closeTopmostLayer() {
+  if (!shortcutPanel.classList.contains("hidden")) {
+    closeShortcutPanel();
+    return true;
+  }
+  const panels = visiblePanels();
+  if (panels.length) {
+    panels[panels.length - 1].querySelector(".panel-close")?.click();
+    return true;
+  }
+  const menu = document.getElementById("study-fab-menu");
+  if (!menu.classList.contains("hidden")) {
+    menu.classList.add("hidden");
+    endSubjectPick();
+    return true;
+  }
+  if (timerSubject && !overlayMinimized && !document.getElementById("focus-overlay").classList.contains("hidden")) {
+    minimizeFocusOverlay();
+    return true;
+  }
+  return false;
+}
+
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") {
+    if (closeTopmostLayer()) e.preventDefault();
+    return;
+  }
+  if (e.ctrlKey || e.metaKey || e.altKey || isTypingTarget(e.target)) return;
+
+  if (subjectPickTimer && /^[1-9]$/.test(e.key) && !document.getElementById("study-fab-menu").classList.contains("hidden")) {
+    const btn = document.querySelectorAll("#study-fab-menu .subject-btn")[Number(e.key) - 1];
+    endSubjectPick();
+    if (btn) {
+      e.preventDefault();
+      btn.click();
+    }
+    return;
+  }
+
+  if (e.key === " " && timerSubject) {
+    e.preventDefault();
+    if (isPaused) resumeSession();
+    else pauseSession();
+    return;
+  }
+
+  // パネルが開いている間はEsc以外の1文字キーで別のパネルを重ねない
+  if (visiblePanels().length) return;
+
+  const key = e.key.toLowerCase();
+  if (e.key === "?") {
+    e.preventDefault();
+    openShortcutPanel();
+  } else if (key === "n") {
+    const tab = activeTabId();
+    if (tab === "tab-todo") openTodoAddPanel();
+    else if (tab === "tab-calendar") openEventAddPanel();
+    else return;
+    e.preventDefault(); // 開いたパネルのタイトル欄に「n」が入らないように
+  } else if (key === "s") {
+    e.preventDefault();
+    startSubjectPick();
+  }
+});
 
 if ("serviceWorker" in navigator) {
   navigator.serviceWorker.register("/service-worker.js").catch(() => {});

@@ -857,6 +857,28 @@ button.secondary {
   transform: translate(-50%, 0);
 }
 
+/* 「Undo」ボタン付きのトーストはエラーではないので赤枠をやめ、ボタンを押せるようにする */
+#toast-banner.has-action {
+  border-color: var(--border);
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+#toast-banner.has-action.show {
+  pointer-events: auto;
+}
+
+#toast-banner .toast-action {
+  background: none;
+  border: none;
+  color: var(--accent);
+  font-weight: 700;
+  padding: 4px 2px;
+  min-height: 0;
+  flex-shrink: 0;
+}
+
 /* --fab-lift: 計測中にミニタイマーバーが出ている間だけJSがバーの高さを入れる。
    FABと科目ミニメニューの両方がこれを参照するので、片方だけ持ち上がって重なることがない */
 .fab {
@@ -1129,8 +1151,10 @@ h3.collapsible {
   padding-left: 36px;
 }
 
+/* 科目が増えるとスマホ幅で1行に収まらずページごと横にはみ出していた(kobun追加で発覚、2026-09-27)ので折り返す */
 .study-buttons {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   margin-bottom: 16px;
 }
@@ -2409,4 +2433,53 @@ body.focus-open #tabbar {
   .cal-event-label {
     font-size: 10px;
   }
+}
+
+/* ---------- keyboard shortcuts (2026-09-27) ---------- */
+
+/* S キーで科目メニューを開いた時だけ、各科目に押す数字を表示する */
+.study-fab-menu.numbered {
+  counter-reset: subject-num;
+}
+
+.study-fab-menu.numbered .subject-btn::before {
+  counter-increment: subject-num;
+  content: counter(subject-num);
+  display: inline-block;
+  min-width: 18px;
+  margin-right: 8px;
+  padding: 1px 5px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 12px;
+  color: var(--text-muted, var(--text));
+}
+
+.shortcut-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.shortcut-table td {
+  padding: 8px 4px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+
+.shortcut-table td:first-child {
+  white-space: nowrap;
+  width: 1%;
+  padding-right: 16px;
+}
+
+kbd {
+  display: inline-block;
+  padding: 1px 6px;
+  border: 1px solid var(--border);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  background: var(--bg);
+  font-family: inherit;
+  font-size: 12px;
 }

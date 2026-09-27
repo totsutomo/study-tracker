@@ -280,6 +280,9 @@ def _migrate(conn):
         conn.execute("ALTER TABLE todos ADD COLUMN skipped INTEGER DEFAULT 0")
     if "skipped_at" not in cols:
         conn.execute("ALTER TABLE todos ADD COLUMN skipped_at TEXT")
+    # 'overdue' = 期限切れで自動スキップされた(=やり損ねた)もの。NULLは自分で「やらない」と決めたスキップ
+    if "skip_reason" not in cols:
+        conn.execute("ALTER TABLE todos ADD COLUMN skip_reason TEXT")
     conn.execute("UPDATE todos SET recurrence = 'mon,tue,wed,thu,fri,sat,sun' WHERE recurrence = 'daily'")
     conn.execute("UPDATE todos SET recurrence = 'mon,tue,wed,thu,fri' WHERE recurrence = 'weekdays'")
 

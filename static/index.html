@@ -771,6 +771,12 @@
   </div>
 
   <div class="settings-group">
+    <h3>Keyboard Shortcuts</h3>
+    <p class="meta">Press ? anywhere to see them</p>
+    <button type="button" id="shortcut-open-btn" class="secondary">Show shortcuts</button>
+  </div>
+
+  <div class="settings-group">
     <h3>App Info</h3>
     <p class="meta" id="settings-last-updated">Checking...</p>
   </div>
@@ -885,6 +891,22 @@
   <p class="meta hidden" id="copyweek-conflict-note"></p>
   <ul id="copyweek-list" class="list"></ul>
   <button type="button" id="copyweek-commit" class="hidden">Copy These Events</button>
+</div>
+
+<div id="shortcut-backdrop" class="backdrop hidden"></div>
+<div id="shortcut-panel" class="add-panel hidden">
+  <div class="panel-header">
+    <h3>Keyboard Shortcuts</h3>
+    <button type="button" id="shortcut-close" class="panel-close" aria-label="Close">×</button>
+  </div>
+  <table class="shortcut-table">
+    <tr><td><kbd>Esc</kbd></td><td>Close the open panel</td></tr>
+    <tr><td><kbd>N</kbd></td><td>New task (ToDo) / new event (Calendar)</td></tr>
+    <tr><td><kbd>S</kbd> then <kbd>1</kbd>–<kbd>9</kbd></td><td>Pick a subject to study, then <kbd>Enter</kbd> to start</td></tr>
+    <tr><td><kbd>Space</kbd></td><td>Pause / resume the running timer</td></tr>
+    <tr><td><kbd>Ctrl</kbd>+<kbd>1</kbd>–<kbd>5</kbd></td><td>Switch tabs</td></tr>
+    <tr><td><kbd>?</kbd></td><td>Show this list</td></tr>
+  </table>
 </div>
 
 <nav id="tabbar">
