@@ -2321,9 +2321,55 @@ body.focus-open #tabbar {
     min-width: 0;
   }
 
-  .todo-side {
+  /* 右列(2026-09-27): 「今日の予定」「今日の勉強時間」+「Completed」。広い画面では2列に並べて
+     ToDoが数件しかない日の右側の空白を埋め、狭いPC幅では1列に縦積みにする */
+  .todo-aside {
     width: 280px;
     flex-shrink: 0;
+  }
+
+  /* ToDoは1行表示: タイトル・カテゴリー・▶を横一列に。長いタイトルは省略し、全文はマウスを乗せると出る */
+  #todo-groups .todo-swipe-content {
+    padding: 10px 14px;
+  }
+
+  #todo-groups .todo-card-main {
+    flex-direction: row;
+    align-items: baseline;
+    gap: 12px;
+  }
+
+  #todo-groups .todo-card-title {
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  #todo-groups .todo-card-meta {
+    flex-shrink: 0;
+    flex-wrap: nowrap;
+    white-space: nowrap;
+  }
+
+  /* パネル類はスマホ用の「下から出るシート」のままだと、PCでは横幅いっぱいに間延びするため、
+     画面中央の小窓にする(2026-09-27) */
+  .add-panel {
+    left: 50%;
+    right: auto;
+    top: 50%;
+    bottom: auto;
+    transform: translate(-50%, -50%);
+    width: min(520px, calc(100vw - 48px));
+    max-height: 85vh;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 20px;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+  }
+
+  .start-panel .reason-btn {
+    flex: 1 1 30%;
   }
 
   /* ---- Study: 目標カードとグラフ・履歴を横並びにして空きスペースを埋める ---- */
@@ -2517,9 +2563,22 @@ kbd {
 }
 
 @media (min-width: 768px) and (hover: hover) {
+  /* 日付変更ボタンは▶の左に重ねて出す(2026-09-27)。以前はタイトルの下で見えないまま1段分の
+     場所を取り、カードが縦に間延びしていた。重ねる形なら場所を取らず、1行表示を保てる */
+  #todo-groups .todo-card-actions {
+    position: relative;
+  }
+
   #todo-groups .reschedule-row {
     display: flex;
     visibility: hidden;
+    position: absolute;
+    right: 100%;
+    top: 50%;
+    transform: translateY(-50%);
+    padding: 0 8px 0 28px;
+    white-space: nowrap;
+    background: linear-gradient(to right, transparent, var(--card) 20px);
   }
 
   #todo-groups .skip-btn,
@@ -2632,4 +2691,129 @@ kbd {
   height: 7px;
   border-radius: 50%;
   display: inline-block;
+}
+
+/* ---------- ToDo tab: today panel (2026-09-27) ---------- */
+.todo-today {
+  display: none; /* スマホでは一覧が長くなるだけなので出さない(上部の帯で足りる) */
+}
+
+.today-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-card);
+  padding: 12px 14px;
+  margin-bottom: 16px;
+  font-size: 13px;
+}
+
+.today-empty {
+  margin: 2px 0 4px;
+  color: var(--text-muted);
+}
+
+.today-event {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: 5px 4px;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+}
+
+.today-event:hover {
+  background: var(--card-hover);
+}
+
+.today-event-time {
+  width: 46px;
+  flex-shrink: 0;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.today-event i {
+  width: 3px;
+  height: 16px;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
+.today-event-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#today-study {
+  cursor: pointer;
+}
+
+.today-study-total {
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+
+.today-study-total span {
+  color: var(--text-muted);
+  font-weight: 400;
+}
+
+.today-study-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 0;
+}
+
+.today-study-subject {
+  width: 64px;
+  flex-shrink: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.today-study-bar {
+  flex: 1;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--border);
+  overflow: hidden;
+}
+
+.today-study-bar i {
+  display: block;
+  height: 100%;
+}
+
+.today-study-min {
+  width: 56px;
+  text-align: right;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+@media (min-width: 768px) {
+  .todo-today {
+    display: block;
+  }
+}
+
+@media (min-width: 1400px) {
+  .todo-aside {
+    width: 600px;
+    display: grid;
+    grid-template-columns: 300px 280px;
+    gap: 20px;
+    align-items: start;
+  }
 }

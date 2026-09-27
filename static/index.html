@@ -148,132 +148,142 @@
       <div class="todo-main">
         <div id="todo-groups"></div>
       </div>
-      <div class="todo-side">
-        <h3>Completed</h3>
-        <div id="todo-stats"></div>
+      <div class="todo-aside">
+        <div class="todo-today">
+          <h3>Schedule</h3>
+          <div id="today-schedule" class="today-card"></div>
+          <h3>Studied today</h3>
+          <div id="today-study" class="today-card" title="Open Study tab"></div>
+        </div>
+        <div class="todo-side">
+          <h3>Completed</h3>
+          <div id="todo-stats"></div>
+        </div>
       </div>
     </div>
 
     <button type="button" id="todo-fab" class="fab" aria-label="Add task">+</button>
-
-    <div id="todo-add-backdrop" class="backdrop hidden"></div>
-    <div id="todo-add-panel" class="add-panel hidden">
-      <div class="panel-header">
-        <h3>New Task</h3>
-        <button type="button" id="todo-add-close" class="panel-close" aria-label="Close">×</button>
-      </div>
-      <form id="todo-form" class="add-form">
-        <input type="text" id="todo-title" placeholder="Task name" required>
-        <div class="form-row">
-          <select id="todo-category">
-            <option value="英語">English</option>
-            <option value="数学">Math</option>
-            <option value="世界史">World History</option>
-            <option value="その他">Other</option>
-          </select>
-          <select id="todo-priority">
-            <option value="high">Priority: High</option>
-            <option value="medium" selected>Priority: Medium</option>
-            <option value="low">Priority: Low</option>
-          </select>
-        </div>
-        <div class="due-row">
-          <input type="date" id="todo-due-date">
-          <button type="button" class="quick-date-btn" data-quick="today" data-quick-target="todo-due-date">Today</button>
-          <button type="button" class="quick-date-btn" data-quick="tomorrow" data-quick-target="todo-due-date">Tomorrow</button>
-          <button type="button" class="quick-date-btn" data-quick="nextweek" data-quick-target="todo-due-date">Next week</button>
-          <button type="button" class="quick-date-btn" data-quick="clear" data-quick-target="todo-due-date">Clear</button>
-        </div>
-        <button type="button" id="todo-time-toggle" class="time-toggle-btn">+ Add time</button>
-        <input type="time" id="todo-due-time" style="display:none;">
-        <select id="todo-notify" style="display:none;">
-          <option value="">No notification</option>
-          <option value="0">Notify at time</option>
-          <option value="10">Notify 10 min before</option>
-          <option value="30">Notify 30 min before</option>
-          <option value="60">Notify 1 hr before</option>
-        </select>
-        <div class="due-row">
-          <button type="button" class="quick-date-btn" data-recur-preset="daily">Daily</button>
-          <button type="button" class="quick-date-btn" data-recur-preset="weekdays">Weekdays</button>
-          <button type="button" class="quick-date-btn" data-recur-preset="clear">Clear</button>
-        </div>
-        <div class="weekday-picker" id="todo-recurrence-picker">
-          <button type="button" class="weekday-btn" data-day="sun">Sun</button>
-          <button type="button" class="weekday-btn" data-day="mon">Mon</button>
-          <button type="button" class="weekday-btn" data-day="tue">Tue</button>
-          <button type="button" class="weekday-btn" data-day="wed">Wed</button>
-          <button type="button" class="weekday-btn" data-day="thu">Thu</button>
-          <button type="button" class="weekday-btn" data-day="fri">Fri</button>
-          <button type="button" class="weekday-btn" data-day="sat">Sat</button>
-        </div>
-        <textarea id="todo-note" rows="3" placeholder="Note (optional)"></textarea>
-        <button type="submit">+ Add</button>
-      </form>
-    </div>
-
-    <div id="todo-detail-backdrop" class="backdrop hidden"></div>
-    <div id="todo-detail-panel" class="add-panel hidden">
-      <div class="panel-header">
-        <h3>Edit Task</h3>
-        <button type="button" id="todo-detail-close" class="panel-close" aria-label="Close">×</button>
-      </div>
-      <!-- スマホのToDoカードから外したボタンの移動先(2026-09-27) -->
-      <div class="todo-detail-actions" id="todo-detail-reschedule">
-        <button type="button" class="quick-date-btn" data-detail-reschedule="+30">+30 min</button>
-        <button type="button" class="quick-date-btn" data-detail-reschedule="+60">+1 hr</button>
-        <button type="button" class="quick-date-btn" data-detail-reschedule="tomorrow">Tomorrow</button>
-      </div>
-      <div class="todo-detail-actions">
-        <button type="button" id="todo-detail-skip" class="secondary">Skip</button>
-        <button type="button" id="todo-detail-delete" class="danger-outline">Delete</button>
-      </div>
-      <form id="todo-detail-form" class="add-form">
-        <input type="text" id="todo-detail-title" placeholder="Task name" required>
-        <div class="form-row">
-          <select id="todo-detail-category"></select>
-          <select id="todo-detail-priority">
-            <option value="high">Priority: High</option>
-            <option value="medium">Priority: Medium</option>
-            <option value="low">Priority: Low</option>
-          </select>
-        </div>
-        <div class="due-row">
-          <input type="date" id="todo-detail-due-date">
-          <button type="button" class="quick-date-btn" data-quick="today" data-quick-target="todo-detail-due-date">Today</button>
-          <button type="button" class="quick-date-btn" data-quick="tomorrow" data-quick-target="todo-detail-due-date">Tomorrow</button>
-          <button type="button" class="quick-date-btn" data-quick="nextweek" data-quick-target="todo-detail-due-date">Next week</button>
-          <button type="button" class="quick-date-btn" data-quick="clear" data-quick-target="todo-detail-due-date">Clear</button>
-        </div>
-        <button type="button" id="todo-detail-time-toggle" class="time-toggle-btn">+ Add time</button>
-        <input type="time" id="todo-detail-due-time" style="display:none;">
-        <select id="todo-detail-notify" style="display:none;">
-          <option value="">No notification</option>
-          <option value="0">Notify at time</option>
-          <option value="10">Notify 10 min before</option>
-          <option value="30">Notify 30 min before</option>
-          <option value="60">Notify 1 hr before</option>
-        </select>
-        <div class="due-row">
-          <button type="button" class="quick-date-btn" data-recur-preset="daily">Daily</button>
-          <button type="button" class="quick-date-btn" data-recur-preset="weekdays">Weekdays</button>
-          <button type="button" class="quick-date-btn" data-recur-preset="clear">Clear</button>
-        </div>
-        <div class="weekday-picker" id="todo-detail-recurrence-picker">
-          <button type="button" class="weekday-btn" data-day="sun">Sun</button>
-          <button type="button" class="weekday-btn" data-day="mon">Mon</button>
-          <button type="button" class="weekday-btn" data-day="tue">Tue</button>
-          <button type="button" class="weekday-btn" data-day="wed">Wed</button>
-          <button type="button" class="weekday-btn" data-day="thu">Thu</button>
-          <button type="button" class="weekday-btn" data-day="fri">Fri</button>
-          <button type="button" class="weekday-btn" data-day="sat">Sat</button>
-        </div>
-        <textarea id="todo-detail-note" rows="3" placeholder="Note (optional)"></textarea>
-        <button type="submit">Save</button>
-      </form>
-      <span class="meta" id="todo-detail-status"></span>
-    </div>
   </section>
+
+  <!-- ToDoの追加・詳細パネルはカレンダータブの「その日のToDo」からも開くため、ToDoタブの外に置く。
+       タブの中にあると、他のタブを表示している間はタブごと非表示になり開けない(2026-09-27) -->
+  <div id="todo-add-backdrop" class="backdrop hidden"></div>
+  <div id="todo-add-panel" class="add-panel hidden">
+    <div class="panel-header">
+      <h3>New Task</h3>
+      <button type="button" id="todo-add-close" class="panel-close" aria-label="Close">×</button>
+    </div>
+    <form id="todo-form" class="add-form">
+      <input type="text" id="todo-title" placeholder="Task name" required>
+      <div class="form-row">
+        <select id="todo-category">
+          <option value="英語">English</option>
+          <option value="数学">Math</option>
+          <option value="世界史">World History</option>
+          <option value="その他">Other</option>
+        </select>
+        <select id="todo-priority">
+          <option value="high">Priority: High</option>
+          <option value="medium" selected>Priority: Medium</option>
+          <option value="low">Priority: Low</option>
+        </select>
+      </div>
+      <div class="due-row">
+        <input type="date" id="todo-due-date">
+        <button type="button" class="quick-date-btn" data-quick="today" data-quick-target="todo-due-date">Today</button>
+        <button type="button" class="quick-date-btn" data-quick="tomorrow" data-quick-target="todo-due-date">Tomorrow</button>
+        <button type="button" class="quick-date-btn" data-quick="nextweek" data-quick-target="todo-due-date">Next week</button>
+        <button type="button" class="quick-date-btn" data-quick="clear" data-quick-target="todo-due-date">Clear</button>
+      </div>
+      <button type="button" id="todo-time-toggle" class="time-toggle-btn">+ Add time</button>
+      <input type="time" id="todo-due-time" style="display:none;">
+      <select id="todo-notify" style="display:none;">
+        <option value="">No notification</option>
+        <option value="0">Notify at time</option>
+        <option value="10">Notify 10 min before</option>
+        <option value="30">Notify 30 min before</option>
+        <option value="60">Notify 1 hr before</option>
+      </select>
+      <div class="due-row">
+        <button type="button" class="quick-date-btn" data-recur-preset="daily">Daily</button>
+        <button type="button" class="quick-date-btn" data-recur-preset="weekdays">Weekdays</button>
+        <button type="button" class="quick-date-btn" data-recur-preset="clear">Clear</button>
+      </div>
+      <div class="weekday-picker" id="todo-recurrence-picker">
+        <button type="button" class="weekday-btn" data-day="sun">Sun</button>
+        <button type="button" class="weekday-btn" data-day="mon">Mon</button>
+        <button type="button" class="weekday-btn" data-day="tue">Tue</button>
+        <button type="button" class="weekday-btn" data-day="wed">Wed</button>
+        <button type="button" class="weekday-btn" data-day="thu">Thu</button>
+        <button type="button" class="weekday-btn" data-day="fri">Fri</button>
+        <button type="button" class="weekday-btn" data-day="sat">Sat</button>
+      </div>
+      <textarea id="todo-note" rows="3" placeholder="Note (optional)"></textarea>
+      <button type="submit">+ Add</button>
+    </form>
+  </div>
+
+  <div id="todo-detail-backdrop" class="backdrop hidden"></div>
+  <div id="todo-detail-panel" class="add-panel hidden">
+    <div class="panel-header">
+      <h3>Edit Task</h3>
+      <button type="button" id="todo-detail-close" class="panel-close" aria-label="Close">×</button>
+    </div>
+    <!-- スマホのToDoカードから外したボタンの移動先(2026-09-27) -->
+    <div class="todo-detail-actions" id="todo-detail-reschedule">
+      <button type="button" class="quick-date-btn" data-detail-reschedule="+30">+30 min</button>
+      <button type="button" class="quick-date-btn" data-detail-reschedule="+60">+1 hr</button>
+      <button type="button" class="quick-date-btn" data-detail-reschedule="tomorrow">Tomorrow</button>
+    </div>
+    <div class="todo-detail-actions">
+      <button type="button" id="todo-detail-skip" class="secondary">Skip</button>
+      <button type="button" id="todo-detail-delete" class="danger-outline">Delete</button>
+    </div>
+    <form id="todo-detail-form" class="add-form">
+      <input type="text" id="todo-detail-title" placeholder="Task name" required>
+      <div class="form-row">
+        <select id="todo-detail-category"></select>
+        <select id="todo-detail-priority">
+          <option value="high">Priority: High</option>
+          <option value="medium">Priority: Medium</option>
+          <option value="low">Priority: Low</option>
+        </select>
+      </div>
+      <div class="due-row">
+        <input type="date" id="todo-detail-due-date">
+        <button type="button" class="quick-date-btn" data-quick="today" data-quick-target="todo-detail-due-date">Today</button>
+        <button type="button" class="quick-date-btn" data-quick="tomorrow" data-quick-target="todo-detail-due-date">Tomorrow</button>
+        <button type="button" class="quick-date-btn" data-quick="nextweek" data-quick-target="todo-detail-due-date">Next week</button>
+        <button type="button" class="quick-date-btn" data-quick="clear" data-quick-target="todo-detail-due-date">Clear</button>
+      </div>
+      <button type="button" id="todo-detail-time-toggle" class="time-toggle-btn">+ Add time</button>
+      <input type="time" id="todo-detail-due-time" style="display:none;">
+      <select id="todo-detail-notify" style="display:none;">
+        <option value="">No notification</option>
+        <option value="0">Notify at time</option>
+        <option value="10">Notify 10 min before</option>
+        <option value="30">Notify 30 min before</option>
+        <option value="60">Notify 1 hr before</option>
+      </select>
+      <div class="due-row">
+        <button type="button" class="quick-date-btn" data-recur-preset="daily">Daily</button>
+        <button type="button" class="quick-date-btn" data-recur-preset="weekdays">Weekdays</button>
+        <button type="button" class="quick-date-btn" data-recur-preset="clear">Clear</button>
+      </div>
+      <div class="weekday-picker" id="todo-detail-recurrence-picker">
+        <button type="button" class="weekday-btn" data-day="sun">Sun</button>
+        <button type="button" class="weekday-btn" data-day="mon">Mon</button>
+        <button type="button" class="weekday-btn" data-day="tue">Tue</button>
+        <button type="button" class="weekday-btn" data-day="wed">Wed</button>
+        <button type="button" class="weekday-btn" data-day="thu">Thu</button>
+        <button type="button" class="weekday-btn" data-day="fri">Fri</button>
+        <button type="button" class="weekday-btn" data-day="sat">Sat</button>
+      </div>
+      <textarea id="todo-detail-note" rows="3" placeholder="Note (optional)"></textarea>
+      <button type="submit">Save</button>
+    </form>
+    <span class="meta" id="todo-detail-status"></span>
+  </div>
 
   <section id="tab-study" class="tab-panel">
     <h2>Study Log</h2>
@@ -568,98 +578,100 @@
     </div>
 
     <button type="button" id="event-fab" class="fab" aria-label="Add event">+</button>
-
-    <div id="event-add-backdrop" class="backdrop hidden"></div>
-    <div id="event-add-panel" class="add-panel hidden">
-      <div class="panel-header">
-        <h3>New Event</h3>
-        <button type="button" id="event-add-close" class="panel-close" aria-label="Close">×</button>
-      </div>
-      <form id="event-form" class="add-form">
-        <input type="text" id="event-title" placeholder="Event title" required>
-        <select id="event-category">
-          <option value="">Category: None</option>
-        </select>
-        <div class="form-row">
-          <input type="date" id="event-date" required>
-        </div>
-        <div class="form-row">
-          <input type="time" id="event-start-time" required>
-          <input type="time" id="event-end-time" required>
-        </div>
-        <select id="event-notify">
-          <option value="">No notification</option>
-          <option value="0">Notify at start time</option>
-          <option value="10">Notify 10 min before</option>
-          <option value="30">Notify 30 min before</option>
-          <option value="60">Notify 1 hr before</option>
-        </select>
-        <div class="due-row">
-          <button type="button" class="quick-date-btn" data-recur-preset="daily">Daily</button>
-          <button type="button" class="quick-date-btn" data-recur-preset="weekdays">Weekdays</button>
-          <button type="button" class="quick-date-btn" data-recur-preset="clear">Clear</button>
-        </div>
-        <div class="weekday-picker" id="event-recurrence-picker">
-          <button type="button" class="weekday-btn" data-day="mon">Mon</button>
-          <button type="button" class="weekday-btn" data-day="tue">Tue</button>
-          <button type="button" class="weekday-btn" data-day="wed">Wed</button>
-          <button type="button" class="weekday-btn" data-day="thu">Thu</button>
-          <button type="button" class="weekday-btn" data-day="fri">Fri</button>
-          <button type="button" class="weekday-btn" data-day="sat">Sat</button>
-          <button type="button" class="weekday-btn" data-day="sun">Sun</button>
-        </div>
-        <input type="date" id="event-recurrence-until" placeholder="Recurrence end date (optional)">
-        <textarea id="event-note" rows="3" placeholder="Note (optional)"></textarea>
-        <button type="submit">+ Add</button>
-      </form>
-    </div>
-
-    <div id="event-detail-backdrop" class="backdrop hidden"></div>
-    <div id="event-detail-panel" class="add-panel hidden">
-      <div class="panel-header">
-        <h3>Edit Event</h3>
-        <button type="button" id="event-detail-close" class="panel-close" aria-label="Close">×</button>
-      </div>
-      <form id="event-detail-form" class="add-form">
-        <input type="text" id="event-detail-title" placeholder="Event title" required>
-        <select id="event-detail-category">
-          <option value="">Category: None</option>
-        </select>
-        <div class="form-row">
-          <input type="date" id="event-detail-date" required>
-        </div>
-        <div class="form-row">
-          <input type="time" id="event-detail-start-time" required>
-          <input type="time" id="event-detail-end-time" required>
-        </div>
-        <select id="event-detail-notify">
-          <option value="">No notification</option>
-          <option value="0">Notify at start time</option>
-          <option value="10">Notify 10 min before</option>
-          <option value="30">Notify 30 min before</option>
-          <option value="60">Notify 1 hr before</option>
-        </select>
-        <div class="due-row">
-          <button type="button" class="quick-date-btn" data-recur-preset="daily">Daily</button>
-          <button type="button" class="quick-date-btn" data-recur-preset="weekdays">Weekdays</button>
-          <button type="button" class="quick-date-btn" data-recur-preset="clear">Clear</button>
-        </div>
-        <div class="weekday-picker" id="event-detail-recurrence-picker">
-          <button type="button" class="weekday-btn" data-day="mon">Mon</button>
-          <button type="button" class="weekday-btn" data-day="tue">Tue</button>
-          <button type="button" class="weekday-btn" data-day="wed">Wed</button>
-          <button type="button" class="weekday-btn" data-day="thu">Thu</button>
-          <button type="button" class="weekday-btn" data-day="fri">Fri</button>
-          <button type="button" class="weekday-btn" data-day="sat">Sat</button>
-          <button type="button" class="weekday-btn" data-day="sun">Sun</button>
-        </div>
-        <input type="date" id="event-detail-recurrence-until" placeholder="Recurrence end date (optional)">
-        <textarea id="event-detail-note" rows="3" placeholder="Note (optional)"></textarea>
-        <button type="submit">Save</button>
-      </form>
-      <span class="meta" id="event-detail-status"></span>
-    </div>
   </section>
+
+  <!-- 予定の追加・詳細パネルはToDoタブ横の「今日の予定」からも開くため、カレンダータブの外に置く。
+       タブの中にあると、他のタブを表示している間はタブごと非表示になり開けない(2026-09-27) -->
+  <div id="event-add-backdrop" class="backdrop hidden"></div>
+  <div id="event-add-panel" class="add-panel hidden">
+    <div class="panel-header">
+      <h3>New Event</h3>
+      <button type="button" id="event-add-close" class="panel-close" aria-label="Close">×</button>
+    </div>
+    <form id="event-form" class="add-form">
+      <input type="text" id="event-title" placeholder="Event title" required>
+      <select id="event-category">
+        <option value="">Category: None</option>
+      </select>
+      <div class="form-row">
+        <input type="date" id="event-date" required>
+      </div>
+      <div class="form-row">
+        <input type="time" id="event-start-time" required>
+        <input type="time" id="event-end-time" required>
+      </div>
+      <select id="event-notify">
+        <option value="">No notification</option>
+        <option value="0">Notify at start time</option>
+        <option value="10">Notify 10 min before</option>
+        <option value="30">Notify 30 min before</option>
+        <option value="60">Notify 1 hr before</option>
+      </select>
+      <div class="due-row">
+        <button type="button" class="quick-date-btn" data-recur-preset="daily">Daily</button>
+        <button type="button" class="quick-date-btn" data-recur-preset="weekdays">Weekdays</button>
+        <button type="button" class="quick-date-btn" data-recur-preset="clear">Clear</button>
+      </div>
+      <div class="weekday-picker" id="event-recurrence-picker">
+        <button type="button" class="weekday-btn" data-day="mon">Mon</button>
+        <button type="button" class="weekday-btn" data-day="tue">Tue</button>
+        <button type="button" class="weekday-btn" data-day="wed">Wed</button>
+        <button type="button" class="weekday-btn" data-day="thu">Thu</button>
+        <button type="button" class="weekday-btn" data-day="fri">Fri</button>
+        <button type="button" class="weekday-btn" data-day="sat">Sat</button>
+        <button type="button" class="weekday-btn" data-day="sun">Sun</button>
+      </div>
+      <input type="date" id="event-recurrence-until" placeholder="Recurrence end date (optional)">
+      <textarea id="event-note" rows="3" placeholder="Note (optional)"></textarea>
+      <button type="submit">+ Add</button>
+    </form>
+  </div>
+
+  <div id="event-detail-backdrop" class="backdrop hidden"></div>
+  <div id="event-detail-panel" class="add-panel hidden">
+    <div class="panel-header">
+      <h3>Edit Event</h3>
+      <button type="button" id="event-detail-close" class="panel-close" aria-label="Close">×</button>
+    </div>
+    <form id="event-detail-form" class="add-form">
+      <input type="text" id="event-detail-title" placeholder="Event title" required>
+      <select id="event-detail-category">
+        <option value="">Category: None</option>
+      </select>
+      <div class="form-row">
+        <input type="date" id="event-detail-date" required>
+      </div>
+      <div class="form-row">
+        <input type="time" id="event-detail-start-time" required>
+        <input type="time" id="event-detail-end-time" required>
+      </div>
+      <select id="event-detail-notify">
+        <option value="">No notification</option>
+        <option value="0">Notify at start time</option>
+        <option value="10">Notify 10 min before</option>
+        <option value="30">Notify 30 min before</option>
+        <option value="60">Notify 1 hr before</option>
+      </select>
+      <div class="due-row">
+        <button type="button" class="quick-date-btn" data-recur-preset="daily">Daily</button>
+        <button type="button" class="quick-date-btn" data-recur-preset="weekdays">Weekdays</button>
+        <button type="button" class="quick-date-btn" data-recur-preset="clear">Clear</button>
+      </div>
+      <div class="weekday-picker" id="event-detail-recurrence-picker">
+        <button type="button" class="weekday-btn" data-day="mon">Mon</button>
+        <button type="button" class="weekday-btn" data-day="tue">Tue</button>
+        <button type="button" class="weekday-btn" data-day="wed">Wed</button>
+        <button type="button" class="weekday-btn" data-day="thu">Thu</button>
+        <button type="button" class="weekday-btn" data-day="fri">Fri</button>
+        <button type="button" class="weekday-btn" data-day="sat">Sat</button>
+        <button type="button" class="weekday-btn" data-day="sun">Sun</button>
+      </div>
+      <input type="date" id="event-detail-recurrence-until" placeholder="Recurrence end date (optional)">
+      <textarea id="event-detail-note" rows="3" placeholder="Note (optional)"></textarea>
+      <button type="submit">Save</button>
+    </form>
+    <span class="meta" id="event-detail-status"></span>
+  </div>
 
 </main>
 </div>

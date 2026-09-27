@@ -13,6 +13,7 @@ function switchTab(tabId) {
   // 表示された瞬間に高さを再計算する(updateCalGridHeightはapp.js後方で定義、
   // switchTab自体はクリック時にしか呼ばれないのでhoisting上の問題はない)
   if (tabId === "tab-calendar" && typeof updateCalGridHeight === "function") updateCalGridHeight();
+  if (tabId === "tab-todo" && typeof loadTodayPanel === "function") loadTodayPanel();
 }
 
 tabButtons.forEach((btn) => {
@@ -501,7 +502,10 @@ function renderTodoItem(t, list) {
   if (overdue) li.classList.add("overdue");
   if (!t.done && !t.skipped && t.due_date === todayStr() && !overdue) li.classList.add("due-today");
   if (t.priority === "high") li.classList.add("priority-high");
-  const dueLabel = t.due_date ? `${ICONS.calendar} ${t.due_date}${t.due_time ? " " + t.due_time : ""}` : "";
+  // 今日が期限のものは「Today」見出しの下に並ぶので日付は重複。時刻があれば時刻だけ残す(2026-09-27)
+  const dueLabel = !t.due_date ? ""
+    : t.due_date === todayStr() ? (t.due_time ? `${ICONS.clock} ${t.due_time}` : "")
+    : `${ICONS.calendar} ${t.due_date}${t.due_time ? " " + t.due_time : ""}`;
   const recurLabel = recurrenceLabel(t.recurrence);
   const priorityLabel = t.priority && t.priority !== "medium" ? `[${PRIORITY_LABEL[t.priority] || t.priority}] ` : "";
   const noteMark = t.note ? ` ${ICONS.note}` : "";
@@ -519,8 +523,10 @@ function renderTodoItem(t, list) {
         <input type="checkbox" ${t.done ? "checked" : ""}>
         <span class="todo-card-dot" style="background:${dotColor}"></span>
         <div class="todo-card-main">
-          <span class="todo-card-title">${priorityLabel}${escapeHtml(t.title)}${noteMark}</span>
+          <span class="todo-card-title" title="${escapeHtml(t.title)}">${priorityLabel}${escapeHtml(t.title)}${noteMark}</span>
           <span class="todo-card-meta">${t.category || ""} ${dueLabel}${recurLabel}${t.skipped ? " · Skipped" : ""}</span>
+        </div>
+        <div class="todo-card-actions">
           ${showReschedule ? `
             <div class="reschedule-row">
               <button type="button" class="reschedule-btn" data-kind="+30">+30 min</button>
@@ -528,8 +534,6 @@ function renderTodoItem(t, list) {
               <button type="button" class="reschedule-btn" data-kind="tomorrow">Tomorrow</button>
             </div>
           ` : ""}
-        </div>
-        <div class="todo-card-actions">
           ${!t.done && !t.skipped && t.category ? `<button class="play-btn" title="Start recording">${ICONS.play}</button>` : ""}
           ${!t.done ? `<button class="skip-btn" title="${t.skipped ? "Unskip" : "Skip (don't carry over, keep record)"}">${ICONS.skip}</button>` : ""}
           <button class="delete-btn" title="Delete">${ICONS.trash}</button>
@@ -741,6 +745,69 @@ async function loadTodoStats() {
   const stats = await api("/api/todos/stats");
   renderTodoStats(stats);
 }
+
+// ---------- ToDoタブ横の「今日の予定」「今日の勉強時間」(PC幅のみ表示, 2026-09-27) ----------
+// PCではToDoが数件だと右側が空白だらけだったため、その日の行動に直結する情報で埋める。
+// 予定は「始めるきっかけ」、科目別の勉強時間は「やった分がすぐ見えるごほうび」として置く。
+async function loadTodayPanel() {
+  const today = todayStr();
+  const [y, m] = today.split("-").map(Number);
+  const [eventsRes, dailyRes, progressRes] = await Promise.allSettled([
+    api(`/api/events?year=${y}&month=${m}`),
+    api("/api/study-logs/daily"),
+    api("/api/study-logs/progress"),
+  ]);
+  renderTodaySchedule(eventsRes.status === "fulfilled" ? eventsRes.value.filter((e) => e.date === today) : null);
+  renderTodayStudy(
+    dailyRes.status === "fulfilled" ? dailyRes.value.filter((r) => r.d === today && r.total_minutes > 0) : null,
+    progressRes.status === "fulfilled" ? progressRes.value : null,
+  );
+}
+
+function renderTodaySchedule(events) {
+  const el = document.getElementById("today-schedule");
+  if (events === null) {
+    el.innerHTML = `<p class="today-empty">Couldn't load events</p>`;
+    return;
+  }
+  events.sort((a, b) => (a.start_time || "").localeCompare(b.start_time || ""));
+  el.innerHTML = `
+    ${events.map((e, i) => `
+      <button type="button" class="today-event" data-i="${i}">
+        <span class="today-event-time">${e.start_time || "All day"}</span>
+        <i style="background:${colorFor(e.category)}"></i>
+        <span class="today-event-title">${escapeHtml(e.title)}</span>
+      </button>`).join("") || `<p class="today-empty">No events today</p>`}
+    <button type="button" class="link-btn" id="today-add-event">+ Add event</button>
+  `;
+  el.querySelectorAll(".today-event").forEach((btn) => {
+    btn.addEventListener("click", () => openEventDetail(events[Number(btn.dataset.i)]));
+  });
+  el.querySelector("#today-add-event").addEventListener("click", () => {
+    openEventAddPanel();
+    document.getElementById("event-date").value = todayStr();
+  });
+}
+
+function renderTodayStudy(rows, progress) {
+  const el = document.getElementById("today-study");
+  if (rows === null || progress === null) {
+    el.innerHTML = `<p class="today-empty">Couldn't load study time</p>`;
+    return;
+  }
+  const max = Math.max(1, ...rows.map((r) => r.total_minutes));
+  el.innerHTML = `
+    <div class="today-study-total">${progress.today_minutes} <span>${progress.daily_minimum_minutes ? `/ ${progress.daily_minimum_minutes} ` : ""}min</span></div>
+    ${rows.map((r) => `
+      <div class="today-study-row">
+        <span class="today-study-subject">${escapeHtml(r.subject)}</span>
+        <span class="today-study-bar"><i style="width:${(r.total_minutes / max) * 100}%;background:${colorFor(r.subject)}"></i></span>
+        <span class="today-study-min">${r.total_minutes} min</span>
+      </div>`).join("") || `<p class="today-empty">Nothing yet today</p>`}
+  `;
+}
+
+document.getElementById("today-study").addEventListener("click", () => switchTab("tab-study"));
 
 const todoAddPanel = document.getElementById("todo-add-panel");
 const todoAddBackdrop = document.getElementById("todo-add-backdrop");
@@ -1750,13 +1817,24 @@ document.getElementById("focus-minimize-btn").addEventListener("click", minimize
 function showMiniBar() {
   const bar = document.getElementById("mini-timer-bar");
   bar.classList.remove("hidden");
-  bar.style.bottom = `${document.getElementById("tabbar").getBoundingClientRect().height}px`;
   document.getElementById("mini-timer-subject").textContent = timerSubject;
   bar.style.setProperty("--subject-color", colorFor(timerSubject));
   updateMiniStatus();
   updateFocusDisplay();
+  positionMiniBar();
+}
+
+// 下部タブバーはスマホ幅でだけ表示されるので、その高さは表示中にウィンドウ幅が変わると変わる。
+// 以前は表示した瞬間の高さを固定していたため、狭いウィンドウで開始してから広げると、
+// PC表示で消えたタブバーの分(約53px)だけバーの下に隙間が残っていた(2026-09-27)
+function positionMiniBar() {
+  const bar = document.getElementById("mini-timer-bar");
+  if (bar.classList.contains("hidden")) return;
+  bar.style.bottom = `${document.getElementById("tabbar").getBoundingClientRect().height}px`;
   raiseFabsAboveMiniBar();
 }
+
+window.addEventListener("resize", positionMiniBar);
 
 function hideMiniBar() {
   document.getElementById("mini-timer-bar").classList.add("hidden");
@@ -1968,6 +2046,7 @@ async function finishSession(elapsedMinutes) {
   loadActivityHeatmap();
   loadGoalProgress();
   loadScreenBudget(); // 学習分がスマホ利用予算のボーナスに反映されるため
+  loadTodayPanel();
 }
 
 // alert()/vibrate() only reach the user while this tab is focused; a background tab or locked
@@ -4062,6 +4141,7 @@ function renderCalendarView() {
 }
 
 async function loadCalendar() {
+  loadTodayPanel(); // 予定の追加・編集・削除はすべてここを通るので、ToDoタブ横の「今日の予定」もここで追従させる
   const monthKeys = neededCalMonthKeys();
   updateCalMonthLabel();
   if (calViewMode === "week") {
@@ -5095,6 +5175,7 @@ async function hydrateFromCache() {
   await autoSkipOverdueTodos();
 
   const backgroundResults = await Promise.allSettled([
+    loadTodayPanel(),
     loadStudySummary(),
     loadStudyLogList(),
     loadStudyChart(),
