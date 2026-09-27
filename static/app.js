@@ -1627,18 +1627,16 @@ function hideMiniBar() {
 
 // 計測中はミニタイマーバーが画面下に浮くので、+ボタン(各タブに1つずつ、.fab)が
 // それと重ならないよう分だけ底上げする(2026-08-16)。
+// 以前は.fabだけにstyle.bottomを直書きしていたため、学習記録タブの科目ミニメニューが
+// 取り残されて最下段の科目が▶ボタンに隠れていた(2026-09-27)。CSS変数1つで両方を動かす。
 function raiseFabsAboveMiniBar() {
   const bar = document.getElementById("mini-timer-bar");
   const barHeight = bar.getBoundingClientRect().height;
-  document.querySelectorAll(".fab").forEach((fab) => {
-    fab.style.bottom = `calc(92px + ${barHeight}px)`;
-  });
+  document.documentElement.style.setProperty("--fab-lift", `${barHeight}px`);
 }
 
 function resetFabPosition() {
-  document.querySelectorAll(".fab").forEach((fab) => {
-    fab.style.bottom = "";
-  });
+  document.documentElement.style.removeProperty("--fab-lift");
 }
 
 function updateMiniStatus() {
