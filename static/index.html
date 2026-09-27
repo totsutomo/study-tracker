@@ -102,18 +102,20 @@
   <span id="sleep-banner-label"></span>
 </div>
 
-<div id="daily-min-banner" class="daily-min-banner hidden">
-  <span id="daily-min-banner-label"></span>
-  <div class="stat-bar-track"><div class="stat-bar-fill" id="daily-min-banner-fill"></div></div>
-</div>
-
-<div id="screen-budget-banner" class="daily-min-banner screen-budget-banner hidden">
-  <span id="screen-budget-banner-label"></span>
-  <div class="stat-bar-track"><div class="stat-bar-fill" id="screen-budget-banner-fill"></div></div>
-</div>
-
-<div id="peer-session-banner" class="peer-session-banner hidden">
-  <span id="peer-session-banner-label"></span>
+<!-- 最低ライン・スクリーンタイム・別端末で計測中の3本を1行にまとめた帯(2026-09-27)。
+     以前は3本が縦に積まれてスマホ画面の約2割を常に使っていた -->
+<div id="status-strip" class="status-strip">
+  <div id="daily-min-banner" class="strip-item daily-min-banner hidden">
+    <span id="daily-min-banner-label"></span>
+    <div class="stat-bar-track"><div class="stat-bar-fill" id="daily-min-banner-fill"></div></div>
+  </div>
+  <div id="screen-budget-banner" class="strip-item screen-budget-banner hidden">
+    <span id="screen-budget-banner-label"></span>
+    <div class="stat-bar-track"><div class="stat-bar-fill" id="screen-budget-banner-fill"></div></div>
+  </div>
+  <div id="peer-session-banner" class="peer-session-banner hidden">
+    <span id="peer-session-banner-label"></span>
+  </div>
 </div>
 
 <main id="app">
@@ -216,6 +218,16 @@
         <h3>Edit Task</h3>
         <button type="button" id="todo-detail-close" class="panel-close" aria-label="Close">×</button>
       </div>
+      <!-- スマホのToDoカードから外したボタンの移動先(2026-09-27) -->
+      <div class="todo-detail-actions" id="todo-detail-reschedule">
+        <button type="button" class="quick-date-btn" data-detail-reschedule="+30">+30 min</button>
+        <button type="button" class="quick-date-btn" data-detail-reschedule="+60">+1 hr</button>
+        <button type="button" class="quick-date-btn" data-detail-reschedule="tomorrow">Tomorrow</button>
+      </div>
+      <div class="todo-detail-actions">
+        <button type="button" id="todo-detail-skip" class="secondary">Skip</button>
+        <button type="button" id="todo-detail-delete" class="danger-outline">Delete</button>
+      </div>
       <form id="todo-detail-form" class="add-form">
         <input type="text" id="todo-detail-title" placeholder="Task name" required>
         <div class="form-row">
@@ -270,7 +282,7 @@
     <div class="study-fab-menu hidden" id="study-fab-menu"></div>
     <button type="button" id="study-fab" class="fab" aria-label="Record study">▶</button>
 
-    <h3>Goal</h3>
+    <h3 class="goal-heading">Goal <button type="button" id="goal-edit-btn" class="link-btn">✎ Edit goals</button></h3>
     <div class="goal-cards-row">
       <div class="goal-progress-card">
         <div class="goal-progress-row">
@@ -295,10 +307,15 @@
       </div>
     </div>
     <div id="today-activity-echo" class="meta today-activity-echo hidden"></div>
-    <form id="goal-minutes-form" class="add-form">
-      <input type="number" id="daily-goal-input" placeholder="Daily minimum (min)" min="0" step="1">
-      <input type="number" id="weekly-goal-input" placeholder="Weekly goal (hr)" min="0" step="0.5">
-      <input type="number" id="monthly-goal-input" placeholder="Monthly goal (hr)" min="0" step="0.5">
+    <!-- 目標は毎日変えるものではないので普段は隠し、「Edit goals」で開く(2026-09-27)。
+         値が入るとplaceholderが消えて何の数字か分からなかったため、ラベルを常に表示する -->
+    <form id="goal-minutes-form" class="add-form goal-form hidden">
+      <label class="goal-field"><span>Daily minimum (min)</span>
+        <input type="number" id="daily-goal-input" min="0" step="1"></label>
+      <label class="goal-field"><span>Weekly goal (hr)</span>
+        <input type="number" id="weekly-goal-input" min="0" step="0.5"></label>
+      <label class="goal-field"><span>Monthly goal (hr)</span>
+        <input type="number" id="monthly-goal-input" min="0" step="0.5"></label>
       <button type="submit">Save</button>
     </form>
 
@@ -342,6 +359,14 @@
 
   <section id="tab-mood" class="tab-panel">
     <h2>Mood</h2>
+    <!-- 気分・サボり(発動ログ)・睡眠の3画面分が縦に積まれて長かったため切り替え式にした(2026-09-27) -->
+    <div class="period-toggle mood-subtabs" id="mood-subtabs">
+      <button type="button" class="period-btn active" data-sub="mood">Mood</button>
+      <button type="button" class="period-btn" data-sub="slacking">Slacking</button>
+      <button type="button" class="period-btn" data-sub="sleep">Sleep</button>
+    </div>
+
+    <div class="mood-subpanel" data-sub="mood">
     <div class="goal-progress-card">
       <div class="goal-progress-row">
         <span>Current mood</span>
@@ -381,7 +406,7 @@
     <div class="stats-header">
       <div class="stat-cell"><span class="stat-label">Week avg</span><span class="stat-value" id="mood-stat-week"></span></div>
       <div class="stat-cell"><span class="stat-label">Month avg</span><span class="stat-value" id="mood-stat-month"></span></div>
-      <div class="stat-cell"><span class="stat-label">Low-mood day achievement</span><span class="stat-value" id="mood-stat-low-mood-rate"></span></div>
+      <div class="stat-cell"><span class="stat-label">Hit minimum on low days</span><span class="stat-value" id="mood-stat-low-mood-rate"></span></div>
     </div>
     <div class="stats-header">
       <div class="stat-cell"><span class="stat-label">Mood avg by screen time</span><span class="stat-value" id="mood-stat-screen-time-correlation"></span></div>
@@ -407,7 +432,9 @@
       <ul id="mood-log-list" class="list"></ul>
     </div>
 
-    <h2>Activation Log</h2>
+    </div>
+
+    <div class="mood-subpanel hidden" data-sub="slacking">
     <p class="meta" id="activation-current-status"></p>
     <div class="stats-header">
       <div class="stat-cell"><span class="stat-label">This week</span><span class="stat-value" id="activation-stat-week"></span></div>
@@ -415,7 +442,9 @@
       <div class="stat-cell"><span class="stat-label">Total</span><span class="stat-value" id="activation-stat-total"></span></div>
     </div>
     <p class="meta" id="activation-post-return-stats"></p>
+    <h3 id="activation-mood-reasons-heading" class="hidden">Mood when slacking started (30d)</h3>
     <ul id="activation-mood-reasons" class="mood-reason-list hidden"></ul>
+    <h3 id="study-trigger-heading" class="hidden">How study sessions started (30d)</h3>
     <ul id="study-trigger-stats" class="mood-reason-list hidden"></ul>
     <h3 id="activation-list-header">History</h3>
     <ul id="activation-list" class="list"></ul>
@@ -425,13 +454,16 @@
     </div>
     <textarea id="activation-export-text" rows="6" class="hidden" readonly></textarea>
 
-    <h2>Sleep</h2>
+    </div>
+
+    <div class="mood-subpanel hidden" data-sub="sleep">
     <div class="stats-header">
       <div class="stat-cell"><span class="stat-label">Last night</span><span class="stat-value" id="sleep-stat-last-night"></span></div>
       <div class="stat-cell"><span class="stat-label">Last 30 days avg</span><span class="stat-value" id="sleep-stat-avg"></span></div>
     </div>
     <h3 id="sleep-log-header">History</h3>
     <ul id="sleep-log-list" class="list"></ul>
+    </div>
   </section>
 
   <section id="tab-scores" class="tab-panel">
@@ -862,6 +894,12 @@
   <div class="panel-header">
     <h3>Good morning</h3>
     <button type="button" id="wake-mood-close" class="panel-close" aria-label="Close">×</button>
+  </div>
+  <!-- 起床は「Wake up」を押した時刻で記録されるため、押すのが遅れた日にここで直せるようにした(2026-09-27) -->
+  <div class="wake-time-row">
+    <label for="wake-time-input">Woke up at</label>
+    <input type="time" id="wake-time-input">
+    <span class="meta" id="wake-slept-label"></span>
   </div>
   <h4>How are you feeling?</h4>
   <div class="mood-scale-buttons" id="wake-mood-buttons">

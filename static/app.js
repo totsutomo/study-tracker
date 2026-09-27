@@ -475,6 +475,24 @@ function attachSwipeGestures(li, content, completeBg, skipBg, t, onTap) {
   });
 }
 
+// カードの後ろ倒しボタン(PC)と詳細パネルのボタン(スマホ)の両方から使う
+async function rescheduleTodo(t, kind) {
+  const { due_date, due_time } = computeReschedule(t, kind);
+  const prev = { due_date: t.due_date, due_time: t.due_time };
+  await optimistic(
+    () => { t.due_date = due_date; t.due_time = due_time; renderTodos(); },
+    () => { Object.assign(t, prev); renderTodos(); },
+    async () => {
+      await api(`/api/todos/${t.id}/due`, { method: "PUT", body: JSON.stringify({ due_date, due_time }) });
+      loadCalendar();
+    },
+  );
+}
+
+function canReschedule(t) {
+  return !t.done && !t.skipped && t.due_date && (isOverdue(t) || t.due_date === todayStr());
+}
+
 function renderTodoItem(t, list) {
   const li = document.createElement("li");
   if (t.done) li.classList.add("done");
@@ -487,7 +505,7 @@ function renderTodoItem(t, list) {
   const recurLabel = recurrenceLabel(t.recurrence);
   const priorityLabel = t.priority && t.priority !== "medium" ? `[${PRIORITY_LABEL[t.priority] || t.priority}] ` : "";
   const noteMark = t.note ? ` ${ICONS.note}` : "";
-  const showReschedule = !t.done && !t.skipped && t.due_date && (overdue || t.due_date === todayStr());
+  const showReschedule = canReschedule(t);
   const dotColor = t.category ? colorFor(t.category) : "var(--border)";
   li.innerHTML = `
     <div class="todo-swipe-bg ${t.done ? "undo" : "complete"}">
@@ -542,18 +560,9 @@ function renderTodoItem(t, list) {
     deleteTodo(t);
   });
   li.querySelectorAll(".reschedule-btn").forEach((btn) => {
-    btn.addEventListener("click", async (e) => {
+    btn.addEventListener("click", (e) => {
       e.stopPropagation();
-      const { due_date, due_time } = computeReschedule(t, btn.dataset.kind);
-      const prev = { due_date: t.due_date, due_time: t.due_time };
-      await optimistic(
-        () => { t.due_date = due_date; t.due_time = due_time; renderTodos(); },
-        () => { Object.assign(t, prev); renderTodos(); },
-        async () => {
-          await api(`/api/todos/${t.id}/due`, { method: "PUT", body: JSON.stringify({ due_date, due_time }) });
-          loadCalendar();
-        },
-      );
+      rescheduleTodo(t, btn.dataset.kind);
     });
   });
   attachSwipeGestures(
@@ -1077,6 +1086,10 @@ function openTodoDetail(t) {
   setDetailRecurrenceDays(t.recurrence ? t.recurrence.split(",") : []);
   document.getElementById("todo-detail-note").value = t.note || "";
   document.getElementById("todo-detail-status").textContent = "";
+  document.getElementById("todo-detail-reschedule").classList.toggle("hidden", !canReschedule(t));
+  const skipBtn = document.getElementById("todo-detail-skip");
+  skipBtn.classList.toggle("hidden", !!t.done);
+  skipBtn.textContent = t.skipped ? "Unskip" : "Skip";
   document.getElementById("todo-detail-panel").classList.remove("hidden");
   document.getElementById("todo-detail-backdrop").classList.remove("hidden");
 }
@@ -1088,6 +1101,33 @@ function closeTodoDetail() {
 }
 
 document.getElementById("todo-detail-close").addEventListener("click", closeTodoDetail);
+
+function currentDetailTodo() {
+  return allTodos.find((x) => x.id === currentDetailTodoId);
+}
+
+document.querySelectorAll("[data-detail-reschedule]").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    const t = currentDetailTodo();
+    if (!t) return;
+    closeTodoDetail();
+    rescheduleTodo(t, btn.dataset.detailReschedule);
+  });
+});
+
+document.getElementById("todo-detail-skip").addEventListener("click", () => {
+  const t = currentDetailTodo();
+  if (!t) return;
+  closeTodoDetail();
+  toggleTodoSkip(t);
+});
+
+document.getElementById("todo-detail-delete").addEventListener("click", () => {
+  const t = currentDetailTodo();
+  if (!t) return;
+  closeTodoDetail();
+  deleteTodo(t);
+});
 document.getElementById("todo-detail-backdrop").addEventListener("click", closeTodoDetail);
 
 guardedSubmit(document.getElementById("todo-detail-form"), async (e) => {
@@ -1428,12 +1468,13 @@ function updatePeerSessionBanner() {
   // サーバー側がstarted_atを巻き戻してくれる(main.py focus_session_pause参照)ので、次の
   // ポーリングで元の経過分数表示に自然に戻る。
   if (peerSessionPaused) {
-    label.innerHTML = `${ICONS.clock}Studying now${subjectText} · Paused`;
+    label.innerHTML = `${ICONS.clock}${peerSessionSubject || "Studying"} · Paused`;
     banner.classList.remove("hidden");
     return;
   }
   const elapsedMin = Math.max(0, Math.floor((Date.now() - peerSessionStartedAt.getTime()) / 60000));
-  label.innerHTML = `${ICONS.clock}Studying now${subjectText} · ${formatLogDuration(elapsedMin)}`;
+  label.innerHTML = `${ICONS.clock}${peerSessionSubject || "Studying"} · ${formatLogDuration(elapsedMin)}`;
+  banner.title = `Studying now on another device${subjectText}`;
   banner.classList.remove("hidden");
 }
 
@@ -2240,7 +2281,8 @@ async function loadGoalProgress() {
     dailyMinFill.style.width = fillPct;
     banner.classList.remove("hidden");
     banner.classList.toggle("reached", reached);
-    bannerLabel.innerHTML = reached ? `Today's minimum ${labelText}` : `${p.daily_minimum_minutes - p.today_minutes} min left today`;
+    // スクリーンタイム側も「〜min left」になるため、帯の中でどちらの話か分かるよう頭に「Study」を付ける
+    bannerLabel.innerHTML = reached ? `Study ${labelText}` : `Study: ${p.daily_minimum_minutes - p.today_minutes} min to go`;
     bannerFill.style.width = fillPct;
   } else {
     dailyMinLabel.textContent = "Not set";
@@ -2316,9 +2358,9 @@ async function loadScreenBudget() {
   const deviceText = deviceParts.length ? ` (${deviceParts.join(" · ")})` : "";
   const remaining = s.remaining_minutes;
 
-  label.textContent = remaining > 0
-    ? `${remaining} min left today${deviceText}`
-    : `Screen budget used up${deviceText}`;
+  // 帯の中では幅が限られるので端末別の内訳はツールチップ(title)に回す
+  label.textContent = remaining > 0 ? `Screen: ${remaining} min left` : "Screen: used up";
+  banner.title = `Screen time today${deviceText}`;
   fill.style.width = `${Math.min(100, Math.max(0, (s.consumed_minutes / s.budget_minutes) * 100))}%`;
 
   banner.classList.remove("hidden");
@@ -2488,7 +2530,7 @@ async function loadMoodReasonStats() {
   list.classList.remove("hidden");
   rows.forEach((r) => {
     const li = document.createElement("li");
-    li.textContent = `${r.reason} avg ${r.avg_score} (${r.count})`;
+    li.textContent = `${r.reason}: mood ${r.avg_score} · ${r.count}×`;
     list.appendChild(li);
   });
 }
@@ -2636,15 +2678,29 @@ guardedSubmit(document.getElementById("goal-minutes-form"), async (e) => {
   try {
     await api("/api/settings", { method: "PUT", body: JSON.stringify(payload) });
     loadGoalProgress();
+    setGoalEditing(false);
   } catch (err) {
     showToast("目標設定の保存に失敗しました。もう一度お試しください");
   }
 });
 
+function setGoalEditing(editing) {
+  document.getElementById("goal-minutes-form").classList.toggle("hidden", !editing);
+  document.getElementById("goal-edit-btn").textContent = editing ? "Cancel" : "✎ Edit goals";
+  if (editing) document.getElementById("daily-goal-input").focus({ preventScroll: true });
+}
+
+document.getElementById("goal-edit-btn").addEventListener("click", () => {
+  const editing = document.getElementById("goal-minutes-form").classList.contains("hidden");
+  if (!editing) loadGoalProgress(); // キャンセル時は入力途中の値を保存済みの値に戻す
+  setGoalEditing(editing);
+});
+
 // ---------- summary & log list ----------
 
 async function loadStudySummary() {
-  const summary = await api("/api/study-logs/summary");
+  // 0分の行(改名前の古いカテゴリー名「数学」など)は情報がないので出さない(2026-09-27)
+  const summary = (await api("/api/study-logs/summary")).filter((s) => s.total_minutes > 0);
   const list = document.getElementById("study-summary");
   list.innerHTML = "";
   if (summary.length === 0) {
@@ -3156,6 +3212,7 @@ async function loadActivationMoodReasons() {
   const rows = await api("/api/activation-logs/mood-reasons?days=30");
   const list = document.getElementById("activation-mood-reasons");
   list.innerHTML = "";
+  document.getElementById("activation-mood-reasons-heading").classList.toggle("hidden", rows.length === 0);
   if (rows.length === 0) {
     list.classList.add("hidden");
     return;
@@ -3168,10 +3225,28 @@ async function loadActivationMoodReasons() {
   });
 }
 
+// start_triggerには他アプリ連携の内部名("vocab-app:review"等)がそのまま入っているので、表示用に言い換える
+const START_TRIGGER_LABEL = {
+  "vocab-app:review": "Vocab review",
+  "vocab-app:reading": "Vocab reading",
+  "vocab-app:news": "Vocab news",
+  "drill-tracker:solve": "Drill",
+  "stack:review": "Cards (Stack)",
+  "Continuing previous study": "Continuing study",
+  "No particular reason": "No reason",
+};
+
+function startTriggerLabel(trigger) {
+  if (START_TRIGGER_LABEL[trigger]) return START_TRIGGER_LABEL[trigger];
+  if (trigger.startsWith("vocab-app:")) return `Vocab ${trigger.slice("vocab-app:".length)}`;
+  return trigger;
+}
+
 async function loadStudyTriggerStats() {
   const rows = await api("/api/study-logs/trigger-stats?days=30");
   const list = document.getElementById("study-trigger-stats");
   list.innerHTML = "";
+  document.getElementById("study-trigger-heading").classList.toggle("hidden", rows.length === 0);
   if (rows.length === 0) {
     list.classList.add("hidden");
     return;
@@ -3179,7 +3254,7 @@ async function loadStudyTriggerStats() {
   list.classList.remove("hidden");
   rows.forEach((r) => {
     const li = document.createElement("li");
-    li.textContent = `${r.start_trigger} ${r.count}`;
+    li.textContent = `${startTriggerLabel(r.start_trigger)} ${r.count}`;
     list.appendChild(li);
   });
 }
@@ -3416,12 +3491,45 @@ async function loadSleepActive() {
 
 document.getElementById("sleep-banner").addEventListener("click", openSettingsPanel);
 
-function openWakeMoodPanel() {
+// 朝のパネルで直せるよう、今回記録した睡眠ログ(id・就寝・起床時刻)を覚えておく
+let wakePanelLog = null;
+
+function wakeTimeFromInput() {
+  // 入力は時刻だけなので、記録済みの起床時刻と同じ日付を基準にし、就寝より前になるなら翌日扱いにする
+  const hm = document.getElementById("wake-time-input").value;
+  if (!wakePanelLog || !hm) return null;
+  const base = wakePanelLog.wake_at.slice(0, 10);
+  let candidate = new Date(`${base}T${hm}:00`);
+  const bed = new Date(wakePanelLog.bedtime_at.replace(" ", "T"));
+  if (candidate <= bed) candidate = new Date(candidate.getTime() + 24 * 3600 * 1000);
+  return candidate;
+}
+
+function updateWakeSleptLabel() {
+  const el = document.getElementById("wake-slept-label");
+  const wake = wakeTimeFromInput();
+  if (!wake) {
+    el.textContent = "";
+    return;
+  }
+  const bed = new Date(wakePanelLog.bedtime_at.replace(" ", "T"));
+  el.textContent = `Slept ${formatLogDuration(Math.round((wake - bed) / 60000))}`;
+}
+
+document.getElementById("wake-time-input").addEventListener("input", updateWakeSleptLabel);
+
+function openWakeMoodPanel(log = null) {
   const panel = document.getElementById("wake-mood-panel");
   const backdrop = document.getElementById("wake-mood-backdrop");
   const buttons = document.getElementById("wake-mood-buttons");
   setBedtimeMoodScore(buttons, null);
   wakeMoodScore = null;
+  wakePanelLog = log;
+  document.querySelector("#wake-mood-panel .wake-time-row").classList.toggle("hidden", !log);
+  if (log) {
+    document.getElementById("wake-time-input").value = log.wake_at.slice(11, 16);
+    updateWakeSleptLabel();
+  }
   panel.classList.remove("hidden");
   backdrop.classList.remove("hidden");
 }
@@ -3437,11 +3545,12 @@ async function wakeUp() {
   sleepActiveLog = null;
   renderSleepStatus(); // 楽観的に即座に「起床済み」表示へ
   try {
+    const wake_at = nowLocalTimestamp();
     await api(`/api/sleep-logs/${activeLog.id}`, {
       method: "PUT",
-      body: JSON.stringify({ wake_at: nowLocalTimestamp() }),
+      body: JSON.stringify({ wake_at }),
     });
-    openWakeMoodPanel();
+    openWakeMoodPanel({ id: activeLog.id, bedtime_at: activeLog.bedtime_at, wake_at });
   } catch (err) {
     showToast("起床の記録に失敗しました。もう一度お試しください");
   } finally {
@@ -3751,7 +3860,20 @@ document.getElementById("wake-mood-backdrop").addEventListener("click", closeWak
 
 document.getElementById("wake-mood-save").addEventListener("click", async () => {
   const score = wakeMoodScore;
+  const log = wakePanelLog;
+  const correctedWake = wakeTimeFromInput();
   closeWakeMoodPanel();
+  if (log && correctedWake) {
+    const corrected = `${formatLocalDate(correctedWake)} ${String(correctedWake.getHours()).padStart(2, "0")}:${String(correctedWake.getMinutes()).padStart(2, "0")}:00`;
+    if (corrected.slice(0, 16) !== log.wake_at.slice(0, 16)) {
+      try {
+        await api(`/api/sleep-logs/${log.id}`, { method: "PUT", body: JSON.stringify({ wake_at: corrected }) });
+        loadSleepPanel();
+      } catch (err) {
+        showToast("起床時刻の修正に失敗しました。Sleepの履歴から直せます");
+      }
+    }
+  }
   if (score == null) return;
   try {
     await saveMoodScoreOnly(score);
@@ -4053,9 +4175,13 @@ function renderCalGrid() {
       // 名前をそのまま短縮テキストで表示する。ToDoの期限は件数が多く/カレンダー上では
       // ToDo画面ほど重要でないため、従来通りドットのまま(2026-08-16)。
       // セル幅に余裕のあるPC(md+)では1件+「+N件」に丸めず最大3件まで表示する(2026-08-29)。
+      // スマホ幅では1件+「英語シ… +9 more」が読めなかったため、2件以上ある日は件数だけにする
+      // (中身は日付をタップした下の一覧で見る)。1件だけの日は2026-08-16の方針通り名前を出す(2026-09-27)。
       const eventCap = calEventDisplayCap();
       let eventMark = "";
-      if (dayEvents.length > 0) {
+      if (dayEvents.length > 1 && eventCap === 1) {
+        eventMark = `<div class="cal-events"><span class="cal-event-count"><i style="background:${colorFor(dayEvents[0].category || "")}"></i>${dayEvents.length}</span></div>`;
+      } else if (dayEvents.length > 0) {
         const shown = dayEvents.slice(0, eventCap);
         const restCount = dayEvents.length - shown.length;
         eventMark = `<div class="cal-events">${shown
@@ -4987,6 +5113,30 @@ async function hydrateFromCache() {
     openBedtimePanel();
   }
 })();
+
+// ---------- mood tab sub-tabs (2026-09-27) ----------
+// 最後に開いていたサブタブは端末ごとの使い勝手なのでlocalStorageで覚える
+
+function switchMoodSubtab(sub) {
+  document.querySelectorAll("#mood-subtabs .period-btn").forEach((b) => b.classList.toggle("active", b.dataset.sub === sub));
+  document.querySelectorAll(".mood-subpanel").forEach((p) => p.classList.toggle("hidden", p.dataset.sub !== sub));
+  try {
+    localStorage.setItem("moodSubtab", sub);
+  } catch {
+    // 保存できなくても切り替え自体は効く
+  }
+}
+
+document.querySelectorAll("#mood-subtabs .period-btn").forEach((b) => {
+  b.addEventListener("click", () => switchMoodSubtab(b.dataset.sub));
+});
+
+try {
+  const savedSub = localStorage.getItem("moodSubtab");
+  if (savedSub && document.querySelector(`.mood-subpanel[data-sub="${savedSub}"]`)) switchMoodSubtab(savedSub);
+} catch {
+  // 既定のMoodのまま
+}
 
 // ---------- keyboard shortcuts (2026-09-27) ----------
 // PCで開いている時用。1文字キーは入力欄に文字を打っている間は無効(Escだけは入力中でも効く)。

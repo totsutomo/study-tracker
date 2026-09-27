@@ -289,37 +289,59 @@ header h1 {
   50% { opacity: 0.8; }
 }
 
-.daily-min-banner {
+/* ---------- status strip (2026-09-27) ----------
+   最低ライン(daily-min)・スクリーンタイム(screen-budget)・別端末で計測中(peer-session)を1行に並べる。
+   最低ラインのバーは「勉強を始める合図」なので、タップしなくても常に見える形で残している */
+.status-strip {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 8px 16px;
+  gap: 14px;
+  padding: 8px 16px 9px;
   background: var(--card);
   border-bottom: 1px solid var(--border);
-  cursor: pointer;
 }
 
-.daily-min-banner.hidden {
+/* 3つとも非表示の日は帯ごと消す */
+.status-strip:not(:has(> :not(.hidden))) {
   display: none;
 }
 
-.daily-min-banner span {
+.strip-item {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  cursor: pointer;
+}
+
+.strip-item.hidden {
+  display: none;
+}
+
+.strip-item span {
   font-size: 12px;
   color: var(--text-muted);
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.strip-item .stat-bar-track {
+  height: 4px;
 }
 
 .daily-min-banner.reached span {
   color: var(--accent);
 }
 
-.daily-min-banner .stat-bar-track {
-  height: 5px;
-}
-
 .daily-min-banner.reached .stat-bar-fill {
   background: var(--accent);
   box-shadow: 0 0 6px var(--accent-dim);
+}
+
+.screen-budget-banner .stat-bar-fill {
+  background: var(--text-muted);
 }
 
 .screen-budget-banner.low span {
@@ -339,17 +361,16 @@ header h1 {
 }
 
 /* もう一方のデバイス(スマホ/PC)で今フォーカスタイマーが動いている時のFYI表示。
-   行動を要求するactivation(赤)/sleep(青)ほど緊急ではないが、気付いてもらう必要はあるため
-   daily-min-bannerの控えめな見た目からは離し、sleep-bannerと同格(色付き背景+パルス)にした
-   上で色だけ変えて区別する(勉強中=ポジティブな状態としてaccent-secondaryの緑を使用)。
-   クリックしても遷移先がないのでcursorはdefaultのまま。 */
+   気付いてもらう必要はあるので、帯の右端に緑の丸いバッジ+パルスで出す
+   (勉強中=ポジティブな状態としてaccent-secondaryの緑を使用)。 */
 .peer-session-banner {
+  flex: none;
+  max-width: 45%;
   display: flex;
   align-items: center;
-  justify-content: center;
-  padding: 10px 16px;
+  padding: 3px 10px;
+  border-radius: 999px;
   background: var(--accent-secondary);
-  border-bottom: 1px solid var(--border);
   animation: peer-session-banner-pulse 3s ease-in-out infinite;
 }
 
@@ -358,7 +379,7 @@ header h1 {
 }
 
 .peer-session-banner span {
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 700;
   color: var(--on-accent);
   white-space: nowrap;
@@ -366,7 +387,7 @@ header h1 {
   text-overflow: ellipsis;
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: 4px;
 }
 
 /* .inline-icon の既定色(text-muted寄り)は自身に直接colorを持つため祖先のcolorを継承しない。
@@ -2482,4 +2503,133 @@ kbd {
   background: var(--bg);
   font-family: inherit;
   font-size: 12px;
+}
+
+/* ---------- ToDo card actions (2026-09-27) ----------
+   スマホではカード上のボタンを完了チェックと▶だけにし、日付の後ろ倒し・スキップ・削除は
+   カードをタップして開く詳細パネルへ移した(完了/スキップはスワイプでもできる)。
+   PC(マウス操作)では、カードにマウスを乗せた時だけ表示する。場所は確保したままにして
+   表示/非表示でカードの高さが変わらないようにしている */
+#todo-groups .reschedule-row,
+#todo-groups .skip-btn,
+#todo-groups .delete-btn {
+  display: none;
+}
+
+@media (min-width: 768px) and (hover: hover) {
+  #todo-groups .reschedule-row {
+    display: flex;
+    visibility: hidden;
+  }
+
+  #todo-groups .skip-btn,
+  #todo-groups .delete-btn {
+    display: flex;
+    visibility: hidden;
+  }
+
+  #todo-groups li:hover .reschedule-row,
+  #todo-groups li:hover .skip-btn,
+  #todo-groups li:hover .delete-btn,
+  #todo-groups li:focus-within .reschedule-row,
+  #todo-groups li:focus-within .skip-btn,
+  #todo-groups li:focus-within .delete-btn {
+    visibility: visible;
+  }
+}
+
+.todo-detail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.todo-detail-actions button {
+  flex: 1 1 0;
+  min-width: 90px;
+}
+
+/* ---------- goal editing (2026-09-27) ---------- */
+.goal-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.link-btn {
+  background: none;
+  border: none;
+  padding: 4px 0;
+  min-height: 0;
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: none;
+  letter-spacing: 0;
+  cursor: pointer;
+}
+
+.goal-form {
+  align-items: flex-end;
+}
+
+.goal-form.hidden {
+  display: none;
+}
+
+.goal-field {
+  flex: 1 1 100px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+/* ---------- mood tab sub-tabs / wake time (2026-09-27) ---------- */
+.mood-subtabs {
+  display: flex;
+  margin-bottom: 14px;
+}
+
+.mood-subtabs .period-btn {
+  flex: 1 1 0;
+}
+
+.mood-subpanel.hidden {
+  display: none;
+}
+
+.wake-time-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 4px 0 14px;
+  font-size: 14px;
+}
+
+.wake-time-row.hidden {
+  display: none;
+}
+
+.wake-time-row input {
+  max-width: 130px;
+}
+
+/* スマホの月カレンダー: 予定が2件以上ある日は件数だけ(2026-09-27) */
+.cal-event-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.cal-event-count i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  display: inline-block;
 }
