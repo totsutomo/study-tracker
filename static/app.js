@@ -2872,21 +2872,6 @@ async function loadStudyLogList() {
   });
 }
 
-// ---------- big-goal countdown (起動画面の「あと◯◯日」。旧Goalタブ廃止後も単独で残す) ----------
-
-function renderCountdown(c) {
-  // 起動画面の「あと◯◯日」に反映する(旧Goalタブの#countdown表示は廃止済み)
-  const bootDays = document.getElementById("boot-goal-days");
-  if (bootDays) bootDays.textContent = c.days_left;
-  const bootLabel = document.getElementById("boot-goal-label");
-  if (bootLabel) bootLabel.textContent = `Until ${c.label}`;
-}
-
-async function loadCountdown() {
-  const c = await api("/api/goals/countdown");
-  renderCountdown(c);
-}
-
 // ---------- scores (diary / hitotsubashi writing / stack) ----------
 
 let diaryScoreView = "overall"; // "overall" | "categories"
@@ -5059,14 +5044,13 @@ document.getElementById("export-data-btn").addEventListener("click", () => {
   window.location.href = "/api/export";
 });
 
-// 起動直後に見えるToDoタブ(一覧・統計・カウントダウン)だけ、前回取得したキャッシュを
+// 起動直後に見えるToDoタブ(一覧・統計)だけ、前回取得したキャッシュを
 // 即座に描画する。本物の読み込み(critical group)はこの後も従来通り必ず走るので、
 // ここで描けなくても・描いた内容が古くても実害はない(すぐ上書きされる)。
 async function hydrateFromCache() {
-  const [todos, stats, countdown] = await Promise.all([
+  const [todos, stats] = await Promise.all([
     cacheGet("/api/todos"),
     cacheGet("/api/todos/stats"),
-    cacheGet("/api/goals/countdown"),
   ]);
   let hydrated = false;
   try {
@@ -5075,9 +5059,6 @@ async function hydrateFromCache() {
   try {
     if (stats) { renderTodoStats(stats); hydrated = true; }
   } catch (err) { console.error("hydrate todo stats failed:", err); }
-  try {
-    if (countdown) { renderCountdown(countdown); hydrated = true; }
-  } catch (err) { console.error("hydrate countdown failed:", err); }
   return hydrated;
 }
 
@@ -5101,12 +5082,11 @@ async function hydrateFromCache() {
   // peer-session-bannerと同じ30秒ポーリングで補う。
   setInterval(loadScreenBudget, 30000);
 
-  // 起動画面は「最初に表示されるToDoタブに必要な分」+「起動画面自体に出す目標カウントダウン」
-  // だけ待って閉じる。残り12件は起動画面の裏でバックグラウンド読み込みを続け、届き次第
+  // 起動画面は「最初に表示されるToDoタブに必要な分」だけ待って閉じる。残り12件は起動画面の裏でバックグラウンド読み込みを続け、届き次第
   // 各セクションに反映される。以前は15件すべてが揃うまで真っ暗な起動画面のままだったため、
   // 体感の読み込み時間が実際より長くなっていた。キャッシュがあれば上でスピナーは既に
   // 消えているが、ここで最新データに必ず上書きするので正しさは変わらない。
-  const criticalResults = await Promise.allSettled([loadTodos(), loadTodoStats(), loadCountdown()]);
+  const criticalResults = await Promise.allSettled([loadTodos(), loadTodoStats()]);
   criticalResults.filter((r) => r.status === "rejected").forEach((r) => console.error("init load failed:", r.reason));
   document.getElementById("boot-loading")?.classList.add("hidden");
 

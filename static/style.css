@@ -148,45 +148,6 @@ header h1 {
   50% { opacity: 1; }
 }
 
-.boot-goal {
-  position: relative;
-  z-index: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 12px;
-  padding: 0 32px;
-  text-align: center;
-}
-
-.boot-goal-label {
-  font-size: 13px;
-  color: var(--text-muted);
-  letter-spacing: 0.03em;
-}
-
-.boot-goal-days {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  font-variant-numeric: tabular-nums;
-}
-
-.boot-goal-number {
-  font-size: 60px;
-  font-weight: 800;
-  letter-spacing: -0.02em;
-  color: var(--accent);
-  line-height: 1;
-  text-shadow: 0 0 40px rgba(79, 124, 219, 0.35);
-}
-
-.boot-goal-unit {
-  font-size: 20px;
-  color: var(--text-muted);
-  font-weight: 600;
-}
-
 .boot-spinner {
   position: relative;
   z-index: 1;
