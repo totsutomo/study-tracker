@@ -4180,9 +4180,13 @@ async function fetchCalTodos() {
   calTodosCache = todos.filter((t) => t.due_date);
 }
 
+// ×で消した直後〜削除が確定するまで(Undoの5秒+通信)の予定。この間に別の理由で再描画されても
+// 手持ちのデータから予定が復活しないよう、描画用の一覧から外しておく(2026-09-28)
+const pendingEventDeleteIds = new Set();
+
 function rebuildCalCaches() {
   const parts = [...neededCalMonthKeys()].map((k) => calMonthData.get(k)).filter(Boolean);
-  calEventsCache = parts.flatMap((p) => p.events);
+  calEventsCache = parts.flatMap((p) => p.events).filter((e) => !pendingEventDeleteIds.has(e.id));
   calStudyDaysCache = new Set(parts.flatMap((p) => p.studyDays));
   calActivationDaysCache = new Set(parts.flatMap((p) => p.activationDays));
   calMinAchievedDaysCache = new Set(parts.flatMap((p) => p.minAchievedDays));
@@ -4565,12 +4569,21 @@ function renderCalDayDetail() {
     li.querySelector(".delete-btn").addEventListener("click", async (e) => {
       e.stopPropagation();
       if (ev.recurrence && !confirm("This is a recurring event. Delete the entire series?")) return;
+      // 以前はパネルの行を消すだけで、月グリッドには残り、Undo待ちの間に再描画されると行も復活していた
       undoableDelete(`Deleted "${ev.title}"`, {
-        apply: () => li.remove(),
-        revert: () => loadCalendar(),
+        apply: () => {
+          pendingEventDeleteIds.add(ev.id);
+          renderCalendarView();
+        },
+        revert: () => {
+          pendingEventDeleteIds.delete(ev.id);
+          loadCalendar();
+        },
         commit: async () => {
           await api(`/api/events/${ev.id}`, { method: "DELETE" });
-          loadCalendar();
+          await loadCalendar().catch((err) => console.error("calendar reload failed:", err)); // 削除自体は成功しているので「失敗」扱いにしない
+          pendingEventDeleteIds.delete(ev.id);
+          renderCalendarView();
         },
       });
     });
