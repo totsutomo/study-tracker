@@ -3,7 +3,11 @@
 const tabButtons = document.querySelectorAll(".tab-btn");
 const tabPanels = document.querySelectorAll(".tab-panel");
 
-function switchTab(tabId) {
+// タブの切り替えをブラウザの履歴に積み、Alt+←/→・マウスの戻る/進む・Androidの戻るで
+// 前のタブへ戻れるようにする(2026-09-28)。popstateからの呼び出しは履歴を積まない
+function switchTab(tabId, { fromHistory = false } = {}) {
+  const prevTab = document.querySelector(".tab-panel.active")?.id;
+  if (!fromHistory && prevTab !== tabId) history.pushState({ tab: tabId }, "");
   tabButtons.forEach((b) => b.classList.toggle("active", b.dataset.tab === tabId));
   tabPanels.forEach((p) => p.classList.toggle("active", p.id === tabId));
   if (typeof timerSubject !== "undefined" && timerSubject && !overlayMinimized) {
@@ -18,6 +22,11 @@ function switchTab(tabId) {
 
 tabButtons.forEach((btn) => {
   btn.addEventListener("click", () => switchTab(btn.dataset.tab));
+});
+
+history.replaceState({ tab: document.querySelector(".tab-panel.active")?.id }, "");
+window.addEventListener("popstate", (e) => {
+  if (e.state?.tab) switchTab(e.state.tab, { fromHistory: true });
 });
 
 document.getElementById("daily-min-banner").addEventListener("click", () => switchTab("tab-study"));
@@ -5288,7 +5297,7 @@ async function hydrateFromCache() {
   // 就寝リマインダーpush(main.pyのbedtime-reminder)のタップから、アプリ未起動時は
   // /#bedtime付きの新規ウィンドウとして開かれる。既存ウィンドウ再利用時はSWからのpostMessageで拾う。
   if (location.hash === "#bedtime") {
-    history.replaceState(null, "", location.pathname + location.search);
+    history.replaceState(history.state, "", location.pathname + location.search); // タブの履歴は残す
     openBedtimePanel();
   }
 })();
