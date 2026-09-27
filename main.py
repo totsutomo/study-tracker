@@ -2602,6 +2602,20 @@ def _read_session_flag(
     return True, values.get(label_key) or None, started_at
 
 
+def _with_elapsed(result: dict) -> dict:
+    # started_atはサーバー機のdatetime.now()(タイムゾーンなし)で書かれるため、Render(UTC)と
+    # ローカル運用のPC(NZ時間)で意味が変わる。受け手(Webフロント・FocusGuard)が時差を推測しなくて
+    # 済むよう、経過秒数をサーバー側で計算して添える。started_at自体の形式は変えない
+    # (JpBlockerはactiveしか読まず、追加フィールドは無視される、2026-09-27)
+    if result.get("active") and result.get("started_at"):
+        try:
+            elapsed = datetime.now() - datetime.fromisoformat(result["started_at"])
+            result["elapsed_seconds"] = max(0, int(elapsed.total_seconds()))
+        except ValueError:
+            pass
+    return result
+
+
 def _focus_session_status(conn) -> dict:
     active, subject, started_at = _read_session_flag(
         conn, "session_active", "session_subject", "session_started_at"
@@ -2611,7 +2625,7 @@ def _focus_session_status(conn) -> dict:
             "SELECT value FROM settings WHERE key = 'session_paused'"
         ).fetchone()
         paused = bool(paused_row and paused_row[0] == "1")
-        return {"active": True, "subject": subject, "started_at": started_at, "paused": paused}
+        return _with_elapsed({"active": True, "subject": subject, "started_at": started_at, "paused": paused})
 
     # vocab-appのreview/reading/newsモード(2026-09-02〜)。Compass本体のsession_activeとは
     # 別フラグ(vocab_session_*, POST /api/vocab-session/active参照)なので、ここでOR条件と
@@ -2621,7 +2635,7 @@ def _focus_session_status(conn) -> dict:
         conn, "vocab_session_active", "vocab_session_mode", "vocab_session_started_at"
     )
     if vocab_active:
-        return {"active": True, "subject": "English", "started_at": vocab_started_at, "paused": False}
+        return _with_elapsed({"active": True, "subject": "English", "started_at": vocab_started_at, "paused": False})
 
     return {"active": False}
 
@@ -2645,15 +2659,6 @@ def focus_session_current():
     conn = get_connection()
     result = _focus_session_status(conn)
     conn.close()
-    # started_atはサーバー機のdatetime.now()(タイムゾーンなし)で書かれるため、Render(UTC)と
-    # ローカル運用のPC(NZ時間)で意味が変わる。表示側が時差を推測しなくて済むよう、
-    # 経過秒数をサーバー側で計算して添える(既存フィールドは他アプリも読むので形式は変えない、2026-09-27)
-    if result.get("active") and result.get("started_at"):
-        try:
-            elapsed = datetime.now() - datetime.fromisoformat(result["started_at"])
-            result["elapsed_seconds"] = max(0, int(elapsed.total_seconds()))
-        except ValueError:
-            pass
     return result
 
 
