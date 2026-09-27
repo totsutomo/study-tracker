@@ -1504,7 +1504,13 @@ async function checkPeerSession() {
     // those client-local strings double-counted this device's UTC offset as elapsed time (e.g.
     // NZ's UTC+12 showed up as a phantom +12h on top of the real elapsed minutes). Appending "Z"
     // tells Date() to parse it as UTC instead of local time.
-    peerSessionStartedAt = status.started_at ? new Date(status.started_at.replace(" ", "T") + "Z") : new Date();
+    // ↑の"Z"方式はサーバーがUTCで動くRender前提で、ローカル運用(PCがNZ時間)では経過が常に0分になっていた。
+    // サーバーが経過秒数(elapsed_seconds)を返す場合はそれを優先する(2026-09-27)
+    if (typeof status.elapsed_seconds === "number") {
+      peerSessionStartedAt = new Date(Date.now() - status.elapsed_seconds * 1000);
+    } else {
+      peerSessionStartedAt = status.started_at ? new Date(status.started_at.replace(" ", "T") + "Z") : new Date();
+    }
     if (!peerSessionTickInterval) {
       peerSessionTickInterval = setInterval(updatePeerSessionBanner, 30000);
     }

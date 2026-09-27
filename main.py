@@ -2645,6 +2645,15 @@ def focus_session_current():
     conn = get_connection()
     result = _focus_session_status(conn)
     conn.close()
+    # started_atはサーバー機のdatetime.now()(タイムゾーンなし)で書かれるため、Render(UTC)と
+    # ローカル運用のPC(NZ時間)で意味が変わる。表示側が時差を推測しなくて済むよう、
+    # 経過秒数をサーバー側で計算して添える(既存フィールドは他アプリも読むので形式は変えない、2026-09-27)
+    if result.get("active") and result.get("started_at"):
+        try:
+            elapsed = datetime.now() - datetime.fromisoformat(result["started_at"])
+            result["elapsed_seconds"] = max(0, int(elapsed.total_seconds()))
+        except ValueError:
+            pass
     return result
 
 
