@@ -1280,7 +1280,7 @@ ACTIVATION_ENCOURAGEMENT_WINDOW_DAYS = 14
 ACTIVATION_ENCOURAGEMENT_HOUR = 18
 
 # モチベーション記録は単独の21時リマインダーを廃止し、就寝前後の2回に統合した
-# (2026-09-18、アプリ開発/2026-09-18_Compassのサボりログ・モチベーション・睡眠ログの習慣化設計.md参照)。
+# (2026-09-18、アプリ開発/Compass/2026-09-18_Compassのサボりログ・モチベーション・睡眠ログの習慣化設計.md参照)。
 BEDTIME_REMINDER_HOUR = 22
 BEDTIME_REMINDER_MINUTE = 30
 WAKE_REMINDER_HOUR = 7
