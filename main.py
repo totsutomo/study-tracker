@@ -1018,6 +1018,32 @@ def get_study_heatmap(days: int = 180):
     ]
 
 
+# 時間帯ごとの勉強時間(2026-09-30、Ankiの「時間帯の分析」相当)。Compassタイマー・vocab-app・Stackとも
+# logged_atは終わった時刻(NZローカル)なので「終わり - minutes」を始まりとみなし、時間帯をまたぐ分は按分する。
+# drill-trackerの行はminutes=0(問題数だけ)なので入らない。
+@app.get("/api/study-logs/hourly")
+def get_study_hourly(days: int = 30):
+    days = max(1, min(days, 400))
+    conn = get_connection()
+    rows = conn.execute(
+        "SELECT logged_at, minutes FROM study_logs WHERE minutes > 0 AND logged_at >= ?",
+        (nz_day_bound(-(days - 1)),),
+    ).fetchall()
+    conn.close()
+    minutes = [0.0] * 24
+    for row in rows:
+        try:
+            end = datetime.fromisoformat(str(row[0])[:19])
+        except ValueError:
+            continue
+        cursor = end - timedelta(minutes=row[1])
+        while cursor < end:
+            chunk_end = min(cursor.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1), end)
+            minutes[cursor.hour] += (chunk_end - cursor).total_seconds() / 60
+            cursor = chunk_end
+    return {"days": days, "minutes": [round(m) for m in minutes]}
+
+
 @app.options("/api/vocab-session/active")
 def vocab_session_active_preflight():
     return JSONResponse(content=None, headers=_vocab_cors_headers())

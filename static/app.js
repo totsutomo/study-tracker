@@ -2100,6 +2100,7 @@ async function finishSession(elapsedMinutes) {
   loadStudyLogList();
   loadStudyChart();
   loadActivityHeatmap();
+  loadHourlyChart();
   loadGoalProgress();
   loadScreenBudget(); // 学習分がスマホ利用予算のボーナスに反映されるため
   loadTodayPanel();
@@ -2395,18 +2396,124 @@ function updateChartTitle() {
     chartGranularity === "day" ? "Last 14 days" : `Last ${WEEKLY_CHART_WEEKS} weeks`;
 }
 
-document.querySelectorAll(".period-btn").forEach((btn) => {
+// 以前は".period-btn"全部に付けていたため、Mood・Scores等の別の切り替えを押すと日/週グラフが週に戻り、
+// ほかの切り替えの選択表示も消えていた(2026-09-30修正)。Week/Dayのボタンだけを対象にする
+document.querySelectorAll(".period-btn[data-granularity]").forEach((btn) => {
   btn.classList.toggle("active", btn.dataset.granularity === chartGranularity);
   btn.addEventListener("click", () => {
     chartGranularity = btn.dataset.granularity;
     localStorage.setItem("studyChartGranularity", chartGranularity);
-    document.querySelectorAll(".period-btn").forEach((b) => b.classList.toggle("active", b === btn));
+    document.querySelectorAll(".period-btn[data-granularity]").forEach((b) => b.classList.toggle("active", b === btn));
     updateChartTitle();
     loadStudyChart();
   });
 });
 
 updateChartTitle();
+
+// ---------- time of day (2026-09-30、Ankiの「時間帯の分析」相当) ----------
+// 「一番勉強できている時間帯」を見える化し、次の勉強をその時間に置くきっかけにする。
+// 棒は3アプリ合計の勉強時間。一番多い連続2時間を濃い色にして上に一言で出す
+
+let hourlyDays = [30, 90, 365].includes(Number(localStorage.getItem("hourlyChartDays")))
+  ? Number(localStorage.getItem("hourlyChartDays"))
+  : 30;
+
+async function loadHourlyChart() {
+  const days = hourlyDays;
+  await apiCached(`/api/study-logs/hourly?days=${days}`, (raw) => {
+    if (days === hourlyDays) renderHourlyChart(raw.minutes, days);
+  });
+}
+
+function hourRangeLabel(start, length) {
+  const pad = (h) => `${String(h % 24).padStart(2, "0")}:00`;
+  return `${pad(start)}–${pad(start + length)}`;
+}
+
+function renderHourlyChart(minutes, days) {
+  const container = document.getElementById("hourly-chart");
+  const bestEl = document.getElementById("hourly-best");
+  const total = minutes.reduce((s, m) => s + m, 0);
+  const periodLabel = { 30: "last month", 90: "last 3 months", 365: "last year" }[days];
+
+  // 日付をまたぐ23時〜0時も1つの枠として数える
+  let bestStart = 0;
+  let bestSum = -1;
+  for (let h = 0; h < 24; h++) {
+    const sum = minutes[h] + minutes[(h + 1) % 24];
+    if (sum > bestSum) {
+      bestSum = sum;
+      bestStart = h;
+    }
+  }
+  const inBest = (h) => total > 0 && (h === bestStart || h === (bestStart + 1) % 24);
+  bestEl.textContent = total > 0
+    ? `Most study: ${hourRangeLabel(bestStart, 2)} · ${Math.round((bestSum / total) * 100)}% of your study time in the ${periodLabel}`
+    : `No study recorded in the ${periodLabel}`;
+
+  const maxMin = Math.max(60, ...minutes);
+  const chartW = 320;
+  const chartH = 120;
+  const padLeft = 26;
+  const padTop = 9;
+  const padBottom = 14;
+  const plotW = chartW - padLeft - 2;
+  const plotH = chartH - padTop - padBottom;
+  const barGap = 2;
+  const barW = plotW / 24 - barGap;
+
+  const gridLines = [0, 0.5, 1]
+    .map((frac) => {
+      const y = padTop + plotH - plotH * frac;
+      const label = Math.round(((maxMin * frac) / 60) * 10) / 10;
+      return `
+        <line x1="${padLeft}" y1="${y}" x2="${chartW}" y2="${y}" stroke="var(--border)" stroke-width="1" />
+        <text x="${padLeft - 4}" y="${y + 3}" font-size="8" fill="var(--text-muted)" text-anchor="end">${label}h</text>
+      `;
+    })
+    .join("");
+
+  const bars = minutes
+    .map((m, h) => {
+      const x = padLeft + h * (barW + barGap);
+      const barH = (m / maxMin) * plotH;
+      const label = h % 3 === 0
+        ? `<text x="${x + barW / 2}" y="${chartH - 1}" font-size="8" fill="var(--text-muted)" text-anchor="middle">${h}</text>`
+        : "";
+      // 0分の時間帯もタップできるよう、透明な当たり判定を棒の高さに関係なく全面に敷く
+      return `
+        <rect x="${x}" y="${padTop + plotH - barH}" width="${Math.max(barW, 0)}" height="${Math.max(barH, 0)}"
+          fill="var(--accent)" opacity="${inBest(h) ? 1 : 0.4}" rx="2"></rect>
+        <rect x="${x}" y="${padTop}" width="${barW + barGap}" height="${plotH}" fill="transparent" data-hour="${h}"></rect>
+        ${label}
+      `;
+    })
+    .join("");
+
+  container.innerHTML = `<svg viewBox="0 0 ${chartW} ${chartH}" class="study-svg-chart">${gridLines}${bars}</svg>`;
+
+  container.querySelectorAll("rect[data-hour]").forEach((rect) => {
+    rect.addEventListener("click", () => {
+      const h = Number(rect.dataset.hour);
+      const m = minutes[h];
+      const share = total > 0 ? ` (${Math.round((m / total) * 100)}%)` : "";
+      document.getElementById("hourly-chart-detail").textContent =
+        `${hourRangeLabel(h, 1)}: ${formatDuration(m)}${share} · avg ${Math.round(m / days)} min/day`;
+    });
+  });
+}
+
+document.querySelectorAll("#hourly-toggle .period-btn").forEach((btn) => {
+  btn.classList.toggle("active", Number(btn.dataset.days) === hourlyDays);
+  btn.addEventListener("click", () => {
+    hourlyDays = Number(btn.dataset.days);
+    localStorage.setItem("hourlyChartDays", String(hourlyDays));
+    document.querySelectorAll("#hourly-toggle .period-btn").forEach((b) => b.classList.toggle("active", b === btn));
+    document.getElementById("hourly-chart-detail").textContent = "Tap a bar to see that hour";
+    loadHourlyChart();
+  });
+});
 
 // ---------- weekly / monthly goal progress ----------
 
@@ -2940,6 +3047,8 @@ function renderStudyLogList(logs) {
           await api(`/api/study-logs/${l.id}`, { method: "DELETE" });
           loadStudySummary();
           loadStudyChart();
+          loadActivityHeatmap();
+          loadHourlyChart();
           loadGoalProgress();
           loadScreenBudget();
         },
@@ -5283,6 +5392,7 @@ async function hydrateFromCache() {
     loadStudyLogList(),
     loadStudyChart(),
     loadActivityHeatmap(),
+    loadHourlyChart(),
     loadGoalProgress(),
     loadScreenBudget(),
     loadScoresTab(),

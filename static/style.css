@@ -1453,6 +1453,13 @@ body.focus-open #tabbar {
   margin: 6px 0 0;
 }
 
+/* 時間帯グラフの「一番勉強している時間帯」。グラフより先に目に入るよう本文色にする */
+.chart-card > p.meta.hourly-best {
+  font-size: 13px;
+  color: var(--text);
+  margin: 8px 0 4px;
+}
+
 .chart-grid {
   display: flex;
   flex-direction: column;
