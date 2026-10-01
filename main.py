@@ -718,6 +718,49 @@ def study_log_summary():
     return result
 
 
+# Scoresタブ最上部の科目別まとめ表(2026-10-01)用。直近days日と、その直前days日の科目ごとの合計時間を
+# 1回の問い合わせで返す。成果の数字(Stack正答率・一橋ライティング・語彙)はScoresの各カードが既に
+# 読み込んでいるデータをクライアント側で使い回し、ここでは時間だけを扱う(外部アプリへの取得を増やさないため)。
+# Drill(drill-tracker)のログは科目名が「数学」で入ってくるので、Compassのカテゴリー名に寄せて合算する。
+SUBJECT_ALIASES = {"数学": "math"}
+
+
+@app.get("/api/study-logs/subject-totals")
+def study_log_subject_totals(days: int = 7):
+    days = max(1, min(days, 180))
+    current_start = nz_day_bound(offset_days=-(days - 1))
+    previous_start = nz_day_bound(offset_days=-(2 * days - 1))
+    conn = get_connection()
+    rows = conn.execute(
+        "SELECT subject, "
+        "SUM(CASE WHEN logged_at >= ? THEN minutes ELSE 0 END), "
+        "SUM(CASE WHEN logged_at < ? THEN minutes ELSE 0 END), "
+        "SUM(CASE WHEN logged_at >= ? AND start_trigger LIKE 'drill-tracker:%' THEN COALESCE(count, 0) ELSE 0 END), "
+        "SUM(CASE WHEN logged_at < ? AND start_trigger LIKE 'drill-tracker:%' THEN COALESCE(count, 0) ELSE 0 END) "
+        "FROM study_logs WHERE logged_at >= ? GROUP BY subject",
+        (current_start, current_start, current_start, current_start, previous_start),
+    ).fetchall()
+    conn.close()
+    totals: dict[str, dict] = {}
+    for subject, cur_min, prev_min, cur_drill, prev_drill in rows:
+        t = totals.setdefault(
+            SUBJECT_ALIASES.get(subject, subject),
+            {"minutes": 0, "prev_minutes": 0, "drill_count": 0, "prev_drill_count": 0},
+        )
+        t["minutes"] += cur_min or 0
+        t["prev_minutes"] += prev_min or 0
+        t["drill_count"] += cur_drill or 0
+        t["prev_drill_count"] += prev_drill or 0
+    return {
+        "days": days,
+        "subjects": [
+            {"subject": s, **t}
+            for s, t in sorted(totals.items(), key=lambda kv: -kv[1]["minutes"])
+            if t["minutes"] or t["prev_minutes"] or t["drill_count"] or t["prev_drill_count"]
+        ],
+    }
+
+
 @app.get("/api/study-logs/trigger-stats")
 def study_log_trigger_stats(days: int = 30):
     conn = get_connection()

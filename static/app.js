@@ -3331,11 +3331,17 @@ async function loadScoresTab() {
       renderStackScores(rows);
     }],
     // vocab-appの同期サーバーをCompassのサーバー経由で読みに行く(main.pyの/api/vocab-stats参照)
-    ["/api/vocab-stats?days=90", "vocab-stats-chart", renderVocabStats],
+    ["/api/vocab-stats?days=90", "vocab-stats-chart", (data) => {
+      lastVocabStats = data;
+      renderVocabStats(data);
+    }],
   ];
+  // 各カードのデータが届くたびにまとめ表も描き直す(まとめ表は時間以外のデータを各カードから借りる)
+  const withOverview = (render) => (data) => { render(data); renderOverview(); };
   // 前回の内容を先に描いてからサーバーの最新で描き直す(apiCached)。前回分が出ていれば、
   // 更新に失敗してもエラー表示で消さずにそのまま残す。
-  await Promise.all(cards.map(async ([path, chartId, render]) => {
+  await Promise.all([loadOverview(), ...cards.map(async ([path, chartId, rawRender]) => {
+    const render = withOverview(rawRender);
     try {
       await apiCached(path, render);
     } catch (err) {
@@ -3343,8 +3349,176 @@ async function loadScoresTab() {
       document.getElementById(chartId).innerHTML =
         `<p class="meta">Couldn't load this card (${escapeHtml(String(err?.message || err))})</p>`;
     }
-  }));
+  })]);
 }
+
+// ---------- overview by subject (2026-10-01) ----------
+// 「時間配分の偏り」「一橋の科目ごとの進み具合」「伸びているか」を1枚で見るための表。
+// 時間だけ/api/study-logs/subject-totalsから取り、成果の数字は下の各カードが読み込んだデータを使い回す
+// (外部アプリへの取得を増やさないため)。▲▼は同じ長さの直前の期間との比較。
+
+const DRILL_URL = "https://drill-tracker.vercel.app";
+let lastVocabStats = null;
+let overviewData = null;
+let overviewDays = [7, 30].includes(Number(localStorage.getItem("overviewDays")))
+  ? Number(localStorage.getItem("overviewDays"))
+  : 7;
+
+async function loadOverview() {
+  const days = overviewDays;
+  try {
+    await apiCached(`/api/study-logs/subject-totals?days=${days}`, (data) => {
+      if (days !== overviewDays) return;
+      overviewData = data;
+      renderOverview();
+    });
+  } catch (err) {
+    console.error("overview load failed", err);
+    document.getElementById("overview-table").innerHTML =
+      `<p class="meta">Couldn't load this card (${escapeHtml(String(err?.message || err))})</p>`;
+  }
+}
+
+// 「今日を含む直近days日」と「その直前のdays日」の開始日(YYYY-MM-DD)
+function overviewPeriodStarts(days) {
+  const d = new Date();
+  d.setDate(d.getDate() - (days - 1));
+  const current = formatLocalDate(d);
+  d.setDate(d.getDate() - days);
+  return { current, previous: formatLocalDate(d) };
+}
+
+function overviewDelta(cur, prev, unit = "", digits = 0) {
+  if (cur == null || prev == null) return "";
+  const diff = cur - prev;
+  const shown = Math.abs(diff).toFixed(digits);
+  if (Number(shown) === 0) return `<span class="overview-flat">± 0${unit}</span>`;
+  return diff > 0
+    ? `<span class="overview-up">▲ ${shown}${unit}</span>`
+    : `<span class="overview-down">▼ ${shown}${unit}</span>`;
+}
+
+function formatOverviewMinutes(min) {
+  const h = Math.floor(min / 60);
+  const m = Math.round(min % 60);
+  return h ? `${h}h ${m}m` : `${m}m`;
+}
+
+// 時間差は分単位だと細かすぎるので、1時間以上は時間(小数1桁)で出す
+function overviewMinutesDelta(cur, prev) {
+  if (Math.abs(cur - prev) >= 60) return overviewDelta(cur / 60, prev / 60, "h", 1);
+  return overviewDelta(cur, prev, "m");
+}
+
+// 科目ごとの成果の数字。{ main, sub, target } を返す(targetはタップ時の移動先のカードid、またはURL)
+function overviewResult(subject, starts) {
+  const inCur = (date) => date >= starts.current;
+  const inPrev = (date) => date >= starts.previous && date < starts.current;
+  const avg = (xs) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null);
+
+  if (subject === "English") {
+    const writing = lastHitotsubashiScoreRows;
+    const cur = avg(writing.filter((r) => inCur(r.date)).map((r) => r.overall));
+    const prev = avg(writing.filter((r) => inPrev(r.date)).map((r) => r.overall));
+    const main = cur == null
+      ? `Hitotsubashi writing <span class="overview-num">--</span>`
+      : `Hitotsubashi writing <span class="overview-num">${Math.round(cur)}</span>${overviewDelta(cur, prev)}`;
+    let sub = "";
+    if (lastVocabStats?.configured) {
+      const ratings = lastVocabStats.ratings.filter((r) => inCur(r.date));
+      const total = ratings.reduce((n, r) => n + r.total, 0);
+      const good = ratings.reduce((n, r) => n + r.good + r.easy, 0);
+      sub = `Vocab: mastered ${lastVocabStats.words.mastered}` + (total ? ` · Good/Easy ${Math.round((good / total) * 100)}%` : "");
+    }
+    return { main, sub, target: "scores-card-hitotsubashi" };
+  }
+
+  const stackRows = lastStackScoreRows.filter((r) => r.subject === subject);
+  if (stackRows.length) {
+    const acc = (rows) => {
+      const reviews = rows.reduce((n, r) => n + r.reviews, 0);
+      return reviews ? (rows.reduce((n, r) => n + r.correct, 0) / reviews) * 100 : null;
+    };
+    const cur = acc(stackRows.filter((r) => inCur(r.date)));
+    const prev = acc(stackRows.filter((r) => inPrev(r.date)));
+    const latest = stackRows[stackRows.length - 1];
+    return {
+      main: `Stack accuracy <span class="overview-num">${cur == null ? "--" : `${Math.round(cur)}%`}</span>${overviewDelta(cur, prev, "pt")}`,
+      sub: `Mastered ${latest.mastered} / ${latest.total}`,
+      target: "scores-card-stack",
+    };
+  }
+
+  return null;
+}
+
+function renderOverview() {
+  if (!overviewData) return;
+  const barEl = document.getElementById("overview-share-bar");
+  const tableEl = document.getElementById("overview-table");
+  const { days, subjects } = overviewData;
+  const starts = overviewPeriodStarts(days);
+  const total = subjects.reduce((n, s) => n + s.minutes, 0);
+  if (!subjects.length) {
+    barEl.innerHTML = "";
+    tableEl.innerHTML = `<p class="meta">No study logs in the last ${days} days</p>`;
+    return;
+  }
+  const share = (s) => (total ? Math.round((s.minutes / total) * 100) : 0);
+
+  barEl.innerHTML = total
+    ? `<div class="overview-share-bar">` +
+      subjects.filter((s) => s.minutes > 0).map((s) =>
+        `<i style="width:${(s.minutes / total) * 100}%;background:${colorFor(s.subject)}" title="${escapeHtml(s.subject)} ${share(s)}%"></i>`).join("") +
+      `</div><div class="chart-legend">` +
+      subjects.filter((s) => s.minutes > 0).map((s) =>
+        `<span class="legend-item"><span class="legend-dot" style="background:${colorFor(s.subject)};"></span>${escapeHtml(s.subject)} ${share(s)}%</span>`).join("") +
+      `</div>`
+    : "";
+
+  const head = `<div class="overview-row overview-head">
+      <span class="overview-subj">Subject</span><span class="overview-time">Time</span>
+      <span class="overview-share">Share</span><span class="overview-result">Results</span></div>`;
+  const rows = subjects.map((s) => {
+    let result = overviewResult(s.subject, starts);
+    // 今期0分で成果の数字も無い科目(「other」等)は並べても情報が無いので出さない。
+    // 英語・Stack科目は成果の行があるので、0分になっても表に残る(サボりに気づけるように)
+    if (!s.minutes && !result && !s.drill_count && !s.prev_drill_count) return "";
+    // Drill(数学)は問題数だけ。青チャートの進み具合はDrill側で見る
+    if (!result && (s.drill_count || s.prev_drill_count)) {
+      result = {
+        main: `Drill problems <span class="overview-num">${s.drill_count}</span>${overviewDelta(s.drill_count, s.prev_drill_count)}`,
+        sub: "Progress details in Drill ↗",
+        target: DRILL_URL,
+      };
+    }
+    const perDay = (s.minutes / 60 / days).toFixed(1);
+    return `<button type="button" class="overview-row"${result?.target ? ` data-target="${result.target}"` : ""}>
+      <span class="overview-subj"><span class="legend-dot" style="background:${colorFor(s.subject)};"></span>${escapeHtml(s.subject)}</span>
+      <span class="overview-time"><span class="overview-num">${formatOverviewMinutes(s.minutes)}</span>${overviewMinutesDelta(s.minutes, s.prev_minutes)}<span class="overview-sub">~${perDay}h / day</span></span>
+      <span class="overview-share"><span class="overview-mini"><i style="width:${share(s)}%;background:${colorFor(s.subject)}"></i></span>${share(s)}%</span>
+      <span class="overview-result">${result ? `${result.main}${result.sub ? `<span class="overview-sub">${result.sub}</span>` : ""}` : `<span class="overview-sub">—</span>`}</span>
+    </button>`;
+  }).join("");
+  tableEl.innerHTML = head + rows;
+}
+
+document.getElementById("overview-table").addEventListener("click", (e) => {
+  const target = e.target.closest(".overview-row[data-target]")?.dataset.target;
+  if (!target) return;
+  if (target.startsWith("http")) window.open(target, "_blank", "noopener");
+  else document.getElementById(target)?.scrollIntoView({ behavior: "smooth", block: "start" });
+});
+
+document.querySelectorAll("#overview-toggle .period-btn").forEach((btn) => {
+  btn.classList.toggle("active", Number(btn.dataset.days) === overviewDays);
+  btn.addEventListener("click", () => {
+    overviewDays = Number(btn.dataset.days);
+    try { localStorage.setItem("overviewDays", String(overviewDays)); } catch {}
+    document.querySelectorAll("#overview-toggle .period-btn").forEach((b) => b.classList.toggle("active", b === btn));
+    loadOverview();
+  });
+});
 
 function renderDiaryScoreStats(rows) {
   const avgEl = document.getElementById("scores-diary-avg");
