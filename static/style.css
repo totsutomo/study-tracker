@@ -2792,3 +2792,8 @@ kbd {
     align-items: start;
   }
 }
+
+/* 追加直後、サーバーの保存が終わるまでの仮の行(app.js renderTodoItem) */
+.list li.todo-pending {
+  opacity: 0.6;
+}

@@ -151,7 +151,22 @@ async function cacheSet(path, data) {
   }
 }
 
-async function api(path, options = {}, retries = 3) {
+// 同じGETが同時に複数の場所から呼ばれた時(例: Stop後のグラフ更新と「今日の勉強時間」パネルが
+// どちらも/api/study-logs/dailyと/progressを取りに行く)は、1本の通信を共有する(2026-09-29)。
+// サーバーはTursoの返事待ちの間ほかのリクエストを実質1件ずつしか捌けず、重複分がそのまま待ち時間になっていた
+const inflightGets = new Map();
+
+function api(path, options = {}, retries = 3) {
+  const isGet = !options.method || options.method.toUpperCase() === "GET";
+  if (!isGet) return apiRequest(path, options, retries);
+  const existing = inflightGets.get(path);
+  if (existing) return existing;
+  const p = apiRequest(path, options, retries).finally(() => inflightGets.delete(path));
+  inflightGets.set(path, p);
+  return p;
+}
+
+async function apiRequest(path, options = {}, retries = 3) {
   apiProgressStart();
   try {
     for (let attempt = 0; ; attempt++) {
@@ -536,6 +551,11 @@ function canReschedule(t) {
 
 function renderTodoItem(t, list) {
   const li = document.createElement("li");
+  // id無し=追加直後に手元で先に出した仮の行(サーバーのidが届くまで操作させない。2026-09-29)
+  if (t.id == null) {
+    li.classList.add("todo-pending");
+    li.inert = true;
+  }
   if (t.done) li.classList.add("done");
   if (t.skipped) li.classList.add("skipped");
   const overdue = isOverdue(t);
@@ -730,7 +750,7 @@ async function loadTodos() {
 // isOverdue()は既にdone/skippedを除外しているので、ここでの対象はまだ手つかずの期限切れのみ。
 // 戻り値はスキップした件数(呼び出し元が他の表示を取り直すかの判断に使う)
 async function autoSkipOverdueTodos() {
-  const overdue = allTodos.filter((t) => !t.done && !t.skipped && isOverdue(t));
+  const overdue = allTodos.filter((t) => t.id != null && !t.done && !t.skipped && isOverdue(t));
   if (overdue.length === 0) return 0;
   alert(
     overdue.length === 1
@@ -1172,10 +1192,19 @@ guardedSubmit(document.getElementById("todo-form"), async (e) => {
   document.getElementById("todo-time-toggle").textContent = "+ Add time";
   setRecurrenceDays([]);
   closeTodoAddPanel();
+  // 保存と一覧の取り直しを待たず、仮の行として先に一覧へ出す(2026-09-29)
+  const tempTodo = {
+    ...payload, id: null, done: 0, skipped: 0, created_at: null, completed_at: null,
+    notified_at: null, skipped_at: null, skip_reason: null,
+  };
+  allTodos = [tempTodo, ...allTodos];
+  renderTodos();
   try {
     await api("/api/todos", { method: "POST", body: JSON.stringify(payload) });
     loadTodos();
   } catch (err) {
+    allTodos = allTodos.filter((t) => t !== tempTodo);
+    renderTodos();
     showToast(`「${title}」の追加に失敗しました。もう一度お試しください`);
   }
 });
@@ -2033,6 +2062,7 @@ document.addEventListener("visibilitychange", () => {
     // immediate re-check here so returning to the tab never shows outdated "studying now" info.
     checkPeerSession();
     refreshIfDayChanged();
+    flushPendingStudyLogs();
   }
 });
 
@@ -2061,6 +2091,191 @@ function resetSessionState() {
   syncSessionActiveFlag(false, null);
 }
 
+// ---------- 未送信の学習記録(finishSessionの保険) ----------
+// 記録の送信は通常のfetchなので、Stop直後にPWAを閉じる/サーバーが一時的に応答しないと
+// 失われうる(終了フラグの方はkeepaliveで届くため「セッションは終わったのに記録が無い」になる)。
+// 送る前に端末へ控え、届いたら消す。届かなかった分は起動時・アプリに戻った時に再送する。
+const PENDING_STUDY_LOGS_KEY = "pendingStudyLogs";
+
+function readPendingStudyLogs() {
+  try {
+    return JSON.parse(localStorage.getItem(PENDING_STUDY_LOGS_KEY) || "[]");
+  } catch {
+    return [];
+  }
+}
+
+function writePendingStudyLogs(list) {
+  try {
+    if (list.length) localStorage.setItem(PENDING_STUDY_LOGS_KEY, JSON.stringify(list));
+    else localStorage.removeItem(PENDING_STUDY_LOGS_KEY);
+  } catch {
+    // 保存できない環境でも送信自体は続ける
+  }
+}
+
+function addPendingStudyLog(log) {
+  writePendingStudyLogs([...readPendingStudyLogs(), log]);
+}
+
+function removePendingStudyLog(log) {
+  writePendingStudyLogs(
+    readPendingStudyLogs().filter(
+      (x) => !(x.subject === log.subject && x.minutes === log.minutes && x.logged_at === log.logged_at)
+    )
+  );
+}
+
+// dedupe:true = 「実は前回届いていたが応答だけ失われた」ケースで再送しても二重登録しない
+// (同じ科目・分数・記録時刻の行が既にあればサーバー側で既存行を返す、main.py参照)
+async function sendPendingStudyLog(log) {
+  const result = await api("/api/study-logs", {
+    method: "POST",
+    body: JSON.stringify({ ...log, dedupe: true }),
+    keepalive: true,
+  });
+  removePendingStudyLog(log);
+  return result;
+}
+
+let flushingPendingStudyLogs = false;
+async function flushPendingStudyLogs() {
+  if (flushingPendingStudyLogs) return;
+  const list = readPendingStudyLogs();
+  if (!list.length) return;
+  flushingPendingStudyLogs = true;
+  let sent = 0;
+  try {
+    for (const log of list) {
+      try {
+        await sendPendingStudyLog(log);
+        sent++;
+      } catch {
+        // 次の機会に再送
+      }
+    }
+  } finally {
+    flushingPendingStudyLogs = false;
+  }
+  if (sent) {
+    showToast(`未送信だった学習記録を${sent}件保存しました`);
+    loadStudySummary();
+    loadStudyLogList();
+    loadStudyChart();
+    loadActivityHeatmap();
+    loadGoalProgress();
+    loadTodayPanel();
+  }
+}
+
+// ---------- 学習記録の先行反映(2026-09-29) ----------
+// Stop直後、サーバーの返事を待たずに「今日の時間」・グラフ・サマリー・一覧・ヒートマップへ終えた分を足す。
+// 各表示は端末キャッシュ(apiCachedが使うもの)から描かれるので、キャッシュ側を書き換えてから描き直す。
+// こうしておくと、この後のapiCachedが最初にキャッシュで描く時も足した後の数字が出る(古い数字に戻らない)。
+// キャッシュが無い項目(一度も開いていない表示)は何もしない。
+async function patchCachedAndRender(path, patch, render) {
+  const data = await cacheGet(path);
+  if (data === undefined) return undefined;
+  let next;
+  try {
+    next = patch(data);
+  } catch (err) {
+    console.error(`local patch failed: ${path}`, err);
+    return undefined;
+  }
+  await cacheSet(path, next);
+  try {
+    render(next);
+  } catch (err) {
+    console.error(`local render failed: ${path}`, err);
+  }
+  return next;
+}
+
+function addToSubjectRow(rows, keyName, keyValue, subject, minutes) {
+  const copy = rows.map((r) => ({ ...r }));
+  const row = copy.find((r) => r[keyName] === keyValue && r.subject === subject);
+  if (row) row.total_minutes += minutes;
+  else copy.push({ [keyName]: keyValue, subject, total_minutes: minutes });
+  return copy;
+}
+
+// 全部の書き換えが終わってから返す(finishSessionはこれを待ってから再読み込みを始める。
+// 先に再読み込みが走ると、サーバーの最新で描いた直後に古いキャッシュ+αで上書きしかねないため)
+async function applyStudyLogLocally(log) {
+  const { subject, minutes } = log;
+  if (!minutes) return;
+  const day = log.logged_at.slice(0, 10);
+  const weekStart = formatLocalDate(mondayOfDate(new Date(`${day}T00:00:00`)));
+  const heatmapPath = `/api/study-logs/heatmap?days=${HEATMAP_WEEKS * 7 + 7}`;
+
+  const [progress, daily] = await Promise.all([
+    patchCachedAndRender(
+      "/api/study-logs/progress",
+      (p) => ({
+        ...p,
+        today_minutes: p.today_minutes + minutes,
+        week_minutes: p.week_minutes + minutes,
+        month_minutes: p.month_minutes + minutes,
+        total_minutes: p.total_minutes + minutes,
+      }),
+      renderGoalProgress,
+    ),
+    patchCachedAndRender(
+      "/api/study-logs/daily",
+      (rows) => addToSubjectRow(rows, "d", day, subject, minutes),
+      (rows) => { if (chartGranularity === "day") renderDailyChart(rows); },
+    ),
+    patchCachedAndRender(
+      "/api/study-logs/weekly",
+      (rows) => addToSubjectRow(rows, "week_start", weekStart, subject, minutes),
+      (rows) => { if (chartGranularity !== "day") renderWeeklyChart(rows); },
+    ),
+    patchCachedAndRender(
+      "/api/study-logs/summary",
+      (rows) => {
+        const copy = rows.map((r) => ({ ...r }));
+        const row = copy.find((r) => r.subject === subject);
+        if (row) row.total_minutes += minutes;
+        else copy.push({ subject, total_minutes: minutes });
+        return copy;
+      },
+      renderStudySummary,
+    ),
+    patchCachedAndRender(
+      "/api/study-logs",
+      (logs) => [{
+        id: null, subject, minutes, note: log.note, logged_at: log.logged_at,
+        start_trigger: log.start_trigger, count: null, unit: null, page_start: null, page_end: null,
+      }, ...logs],
+      renderStudyLogList,
+    ),
+    patchCachedAndRender(
+      heatmapPath,
+      (rows) => {
+        const copy = rows.map((r) => ({ ...r }));
+        const row = copy.find((r) => r.date === day);
+        if (row) row.compass_minutes += minutes;
+        else copy.push({ date: day, vocab_minutes: 0, drill_count: 0, compass_minutes: minutes, stack_minutes: 0 });
+        return copy;
+      },
+      (rows) => {
+        const byDate = {};
+        rows.forEach((row) => { byDate[row.date] = row; });
+        renderActivityHeatmap(byDate);
+      },
+    ),
+  ]);
+  // ToDoタブ横の「今日の勉強時間」はdailyとprogressの両方から描く
+  if (progress && daily) {
+    try {
+      renderTodayStudy(daily.filter((r) => r.d === day && r.total_minutes > 0), progress);
+    } catch (err) {
+      console.error("local render failed: today study", err);
+    }
+  }
+}
+
 function discardSession() {
   if (!timerSubject) return;
   if (!confirm("Discard this session without saving it?")) return;
@@ -2075,18 +2290,25 @@ async function finishSession(elapsedMinutes) {
   // 何を勉強したか(ToDoのタイトル)がログに残るよう、resetSessionState()でactiveTodoIdが
   // 消える前にタイトルを控えておく
   const linkedTodo = todoId ? allTodos.find((x) => x.id === todoId) : null;
+  // resetSessionState()はlocalStorageのセッション本体を消すので、その前に「未送信の記録」として
+  // 端末に控えておく。Stop直後にPWAを閉じて送信が打ち切られても、次回起動時に再送される
+  // (2026-09-28、英語セッションが終了フラグだけ届いて記録本体が消えた件への対策)
+  const pending = {
+    subject,
+    minutes: elapsedMinutes,
+    note: linkedTodo ? linkedTodo.title : null,
+    logged_at: `${localDatetimeNow().replace("T", " ")}:00`,
+    start_trigger: startTrigger,
+  };
+  addPendingStudyLog(pending);
   resetSessionState();
   // タイマー画面はresetSessionState()で既に閉じている(体感即時)。ここから先の保存は裏で進める
-  const logPromise = api("/api/study-logs", {
-    method: "POST",
-    body: JSON.stringify({
-      subject,
-      minutes: elapsedMinutes,
-      note: linkedTodo ? linkedTodo.title : null,
-      logged_at: `${localDatetimeNow().replace("T", " ")}:00`,
-      start_trigger: startTrigger,
-    }),
-  }).catch(() => showToast(`「${subject}」の学習記録の保存に失敗しました`));
+  const logPromise = sendPendingStudyLog(pending).catch(() =>
+    showToast(`「${subject}」の記録を送れませんでした。端末に保存したので次回起動時に再送します`)
+  );
+  // サーバーの保存と再集計を待つと表示が変わるまで数秒〜十数秒かかるため、終えた分を手元の
+  // 表示に先に足しておく。正しい数字はこの後の再読み込みで上書きされる(2026-09-29)
+  const localApplyPromise = applyStudyLogLocally(pending).catch((err) => console.error("local apply failed", err));
   if (todoId && confirm("Mark this task complete?")) {
     const t = allTodos.find((x) => x.id === todoId);
     if (t) {
@@ -2095,6 +2317,7 @@ async function finishSession(elapsedMinutes) {
       api(`/api/todos/${todoId}/toggle`, { method: "POST" }).then(() => { loadTodos(); loadTodoStats(); });
     }
   }
+  await localApplyPromise;
   await logPromise;
   loadStudySummary();
   loadStudyLogList();
@@ -2523,8 +2746,9 @@ function formatDuration(minutes) {
 }
 
 async function loadGoalProgress() {
-  await apiCached("/api/study-logs/progress", renderGoalProgress);
+  // Moodグラフは目標の数字とは無関係なので、progressの返事を待たずに同時に読み込む(2026-09-29)
   loadMoodPanel();
+  await apiCached("/api/study-logs/progress", renderGoalProgress);
 }
 
 function renderGoalProgress(p) {
@@ -2698,8 +2922,7 @@ function renderMoodLogList(rows) {
     });
 }
 
-async function loadMoodPanel() {
-  const rows = await api("/api/mood-logs?days=14");
+function renderMoodPanel({ rows, dailyStudy, dailyScreenTime }) {
   const today = todayStr();
   const todayEntries = rows.filter((r) => r.date === today).slice().reverse();
 
@@ -2729,13 +2952,11 @@ async function loadMoodPanel() {
     avgByDate[d] = Math.round((scores.reduce((a, b) => a + b, 0) / scores.length) * 10) / 10;
   });
 
-  const dailyStudy = await api("/api/study-logs/daily");
   const minutesByDate = {};
   dailyStudy.forEach((row) => {
     minutesByDate[row.d] = (minutesByDate[row.d] || 0) + row.total_minutes;
   });
 
-  const dailyScreenTime = await api("/api/screen-time/daily?days=14");
   const screenMinutesByDate = {};
   dailyScreenTime.forEach((row) => {
     screenMinutesByDate[row.date] = row.total_minutes;
@@ -2748,6 +2969,22 @@ async function loadMoodPanel() {
     minutesByDate,
     screenMinutesByDate
   );
+}
+
+// 気分の記録を保存した瞬間にグラフ・一覧へ出すため、最後に描いた材料を控えておく(2026-09-29)
+let lastMoodPanelData = null;
+
+async function loadMoodPanel() {
+  // 3本を順番に待つと東京Tursoまでの往復が積み上がるため、最初に全部投げておく(2026-09-29)。
+  // dailyは同時に走っているグラフ更新の通信と共有される(api()の重複まとめ)
+  const dailyStudyPromise = api("/api/study-logs/daily");
+  const dailyScreenTimePromise = api("/api/screen-time/daily?days=14");
+  dailyStudyPromise.catch(() => {});
+  dailyScreenTimePromise.catch(() => {});
+  const rows = await api("/api/mood-logs?days=14");
+  const [dailyStudy, dailyScreenTime] = await Promise.all([dailyStudyPromise, dailyScreenTimePromise]);
+  lastMoodPanelData = { rows, dailyStudy, dailyScreenTime };
+  renderMoodPanel(lastMoodPanelData);
   loadMoodStats();
   loadMoodReasonStats();
   loadLowMoodAchievement();
@@ -2909,19 +3146,15 @@ document.getElementById("mood-save-btn").addEventListener("click", async () => {
   noteInput.value = "";
   setSelectedMoodScore(5);
   setSelectedMoodReason(null);
+  const entry = { date: todayStr(), score, note: note || null, reason, logged_at: nowLocalTimestamp() };
+  // サーバーの保存とグラフ3本の取り直しを待たず、手元の材料に足して先に描く(2026-09-29)
+  const before = lastMoodPanelData;
+  if (before) renderMoodPanel({ ...before, rows: [...before.rows, { id: null, ...entry }] });
   try {
-    await api("/api/mood-logs", {
-      method: "POST",
-      body: JSON.stringify({
-        date: todayStr(),
-        score,
-        note: note || null,
-        reason,
-        logged_at: nowLocalTimestamp(),
-      }),
-    });
+    await api("/api/mood-logs", { method: "POST", body: JSON.stringify(entry) });
     loadMoodPanel();
   } catch (err) {
+    if (before) renderMoodPanel(before);
     noteInput.value = note;
     setSelectedMoodScore(score);
     setSelectedMoodReason(reason);
@@ -3032,9 +3265,10 @@ function renderStudyLogList(logs) {
         <span class="log-time">${formatLoggedAt(l.logged_at)}${detailText ? ` · ${escapeHtml(detailText)}` : ""}</span>
       </span>
       <span class="log-duration">${formatLogDuration(l.minutes)}</span>
-      <button class="delete-btn" title="Delete">×</button>
+      ${l.id == null ? "" : `<button class="delete-btn" title="Delete">×</button>`}
     `;
-    li.querySelector(".delete-btn").addEventListener("click", () => {
+    // id無し=Stop直後に手元で先に足した仮の行(applyStudyLogLocally)。サーバーのidが届くまで削除させない
+    li.querySelector(".delete-btn")?.addEventListener("click", () => {
       const idx = logs.indexOf(l);
       undoableDelete(`Deleted ${l.subject} · ${formatLogDuration(l.minutes)}`, {
         apply: () => {
@@ -4673,9 +4907,9 @@ function renderCalDayDetail() {
         <span class="log-subject">${escapeHtml(ev.title)}${noteMark}</span>
         <span class="log-time">${ev.start_time}〜${ev.end_time}${ev.recurrence ? ` ${ICONS.repeat}` : ""}</span>
       </span>
-      <button class="delete-btn" title="Delete">×</button>
+      ${ev.id == null ? "" : `<button class="delete-btn" title="Delete">×</button>`}
     `;
-    li.querySelector(".delete-btn").addEventListener("click", async (e) => {
+    li.querySelector(".delete-btn")?.addEventListener("click", async (e) => {
       e.stopPropagation();
       if (ev.recurrence && !confirm("This is a recurring event. Delete the entire series?")) return;
       // 以前はパネルの行を消すだけで、月グリッドには残り、Undo待ちの間に再描画されると行も復活していた
@@ -4920,6 +5154,61 @@ document.querySelectorAll("#event-detail-form [data-recur-preset]").forEach((btn
   });
 });
 
+// ---------- 予定の先行反映(2026-09-29) ----------
+// 追加・編集の保存と、その後のカレンダーの取り直しを待たずに、手持ちの月データへ先に反映して描き直す。
+// 繰り返し予定はサーバー(main.py list_events)と同じ規則で、その月の該当日に展開する。
+// eventId=nullは追加(仮の予定。idが届くまで開けない・消せない)、数値は編集(同じidの全回を差し替え)。
+// 戻り値のrestore()で反映前に戻せる(保存失敗時用)。
+function expandEventForMonth(ev, key) {
+  const [y, m] = key.split("-").map(Number);
+  const monthStart = isoDate(y, m, 1);
+  const monthEnd = isoDate(y, m, daysInMonth(y, m));
+  if (!ev.recurrence) {
+    return ev.date >= monthStart && ev.date <= monthEnd ? [{ ...ev, occurrence_date: ev.date }] : [];
+  }
+  const days = new Set(ev.recurrence.split(","));
+  const rangeStart = ev.date > monthStart ? ev.date : monthStart;
+  const rangeEnd = ev.recurrence_until && ev.recurrence_until < monthEnd ? ev.recurrence_until : monthEnd;
+  const out = [];
+  for (let d = rangeStart; d <= rangeEnd; d = addDaysToDate(d, 1)) {
+    const dow = (new Date(d + "T00:00:00").getDay() + 6) % 7; // 0 = Monday
+    if (days.has(WEEKDAY_ORDER[dow])) out.push({ ...ev, occurrence_date: d });
+  }
+  return out;
+}
+
+function applyEventLocally(eventId, ev) {
+  const snapshot = new Map(calMonthData);
+  const full = { ...ev, id: eventId };
+  calMonthData.forEach((data, key) => {
+    const kept = eventId == null ? data.events : data.events.filter((e) => e.id !== eventId);
+    const events = [...kept, ...expandEventForMonth(full, key)];
+    events.sort((a, b) => a.occurrence_date.localeCompare(b.occurrence_date) || a.start_time.localeCompare(b.start_time));
+    calMonthData.set(key, { ...data, events });
+    // この反映より前に始まった取得が後から返ってきて、反映前の内容で上書きしないようにする
+    calMonthFetchSeq.set(key, (calMonthFetchSeq.get(key) || 0) + 1);
+  });
+  const redraw = () => {
+    try {
+      renderCalendarView();
+      const today = todayStr();
+      const [y, m] = today.split("-").map(Number);
+      const todayMonth = calMonthData.get(`${y}-${m}`);
+      if (todayMonth) renderTodaySchedule(todayMonth.events.filter((e) => e.occurrence_date === today));
+    } catch (err) {
+      console.error("local event render failed", err);
+    }
+  };
+  redraw();
+  return {
+    restore: () => {
+      calMonthData.clear();
+      snapshot.forEach((v, k) => calMonthData.set(k, v));
+      redraw();
+    },
+  };
+}
+
 guardedSubmit(document.getElementById("event-form"), async (e) => {
   const title = document.getElementById("event-title").value.trim();
   const category = document.getElementById("event-category").value || null;
@@ -4946,10 +5235,12 @@ guardedSubmit(document.getElementById("event-form"), async (e) => {
   e.target.reset();
   setEventRecurrenceDays([]);
   closeEventAddPanel();
+  const local = applyEventLocally(null, { ...payload, created_at: null, last_notified_occurrence: null });
   try {
     await api("/api/events", { method: "POST", body: JSON.stringify(payload) });
     loadCalendar();
   } catch (err) {
+    local.restore();
     showToast(`「${title}」の追加に失敗しました。もう一度お試しください`);
   }
 });
@@ -5202,6 +5493,7 @@ document.getElementById("bedtime-copy-week-btn").addEventListener("click", () =>
 let currentDetailEventId = null;
 
 function openEventDetail(ev) {
+  if (ev.id == null) return; // 追加直後の仮の予定(applyEventLocally)。サーバーのidが届くまで開かせない
   currentDetailEventId = ev.id;
   document.getElementById("event-detail-title").value = ev.title;
   document.getElementById("event-detail-category").value = ev.category || "";
@@ -5254,10 +5546,13 @@ guardedSubmit(document.getElementById("event-detail-form"), async (e) => {
   const eventId = currentDetailEventId;
   document.getElementById("event-detail-status").textContent = "Saved";
   closeEventDetail();
+  const prevEvent = [...calMonthData.values()].flatMap((d) => d.events).find((x) => x.id === eventId);
+  const local = applyEventLocally(eventId, { ...(prevEvent || {}), ...payload });
   try {
     await api(`/api/events/${eventId}`, { method: "PUT", body: JSON.stringify(payload) });
     loadCalendar();
   } catch (err) {
+    local.restore();
     showToast(`「${title}」の保存に失敗しました。もう一度お試しください`);
   }
 });
@@ -5376,6 +5671,7 @@ async function hydrateFromCache() {
   // 前回分が端末にあればそれで先に進む(最新の取得は裏で続く)。
   await loadCategories({ preferCache: true });
   restoreSession();
+  flushPendingStudyLogs(); // 前回Stop直後に閉じて送れなかった記録があれば再送(awaitしない)
   startPeerSessionPolling(); // "studying on another device" banner; own timer (if any) already restored above
   // PC/タブレットの利用時間はこの端末を操作していなくても裏で増えていくため、
   // ユーザー操作をきっかけにした再読込(上のloadScreenBudget呼び出し)だけでは反映が遅れる。

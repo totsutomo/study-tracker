@@ -211,6 +211,9 @@ class StudyLogCreate(BaseModel):
     note: str | None = None
     logged_at: str | None = None  # "YYYY-MM-DD HH:MM:SS", optional; defaults to now
     start_trigger: str | None = None
+    # Compassタイマーの記録は端末側で未送信キューに控えて再送するため、同じ行が既にあれば
+    # 二重登録せず既存行を返す(app.jsのsendPendingStudyLog参照)
+    dedupe: bool = False
 
 
 class VocabAppStudyLogCreate(BaseModel):
@@ -722,6 +725,14 @@ def study_log_trigger_stats(days: int = 30):
 @app.post("/api/study-logs")
 def create_study_log(log: StudyLogCreate):
     conn = get_connection()
+    if log.dedupe and log.logged_at:
+        existing = conn.execute(
+            "SELECT id FROM study_logs WHERE subject = ? AND minutes = ? AND logged_at = ?",
+            (log.subject, log.minutes, log.logged_at),
+        ).fetchone()
+        if existing:
+            conn.close()
+            return {"id": existing[0]}
     if log.logged_at:
         cur = conn.execute(
             "INSERT INTO study_logs (subject, minutes, note, logged_at, start_trigger) VALUES (?, ?, ?, ?, ?)",
@@ -1300,25 +1311,24 @@ def study_log_progress():
     today_bound = nz_day_bound()
     week_bound = nz_week_bound()
     month_bound = nz_month_bound()
-    today_total = conn.execute(
-        "SELECT COALESCE(SUM(minutes), 0) FROM study_logs WHERE logged_at >= ?", (today_bound,)
-    ).fetchone()[0]
-    week_total = conn.execute(
-        "SELECT COALESCE(SUM(minutes), 0) FROM study_logs WHERE logged_at >= ?", (week_bound,)
-    ).fetchone()[0]
-    month_total = conn.execute(
-        "SELECT COALESCE(SUM(minutes), 0) FROM study_logs WHERE logged_at >= ?", (month_bound,)
-    ).fetchone()[0]
-    all_time_total = conn.execute("SELECT COALESCE(SUM(minutes), 0) FROM study_logs").fetchone()[0]
-    # 達成率%はタイマーのminutes放置に弱い(2026-09-19の監査で確認済み)。数字自体は直さず、
-    # 他アプリの実績を並べて表示するだけの参考情報として今日分のcount系だけ追加で返す。
-    today_activity = conn.execute(
+    # 以前は今日/今週/今月/全期間/今日の件数系を5回に分けて問い合わせていた。NZ→東京Tursoは1往復約0.3秒で、
+    # このエンドポイントだけで約4秒かかりStop後の表示更新を遅らせていたため、1回の問い合わせにまとめた(2026-09-29)
+    row = conn.execute(
         "SELECT "
-        "SUM(CASE WHEN start_trigger IN ('vocab-app:review', 'vocab-app:news') THEN COALESCE(count, 0) ELSE 0 END), "
-        "SUM(CASE WHEN start_trigger LIKE 'drill-tracker:%' THEN COALESCE(count, 0) ELSE 0 END), "
-        "SUM(CASE WHEN start_trigger = 'vocab-app:reading' THEN COALESCE(count, 0) ELSE 0 END) "
-        "FROM study_logs WHERE logged_at >= ?", (today_bound,)
+        "COALESCE(SUM(CASE WHEN logged_at >= ? THEN minutes END), 0), "
+        "COALESCE(SUM(CASE WHEN logged_at >= ? THEN minutes END), 0), "
+        "COALESCE(SUM(CASE WHEN logged_at >= ? THEN minutes END), 0), "
+        "COALESCE(SUM(minutes), 0), "
+        # 達成率%はタイマーのminutes放置に弱い(2026-09-19の監査で確認済み)。数字自体は直さず、
+        # 他アプリの実績を並べて表示するだけの参考情報として今日分のcount系だけ追加で返す。
+        "SUM(CASE WHEN logged_at >= ? AND start_trigger IN ('vocab-app:review', 'vocab-app:news') THEN COALESCE(count, 0) ELSE 0 END), "
+        "SUM(CASE WHEN logged_at >= ? AND start_trigger LIKE 'drill-tracker:%' THEN COALESCE(count, 0) ELSE 0 END), "
+        "SUM(CASE WHEN logged_at >= ? AND start_trigger = 'vocab-app:reading' THEN COALESCE(count, 0) ELSE 0 END) "
+        "FROM study_logs",
+        (today_bound, week_bound, month_bound, today_bound, today_bound, today_bound),
     ).fetchone()
+    today_total, week_total, month_total, all_time_total = row[0], row[1], row[2], row[3]
+    today_activity = row[4:7]
     settings = _read_settings(conn)
     conn.close()
     return {
