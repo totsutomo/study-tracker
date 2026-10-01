@@ -694,8 +694,13 @@ def delete_category(category_id: int):
 
 @app.get("/api/study-logs")
 def list_study_logs():
+    # Drillの1問ごとの記録(0分・1問)は、ヒートマップ・今日の実績の問題数のためにDBには残すが、
+    # Studyタブの学習ログ一覧には出さない(一覧が「数学 0分」の行で埋まるため、2026-10-02)
     conn = get_connection()
-    cur = conn.execute("SELECT * FROM study_logs ORDER BY logged_at DESC LIMIT 200")
+    cur = conn.execute(
+        "SELECT * FROM study_logs WHERE start_trigger IS NULL OR start_trigger NOT LIKE 'drill-tracker:%' "
+        "ORDER BY logged_at DESC LIMIT 200"
+    )
     result = rows_to_dicts(cur)
     conn.close()
     return result
