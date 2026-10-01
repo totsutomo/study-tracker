@@ -55,6 +55,16 @@ def nz_now_naive() -> datetime:
     return nz_now().replace(tzinfo=None)
 
 
+def utc_now_naive() -> datetime:
+    """tzinfoなしのUTC現在時刻。サーバー時計基準の絶対時刻(セッション開始時刻・承認の期限・
+    pending_changesの猶予・集中タイマーの終了予定)の書き込みと比較は、必ずこれを使う。
+    素のdatetime.now()はサーバー機のタイムゾーンで変わるため、Render(UTC)とローカル運用のPC(NZ)が
+    同じTursoを読み書きすると13時間ずれ、ローカル側がRenderの書いたセッションを「4時間超の古い
+    もの」と誤判定して消した(2026-10-01)。Render上では従来のdatetime.now()と同じ値。
+    受け手(FocusGuardのindicator・Webの相手端末バナー)も素のstarted_atをUTCとして読む前提。"""
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
 def nz_day_bound(offset_days: int = 0) -> str:
     """「NZの今日+offset_days」の0時を、logged_at等(クライアントローカル文字列)
     と比較できる文字列("YYYY-MM-DD HH:MM:SS")として返す。"""
@@ -1069,7 +1079,7 @@ def vocab_session_active(payload: VocabSessionActiveSync, token: str | None = No
         raise HTTPException(status_code=403, detail="invalid token", headers=_vocab_cors_headers())
     conn = get_connection()
     if payload.active:
-        started_at = datetime.now().isoformat(sep=" ", timespec="seconds")
+        started_at = utc_now_naive().isoformat(sep=" ", timespec="seconds")
         for key, value in (
             ("vocab_session_active", "1"),
             ("vocab_session_mode", payload.mode or ""),
@@ -1813,7 +1823,7 @@ def _apply_due_screen_budget_changes(conn):
     mode/limit等と違い適用先がJpBlocker/FocusGuardのローカル設定ではないため、デバイス側の
     ApprovalSync.applyChange()は関与しない(実際unknown action_typeとしてログに出るだけで無害)。
     """
-    now = datetime.now()
+    now = utc_now_naive()
     rows = rows_to_dicts(conn.execute(
         "SELECT id, payload, apply_after FROM pending_changes "
         "WHERE applied = 0 AND action_type = 'screen_budget_params'"
@@ -2017,7 +2027,7 @@ def _unlock_status(conn) -> dict:
     if row is None:
         return {"active": False, "expires_at": None}
     expires_at = row[0]
-    active = datetime.fromisoformat(expires_at) > datetime.now()
+    active = datetime.fromisoformat(expires_at) > utc_now_naive()
     return {"active": active, "expires_at": expires_at if active else None}
 
 
@@ -2076,7 +2086,7 @@ def _render_approve_page(status: dict, pin_is_set: bool, pending: list[dict], to
     if status["active"]:
         remaining_min = max(
             0,
-            int((datetime.fromisoformat(status["expires_at"]) - datetime.now()).total_seconds() // 60) + 1,
+            int((datetime.fromisoformat(status["expires_at"]) - utc_now_naive()).total_seconds() // 60) + 1,
         )
         status_class = "active"
         status_text = f"承認中(残り約{remaining_min}分、{status['expires_at']}まで申請を受け付けます)"
@@ -2192,7 +2202,7 @@ def approve_submit(payload: ApproveIn):
     if not _verify_pin(conn, payload.pin):
         conn.close()
         raise HTTPException(status_code=403, detail="invalid pin")
-    expires_at = (datetime.now() + timedelta(minutes=UNLOCK_WINDOW_MINUTES)).isoformat(sep=" ", timespec="seconds")
+    expires_at = (utc_now_naive() + timedelta(minutes=UNLOCK_WINDOW_MINUTES)).isoformat(sep=" ", timespec="seconds")
     conn.execute(
         "INSERT INTO settings (key, value) VALUES ('unlock_expires_at', ?) "
         "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
@@ -2255,7 +2265,7 @@ def create_pending_change(payload: PendingChangeCreate, token: str | None = None
         # (端末のUIをいじって直接POSTすればすり抜けられてしまうのを塞ぐ。教訓43/48と同じ、
         # エスケープなし方針をここにも適用する)。
         raise HTTPException(status_code=403, detail="unlock window not active")
-    apply_after = (datetime.now() + timedelta(hours=PENDING_CHANGE_DELAY_HOURS)).isoformat(sep=" ", timespec="seconds")
+    apply_after = (utc_now_naive() + timedelta(hours=PENDING_CHANGE_DELAY_HOURS)).isoformat(sep=" ", timespec="seconds")
     cur = conn.execute(
         "INSERT INTO pending_changes (action_type, payload, apply_after) VALUES (?, ?, ?)",
         (payload.action_type, payload.payload, apply_after),
@@ -2287,15 +2297,13 @@ def list_due_pending_changes(token: str | None = None):
     # (デバイス側ApprovalSyncのapplyChange()には「unknown action_type」として無害に無視される、
     # という二重の安全策も兼ねている)。
     _apply_due_screen_budget_changes(conn)
-    # apply_afterはPythonのdatetime.now()(サーバーのローカル時刻)由来の文字列。
-    # SQLite側のdatetime('now')はUTCなので、SQL側で比較するとサーバーのタイムゾーンが
-    # UTCでない環境ではズレる。他の期限判定(todo/eventのnotify_at等)と同じく、
-    # Python側でdatetime.now()と比較する。
+    # apply_afterはutc_now_naive()(UTC、タイムゾーン情報なし)由来の文字列。
+    # SQL側で比較せず、Python側でutc_now_naive()と比較する(書き込みと同じ時計で比べるため)。
     rows = rows_to_dicts(conn.execute(
         "SELECT id, action_type, payload, created_at, apply_after FROM pending_changes WHERE applied = 0"
     ))
     conn.close()
-    now = datetime.now()
+    now = utc_now_naive()
     return [row for row in rows if datetime.fromisoformat(row["apply_after"]) <= now]
 
 
@@ -2559,7 +2567,7 @@ def focus_session_sync(payload: FocusSessionSync):
             "('focus_target_end_at', 'focus_target_notified', 'focus_target_subject')"
         )
     else:
-        target_end_at = (datetime.now() + timedelta(seconds=payload.remaining_seconds)).isoformat()
+        target_end_at = (utc_now_naive() + timedelta(seconds=payload.remaining_seconds)).isoformat()
         for key, value in (
             ("focus_target_end_at", target_end_at),
             ("focus_target_notified", "0"),
@@ -2582,7 +2590,7 @@ def focus_session_sync(payload: FocusSessionSync):
 def focus_session_active(payload: SessionActiveSync):
     conn = get_connection()
     if payload.active:
-        started_at = datetime.now().isoformat(sep=" ", timespec="seconds")
+        started_at = utc_now_naive().isoformat(sep=" ", timespec="seconds")
         for key, value in (
             ("session_active", "1"),
             ("session_subject", payload.subject or ""),
@@ -2622,7 +2630,7 @@ def focus_session_pause(payload: SessionPauseSync):
             "ON CONFLICT(key) DO UPDATE SET value = excluded.value"
         )
     else:
-        new_started_at = (datetime.now() - timedelta(milliseconds=payload.elapsed_ms)).isoformat(
+        new_started_at = (utc_now_naive() - timedelta(milliseconds=payload.elapsed_ms)).isoformat(
             sep=" ", timespec="seconds"
         )
         conn.execute(
@@ -2664,7 +2672,7 @@ def _read_session_flag(
     stale = False
     if started_at:
         try:
-            age = datetime.now() - datetime.fromisoformat(started_at)
+            age = utc_now_naive() - datetime.fromisoformat(started_at)
             stale = age > timedelta(hours=FOCUS_SESSION_MAX_AGE_HOURS)
         except ValueError:
             pass
@@ -2680,13 +2688,13 @@ def _read_session_flag(
 
 
 def _with_elapsed(result: dict) -> dict:
-    # started_atはサーバー機のdatetime.now()(タイムゾーンなし)で書かれるため、Render(UTC)と
-    # ローカル運用のPC(NZ時間)で意味が変わる。受け手(Webフロント・FocusGuard)が時差を推測しなくて
-    # 済むよう、経過秒数をサーバー側で計算して添える。started_at自体の形式は変えない
+    # started_atはutc_now_naive()(UTC、タイムゾーン情報なし)で書かれる。2026-10-01以前は
+    # サーバー機のdatetime.now()で、ローカル運用のPCではNZ時間になっていた。受け手(Webフロント・
+    # FocusGuard)が時差を推測しなくて済むよう、経過秒数をサーバー側で計算して添える。started_at自体の形式は変えない
     # (JpBlockerはactiveしか読まず、追加フィールドは無視される、2026-09-27)
     if result.get("active") and result.get("started_at"):
         try:
-            elapsed = datetime.now() - datetime.fromisoformat(result["started_at"])
+            elapsed = utc_now_naive() - datetime.fromisoformat(result["started_at"])
             result["elapsed_seconds"] = max(0, int(elapsed.total_seconds()))
         except ValueError:
             pass
@@ -2773,9 +2781,9 @@ def push_check(token: str | None = None):
     # due_date/due_time/events.date/triggered_at等はいずれもNZのwall-clock(タイムゾーン
     # 情報なし)で保存されているため、この関数内の「今」は原則nowで代表させ、NZローカルの
     # naive datetimeとして扱う(nz_now_naive()参照)。focus_target_end_atだけは例外で、
-    # サーバー時計(UTC)のdatetime.now()同士の絶対時刻比較のため、now_utcを別に使う。
+    # utc_now_naive()同士の絶対時刻比較のため、now_utcを別に使う。
     now = nz_now_naive()
-    now_utc = datetime.now()
+    now_utc = utc_now_naive()
     sent_count = 0
 
     todo_rows = rows_to_dicts(conn.execute(
