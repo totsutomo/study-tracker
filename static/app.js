@@ -3355,10 +3355,12 @@ async function loadScoresTab() {
 // ---------- overview by subject (2026-10-01) ----------
 // 「時間配分の偏り」「一橋の科目ごとの進み具合」「伸びているか」を1枚で見るための表。
 // 時間だけ/api/study-logs/subject-totalsから取り、成果の数字は下の各カードが読み込んだデータを使い回す
-// (外部アプリへの取得を増やさないため)。▲▼は同じ長さの直前の期間との比較。
+// (外部アプリへの取得を増やさないため)。例外はmathの行で、カードが無いので/api/drill-statsを別に読む
+// (2026-10-02、drill-sync廃止でCompassに解いた数が残らなくなったため)。▲▼は同じ長さの直前の期間との比較。
 
 const DRILL_URL = "https://drill-tracker.vercel.app";
 let lastVocabStats = null;
+let lastDrillStats = null;
 let overviewData = null;
 let overviewDays = [7, 30].includes(Number(localStorage.getItem("overviewDays")))
   ? Number(localStorage.getItem("overviewDays"))
@@ -3366,6 +3368,12 @@ let overviewDays = [7, 30].includes(Number(localStorage.getItem("overviewDays"))
 
 async function loadOverview() {
   const days = overviewDays;
+  // Drillの集計はmathの行の成果欄だけに使う。失敗しても表全体は出す
+  apiCached(`/api/drill-stats?days=${days}`, (data) => {
+    if (days !== overviewDays) return;
+    lastDrillStats = data;
+    renderOverview();
+  }).catch((err) => console.error("drill stats load failed", err));
   try {
     await apiCached(`/api/study-logs/subject-totals?days=${days}`, (data) => {
       if (days !== overviewDays) return;
@@ -3411,10 +3419,21 @@ function overviewMinutesDelta(cur, prev) {
 }
 
 // 科目ごとの成果の数字。{ main, sub, target } を返す(targetはタップ時の移動先のカードid、またはURL)
-function overviewResult(subject, starts) {
+function overviewResult(subject, starts, days) {
   const inCur = (date) => date >= starts.current;
   const inPrev = (date) => date >= starts.previous && date < starts.current;
   const avg = (xs) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null);
+
+  // Drillは今の表示期間(days)と同じ長さで集計したものだけ使う(7日/30日の切り替え直後の取り違え防止)
+  if (subject === "math" && lastDrillStats && lastDrillStats.days === days) {
+    const d = lastDrillStats;
+    const rating = d.avg_rating == null ? "" : ` · avg rating ${d.avg_rating.toFixed(1)}${overviewDelta(d.avg_rating, d.prev_avg_rating, "", 1)}`;
+    return {
+      main: `Drill solved <span class="overview-num">${d.solved}</span>${overviewDelta(d.solved, d.prev_solved)}${rating}`,
+      sub: `Aochart progress ${d.progress_percent}% (${d.attempted_problems} / ${d.total_problems}) ↗`,
+      target: DRILL_URL,
+    };
+  }
 
   if (subject === "English") {
     const writing = lastHitotsubashiScoreRows;
@@ -3480,18 +3499,10 @@ function renderOverview() {
       <span class="overview-subj">Subject</span><span class="overview-time">Time</span>
       <span class="overview-share">Share</span><span class="overview-result">Results</span></div>`;
   const rows = subjects.map((s) => {
-    let result = overviewResult(s.subject, starts);
+    const result = overviewResult(s.subject, starts, days);
     // 今期0分で成果の数字も無い科目(「other」等)は並べても情報が無いので出さない。
     // 英語・Stack科目は成果の行があるので、0分になっても表に残る(サボりに気づけるように)
-    if (!s.minutes && !result && !s.drill_count && !s.prev_drill_count) return "";
-    // Drill(数学)は問題数だけ。青チャートの進み具合はDrill側で見る
-    if (!result && (s.drill_count || s.prev_drill_count)) {
-      result = {
-        main: `Drill problems <span class="overview-num">${s.drill_count}</span>${overviewDelta(s.drill_count, s.prev_drill_count)}`,
-        sub: "Progress details in Drill ↗",
-        target: DRILL_URL,
-      };
-    }
+    if (!s.minutes && !result) return "";
     const perDay = (s.minutes / 60 / days).toFixed(1);
     return `<button type="button" class="overview-row"${result?.target ? ` data-target="${result.target}"` : ""}>
       <span class="overview-subj"><span class="legend-dot" style="background:${colorFor(s.subject)};"></span>${escapeHtml(s.subject)}</span>

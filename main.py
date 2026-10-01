@@ -721,7 +721,8 @@ def study_log_summary():
 # Scoresタブ最上部の科目別まとめ表(2026-10-01)用。直近days日と、その直前days日の科目ごとの合計時間を
 # 1回の問い合わせで返す。成果の数字(Stack正答率・一橋ライティング・語彙)はScoresの各カードが既に
 # 読み込んでいるデータをクライアント側で使い回し、ここでは時間だけを扱う(外部アプリへの取得を増やさないため)。
-# Drill(drill-tracker)のログは科目名が「数学」で入ってくるので、Compassのカテゴリー名に寄せて合算する。
+# 過去のDrill(drill-tracker)のログは科目名が「数学」で入っているので、Compassのカテゴリー名に寄せて合算する
+# (Drillの解いた数は10/1のdrill-sync廃止後、/api/drill-statsから取る)。
 SUBJECT_ALIASES = {"数学": "math"}
 
 
@@ -734,29 +735,22 @@ def study_log_subject_totals(days: int = 7):
     rows = conn.execute(
         "SELECT subject, "
         "SUM(CASE WHEN logged_at >= ? THEN minutes ELSE 0 END), "
-        "SUM(CASE WHEN logged_at < ? THEN minutes ELSE 0 END), "
-        "SUM(CASE WHEN logged_at >= ? AND start_trigger LIKE 'drill-tracker:%' THEN COALESCE(count, 0) ELSE 0 END), "
-        "SUM(CASE WHEN logged_at < ? AND start_trigger LIKE 'drill-tracker:%' THEN COALESCE(count, 0) ELSE 0 END) "
+        "SUM(CASE WHEN logged_at < ? THEN minutes ELSE 0 END) "
         "FROM study_logs WHERE logged_at >= ? GROUP BY subject",
-        (current_start, current_start, current_start, current_start, previous_start),
+        (current_start, current_start, previous_start),
     ).fetchall()
     conn.close()
     totals: dict[str, dict] = {}
-    for subject, cur_min, prev_min, cur_drill, prev_drill in rows:
-        t = totals.setdefault(
-            SUBJECT_ALIASES.get(subject, subject),
-            {"minutes": 0, "prev_minutes": 0, "drill_count": 0, "prev_drill_count": 0},
-        )
+    for subject, cur_min, prev_min in rows:
+        t = totals.setdefault(SUBJECT_ALIASES.get(subject, subject), {"minutes": 0, "prev_minutes": 0})
         t["minutes"] += cur_min or 0
         t["prev_minutes"] += prev_min or 0
-        t["drill_count"] += cur_drill or 0
-        t["prev_drill_count"] += prev_drill or 0
     return {
         "days": days,
         "subjects": [
             {"subject": s, **t}
             for s, t in sorted(totals.items(), key=lambda kv: -kv[1]["minutes"])
-            if t["minutes"] or t["prev_minutes"] or t["drill_count"] or t["prev_drill_count"]
+            if t["minutes"] or t["prev_minutes"]
         ],
     }
 
@@ -1047,6 +1041,32 @@ def vocab_stats(days: int = 90):
         "words": cached["words"],
         "ratings": _vocab_rating_days(cached["rating_log"], days),
     }
+
+
+# Scoresタブの科目別まとめ表のmathの行(2026-10-02)。drill-syncでの1問ごとの記録は10/1に廃止したので、
+# 解いた数・進み具合はDrill(Vercel)の読み取り専用の集計APIから取る。vocab-statsと同じく短時間キャッシュする。
+DRILL_API_ORIGIN = os.environ.get("DRILL_API_ORIGIN", "https://drill-tracker.vercel.app")
+DRILL_STATS_CACHE_SECONDS = 60
+_drill_stats_cache: dict = {}
+
+
+@app.get("/api/drill-stats")
+def drill_stats(days: int = 7):
+    days = max(1, min(days, 180))
+    today = nz_today().isoformat()
+    key = (today, days)
+    now = time.time()
+    cached = _drill_stats_cache.get(key)
+    if cached and now - cached[0] <= DRILL_STATS_CACHE_SECONDS:
+        return cached[1]
+    try:
+        with urllib.request.urlopen(f"{DRILL_API_ORIGIN}/api/stats/summary?date={today}&days={days}", timeout=15) as res:
+            value = json.loads(res.read().decode("utf-8"))
+    except (urllib.error.URLError, TimeoutError, ValueError) as e:
+        raise HTTPException(status_code=502, detail=f"drill-tracker unreachable: {e}")
+    _drill_stats_cache.clear()  # 日付が変わった古いキーを溜めないよう、持つのは直近の1件だけ
+    _drill_stats_cache[key] = (now, value)
+    return value
 
 
 # 3アプリ統合ヒートマップ(Studyタブ)用の日次集計。start_triggerのプレフィックスで
