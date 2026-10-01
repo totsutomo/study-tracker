@@ -248,6 +248,13 @@ class StackStudyLogCreate(BaseModel):
     logged_at: str | None = None  # "YYYY-MM-DD HH:MM:SS", client(Stack)local time
 
 
+class StackSessionActiveSync(BaseModel):
+    # FocusGuard(PC)向けの「今Stackで復習中か」フラグ(2026-10-02)。VocabSessionActiveSyncと同じ理由で
+    # Compass本体のsession_activeとは別管理にし、_focus_session_status()でOR条件として合成する
+    active: bool
+    subject: str | None = None  # Compassのカテゴリ名("kobun"等)。FocusGuardのチャンネル例外・バッジ表示用
+
+
 class StackScoreUpsert(BaseModel):
     date: str  # "YYYY-MM-DD"(Stack側の端末ローカル日付)
     subject: str
@@ -964,6 +971,39 @@ def upsert_stack_score(score: StackScoreUpsert, token: str | None = None):
         """,
         (score.date, score.subject, score.reviews, score.correct, score.mastered, score.total),
     )
+    conn.commit()
+    conn.close()
+    return JSONResponse(content={"ok": True}, headers=_stack_cors_headers())
+
+
+@app.options("/api/stack-session/active")
+def stack_session_active_preflight():
+    return JSONResponse(content=None, headers=_stack_cors_headers())
+
+
+# Stackの復習画面を開いている間、FocusGuard(PC)にもCompass本体のセッションと同じように
+# ブロックを効かせるためのフラグ(2026-10-02)。書き込むのはstack_session_*という別キーだけ
+@app.post("/api/stack-session/active")
+def stack_session_active(payload: StackSessionActiveSync, token: str | None = None):
+    _check_stack_token(token)
+    conn = get_connection()
+    if payload.active:
+        started_at = utc_now_naive().isoformat(sep=" ", timespec="seconds")
+        for key, value in (
+            ("stack_session_active", "1"),
+            ("stack_session_subject", payload.subject or ""),
+            ("stack_session_started_at", started_at),
+        ):
+            conn.execute(
+                "INSERT INTO settings (key, value) VALUES (?, ?) "
+                "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                (key, value),
+            )
+    else:
+        conn.execute(
+            "DELETE FROM settings WHERE key IN "
+            "('stack_session_active', 'stack_session_subject', 'stack_session_started_at')"
+        )
     conn.commit()
     conn.close()
     return JSONResponse(content={"ok": True}, headers=_stack_cors_headers())
@@ -2789,6 +2829,13 @@ def _focus_session_status(conn) -> dict:
     )
     if vocab_active:
         return _with_elapsed({"active": True, "subject": "English", "started_at": vocab_started_at, "paused": False})
+
+    # Stackの復習中(2026-10-02〜)。vocab-appと同じくOR条件で合成するだけ
+    stack_active, stack_subject, stack_started_at = _read_session_flag(
+        conn, "stack_session_active", "stack_session_subject", "stack_session_started_at"
+    )
+    if stack_active:
+        return _with_elapsed({"active": True, "subject": stack_subject, "started_at": stack_started_at, "paused": False})
 
     return {"active": False}
 
