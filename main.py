@@ -188,10 +188,13 @@ class TodoUpdate(BaseModel):
 
 class CategoryCreate(BaseModel):
     name: str
+    counts_as_study: bool = True
 
 
 class CategoryUpdate(BaseModel):
-    name: str
+    # どちらも省略可(名前変更と「勉強として数える」の切り替えは設定画面で別々に送られるため)
+    name: str | None = None
+    counts_as_study: bool | None = None
 
 
 class SettingsUpdate(BaseModel):
@@ -431,6 +434,10 @@ def next_due_after_close(due_date: str | None, recurrence: str) -> date | None:
 
 # ---------- todos ----------
 
+# ToDo達成率(スクリーンタイム予算・ToDo stats)の対象を「勉強として数える」カテゴリのToDoに絞る条件。
+# カテゴリ未選択(NULL/空)やcounts_as_study=0のカテゴリ(other等)の生活ToDoは数えない(2026-10-02)
+STUDY_TODO_FILTER = "category IN (SELECT name FROM categories WHERE counts_as_study = 1)"
+
 @app.get("/api/todos")
 def list_todos():
     conn = get_connection()
@@ -454,15 +461,18 @@ def todo_stats():
     # 含めてしまうと消化率が下がり続け、スキップ機能を作った意味(all-or-nothing対策)が薄れる。
     # 一方、期限切れで自動スキップされたもの(skip_reason='overdue')は「やり損ねた」なので分母に残す
     # (2026-09-27。それ以前の自動スキップは区別できないため、従来通り除外扱いのまま)
+    # 生活ToDoはスクリーンタイム予算と同じく数えない(STUDY_TODO_FILTER参照)
     total = conn.execute(
-        "SELECT COUNT(*) FROM todos WHERE skipped = 0 OR skip_reason = 'overdue'"
+        f"SELECT COUNT(*) FROM todos WHERE (skipped = 0 OR skip_reason = 'overdue') AND {STUDY_TODO_FILTER}"
     ).fetchone()[0]
-    done_count = conn.execute("SELECT COUNT(*) FROM todos WHERE done = 1 AND skipped = 0").fetchone()[0]
+    done_count = conn.execute(
+        f"SELECT COUNT(*) FROM todos WHERE done = 1 AND skipped = 0 AND {STUDY_TODO_FILTER}"
+    ).fetchone()[0]
     skipped_count = conn.execute(
-        "SELECT COUNT(*) FROM todos WHERE skipped = 1 AND COALESCE(skip_reason, '') != 'overdue'"
+        f"SELECT COUNT(*) FROM todos WHERE skipped = 1 AND COALESCE(skip_reason, '') != 'overdue' AND {STUDY_TODO_FILTER}"
     ).fetchone()[0]
     missed_count = conn.execute(
-        "SELECT COUNT(*) FROM todos WHERE skipped = 1 AND skip_reason = 'overdue'"
+        f"SELECT COUNT(*) FROM todos WHERE skipped = 1 AND skip_reason = 'overdue' AND {STUDY_TODO_FILTER}"
     ).fetchone()[0]
     # completed_atはSQLiteのdatetime('now')で入る「UTC」の時刻なので、そのままdate()で区切ると
     # NZの午前中(UTCではまだ前日)に完了したToDoが前日の棒に入る。NZの暦日で7日分(今日+過去6日)を
@@ -474,7 +484,7 @@ def todo_stats():
         .strftime("%Y-%m-%d %H:%M:%S")
     )
     rows = conn.execute(
-        "SELECT completed_at FROM todos WHERE done = 1 AND completed_at >= ?", (since_utc,)
+        f"SELECT completed_at FROM todos WHERE done = 1 AND completed_at >= ? AND {STUDY_TODO_FILTER}", (since_utc,)
     ).fetchall()
     conn.close()
     counts: dict[str, int] = {}
@@ -661,31 +671,37 @@ def create_category(category: CategoryCreate):
     if existing is not None:
         conn.close()
         raise HTTPException(status_code=400, detail="category already exists")
-    cur = conn.execute("INSERT INTO categories (name) VALUES (?)", (name,))
+    cur = conn.execute(
+        "INSERT INTO categories (name, counts_as_study) VALUES (?, ?)", (name, int(category.counts_as_study))
+    )
     conn.commit()
     new_id = cur.lastrowid
     conn.close()
-    return {"id": new_id, "name": name}
+    return {"id": new_id, "name": name, "counts_as_study": int(category.counts_as_study)}
 
 
 @app.put("/api/categories/{category_id}")
 def update_category(category_id: int, category: CategoryUpdate):
-    name = category.name.strip()
-    if not name:
+    name = category.name.strip() if category.name is not None else None
+    if category.name is not None and not name:
         raise HTTPException(status_code=400, detail="name is required")
     conn = get_connection()
-    row = conn.execute("SELECT name FROM categories WHERE id = ?", (category_id,)).fetchone()
+    row = conn.execute("SELECT name, counts_as_study FROM categories WHERE id = ?", (category_id,)).fetchone()
     if row is None:
         conn.close()
         raise HTTPException(status_code=404, detail="category not found")
-    old_name = row[0]
-    conn.execute("UPDATE categories SET name = ? WHERE id = ?", (name, category_id))
-    conn.execute("UPDATE todos SET category = ? WHERE category = ?", (name, old_name))
-    conn.execute("UPDATE study_logs SET subject = ? WHERE subject = ?", (name, old_name))
-    conn.execute("UPDATE events SET category = ? WHERE category = ?", (name, old_name))
+    old_name, counts_as_study = row
+    if name is not None and name != old_name:
+        conn.execute("UPDATE categories SET name = ? WHERE id = ?", (name, category_id))
+        conn.execute("UPDATE todos SET category = ? WHERE category = ?", (name, old_name))
+        conn.execute("UPDATE study_logs SET subject = ? WHERE subject = ?", (name, old_name))
+        conn.execute("UPDATE events SET category = ? WHERE category = ?", (name, old_name))
+    if category.counts_as_study is not None:
+        counts_as_study = int(category.counts_as_study)
+        conn.execute("UPDATE categories SET counts_as_study = ? WHERE id = ?", (counts_as_study, category_id))
     conn.commit()
     conn.close()
-    return {"id": category_id, "name": name}
+    return {"id": category_id, "name": name or old_name, "counts_as_study": counts_as_study}
 
 
 @app.delete("/api/categories/{category_id}")
@@ -1980,7 +1996,7 @@ def _compute_screen_budget_status(conn, date: str) -> dict:
     ).fetchone()[0]
 
     todo_row = conn.execute(
-        "SELECT COUNT(*), COALESCE(SUM(done), 0) FROM todos WHERE due_date = ? AND skipped = 0",
+        f"SELECT COUNT(*), COALESCE(SUM(done), 0) FROM todos WHERE due_date = ? AND skipped = 0 AND {STUDY_TODO_FILTER}",
         (date,),
     ).fetchone()
     todo_total, todo_done = todo_row

@@ -471,6 +471,14 @@ def _migrate(conn):
         )
         conn.execute("DROP TABLE eiken_writing_scores_old")
 
+    # ToDo達成率(スクリーンタイム予算・ToDo stats)に「勉強として数える」カテゴリかどうか(2026-10-02)。
+    # 玉ねぎを買う等の生活ToDoが勉強の達成率に混ざらないようにする。列を足した初回だけ、
+    # 生活・雑務用のother(旧名その他)をオフにする(以後のオン/オフは設定画面で切り替える)
+    cat_cols = [row[1] for row in conn.execute("PRAGMA table_info(categories)").fetchall()]
+    if "counts_as_study" not in cat_cols:
+        conn.execute("ALTER TABLE categories ADD COLUMN counts_as_study INTEGER NOT NULL DEFAULT 1")
+        conn.execute("UPDATE categories SET counts_as_study = 0 WHERE name IN ('other', 'その他')")
+
     # 犬育成機能を廃止したため、既存環境(ローカルdata.db・本番Turso)に残っているテーブル・設定を掃除する
     conn.execute("DROP TABLE IF EXISTS pet_feedings")
     conn.execute("DROP TABLE IF EXISTS pet_generations")

@@ -584,7 +584,7 @@ function renderTodoItem(t, list) {
         <span class="todo-card-dot" style="background:${dotColor}"></span>
         <div class="todo-card-main">
           <span class="todo-card-title" title="${escapeHtml(t.title)}">${priorityLabel}${escapeHtml(t.title)}${noteMark}</span>
-          <span class="todo-card-meta">${t.category || ""} ${dueLabel}${recurLabel}${t.skipped ? " · Skipped" : ""}</span>
+          <span class="todo-card-meta">${t.category || ""} ${dueLabel}${recurLabel}${t.skipped ? " · Skipped" : ""}${countsAsStudyTodo(t) ? "" : " · Not counted"}</span>
         </div>
         <div class="todo-card-actions">
           ${showReschedule ? `
@@ -993,6 +993,15 @@ async function loadCategories({ preferCache = false } = {}) {
   applyCategories(await api("/api/categories"));
 }
 
+// スマホ利用時間・ToDo達成率の計算に入るToDoか(main.pyのSTUDY_TODO_FILTERと同じ判定)
+// カテゴリ未取得の間や、counts_as_study列が無い古いキャッシュでは印を出さない(誤って「Not counted」と出さないため)
+function countsAsStudyTodo(t) {
+  if (!allCategories.length) return true;
+  const cat = allCategories.find((c) => c.name === t.category);
+  if (!cat) return false;
+  return cat.counts_as_study === undefined || !!cat.counts_as_study;
+}
+
 function applyCategories(cats) {
   allCategories = cats;
 
@@ -1016,21 +1025,46 @@ function applyCategories(cats) {
   const detailCurrent = detailSelect.value;
   const filterCurrent = filterSelect.value;
   const optionsHtml = cats.map((c) => `<option value="${escapeHtml(c.name)}">${escapeHtml(c.name)}</option>`).join("");
-  addSelect.innerHTML = optionsHtml;
-  detailSelect.innerHTML = optionsHtml;
+  // 追加・編集フォームは「カテゴリなし」を先頭(=初期値)に置く。選び忘れた生活ToDo(玉ねぎを買う等)が
+  // 先頭のEnglish扱いになって勉強の達成率に混ざるのを防ぐため(2026-10-02)
+  const noCategoryOption = `<option value="">No category</option>`;
+  addSelect.innerHTML = noCategoryOption + optionsHtml;
+  detailSelect.innerHTML = noCategoryOption + optionsHtml;
   filterSelect.innerHTML = `<option value="">Category: All</option>` + optionsHtml;
+  addSelect.value = "";
   if (cats.some((c) => c.name === addCurrent)) addSelect.value = addCurrent;
   if (cats.some((c) => c.name === detailCurrent)) detailSelect.value = detailCurrent;
   filterSelect.value = filterCurrent;
+  renderTodos(); // カテゴリの「Study」設定が変わると各ToDoの「Not counted」表示も変わるため
 }
 
 function renderCategoryItem(cat, list) {
   const li = document.createElement("li");
   li.innerHTML = `
     <input type="text" class="category-name-input" value="${escapeHtml(cat.name)}">
+    <label class="checkbox-label" title="このカテゴリのToDoをスマホ利用時間・ToDo達成率の計算に含める">
+      <input type="checkbox" class="category-study-toggle" ${cat.counts_as_study ? "checked" : ""}> Study
+    </label>
     <button class="delete-btn" title="Delete">×</button>
   `;
-  const input = li.querySelector("input");
+  const input = li.querySelector(".category-name-input");
+  const studyToggle = li.querySelector(".category-study-toggle");
+  studyToggle.addEventListener("change", async () => {
+    const prev = cat.counts_as_study;
+    cat.counts_as_study = studyToggle.checked ? 1 : 0;
+    renderTodos(); // 「Not counted」表示を即時に切り替える
+    try {
+      await api(`/api/categories/${cat.id}`, {
+        method: "PUT",
+        body: JSON.stringify({ counts_as_study: studyToggle.checked }),
+      });
+    } catch (err) {
+      cat.counts_as_study = prev;
+      studyToggle.checked = !!prev;
+      renderTodos();
+      showToast("設定の変更に失敗しました。もう一度お試しください");
+    }
+  });
   input.addEventListener("change", async () => {
     const newName = input.value.trim();
     if (!newName || newName === cat.name) {
@@ -1170,7 +1204,7 @@ document.getElementById("todo-detail-time-toggle").addEventListener("click", () 
 
 guardedSubmit(document.getElementById("todo-form"), async (e) => {
   const title = document.getElementById("todo-title").value.trim();
-  const category = document.getElementById("todo-category").value;
+  const category = document.getElementById("todo-category").value || null;
   const priority = document.getElementById("todo-priority").value;
   const due_date = document.getElementById("todo-due-date").value || null;
   const due_time = document.getElementById("todo-due-time").value || null;
@@ -1183,6 +1217,7 @@ guardedSubmit(document.getElementById("todo-form"), async (e) => {
   const payload = { title, category, priority, due_date, due_time, recurrence, notify_offset_minutes, note };
   // 保存を待たずフォームを閉じる(「受け付けた」感を即座に出す)。保存自体はこの後裏で進む
   document.getElementById("todo-title").value = "";
+  document.getElementById("todo-category").value = ""; // 毎回「カテゴリなし」に戻す(前回の科目を引き継がない)
   document.getElementById("todo-due-date").value = "";
   document.getElementById("todo-due-time").value = "";
   document.getElementById("todo-due-time").style.display = "none";
