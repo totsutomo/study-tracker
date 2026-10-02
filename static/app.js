@@ -2223,9 +2223,9 @@ async function applyStudyLogLocally(log) {
       renderGoalProgress,
     ),
     patchCachedAndRender(
-      "/api/study-logs/daily",
+      dailyChartPath(studyChartDays()),
       (rows) => addToSubjectRow(rows, "d", day, subject, minutes),
-      (rows) => { if (chartGranularity === "day") renderDailyChart(rows); },
+      (rows) => { if (chartGranularity === "day") renderDailyChart(rows, studyChartDays()); },
     ),
     patchCachedAndRender(
       "/api/study-logs/weekly",
@@ -2376,9 +2376,20 @@ const WEEKLY_CHART_WEEKS = 10;
 
 let chartGranularity = localStorage.getItem("studyChartGranularity") === "day" ? "day" : "week";
 
+// 広いPC幅(style.cssの.study-dashが2列になる1280px以上)では、Day表示を28日分にして
+// グラフも横長すぎない縦横比で描く。右側の余白をなくした分、棒を増やせるため(2026-10-02)
+const STUDY_WIDE_MQ = window.matchMedia("(min-width: 1280px)");
+function studyChartDays() {
+  return STUDY_WIDE_MQ.matches ? 28 : 14;
+}
+
 function last14Dates() {
+  return lastNDates(14);
+}
+
+function lastNDates(n) {
   const dates = [];
-  for (let i = 13; i >= 0; i--) {
+  for (let i = n - 1; i >= 0; i--) {
     const d = new Date();
     d.setDate(d.getDate() - i);
     dates.push(formatLocalDate(d));
@@ -2494,14 +2505,20 @@ async function loadStudyChart() {
 }
 
 // 前回キャッシュの描画が遅れて届いた時に、既に切り替え済みの日/週グラフを上書きしないためのガード
+// 14日分はほかの場所(「今日の勉強時間」パネル等)と同じURLのままにして、通信とキャッシュを共有する
+function dailyChartPath(days) {
+  return days === 14 ? "/api/study-logs/daily" : `/api/study-logs/daily?days=${days}`;
+}
+
 async function loadDailyChart() {
-  await apiCached("/api/study-logs/daily", (raw) => {
-    if (chartGranularity === "day") renderDailyChart(raw);
+  const days = studyChartDays();
+  await apiCached(dailyChartPath(days), (raw) => {
+    if (chartGranularity === "day" && days === studyChartDays()) renderDailyChart(raw, days);
   });
 }
 
-function renderDailyChart(raw) {
-  const dates = last14Dates();
+function renderDailyChart(raw, days = studyChartDays()) {
+  const dates = lastNDates(days);
   const subjectNames = allCategories.map((c) => c.name);
   raw.forEach((row) => {
     if (!subjectNames.includes(row.subject)) subjectNames.push(row.subject);
@@ -2554,8 +2571,10 @@ function renderStudyChart(buckets, byBucket, subjectNames, labelFns) {
   const container = document.getElementById("study-chart");
   const totals = buckets.map((b) => subjectNames.reduce((sum, s) => sum + (byBucket[b][s] || 0), 0));
   const maxTotal = Math.max(60, ...totals);
-  const chartW = 320;
-  const chartH = 130;
+  // 2列表示では左の列が広いので、スマホ用の横長な比率のままだと縦に低すぎる(右の列だけ長くなる)
+  const wide = STUDY_WIDE_MQ.matches;
+  const chartW = wide ? 480 : 320;
+  const chartH = wide ? 308 : 130;
   const padLeft = 26;
   // 最大値の目盛りラベルがviewBoxの上端ぴったりに描かれて見切れていたため、上にも余白を確保する。
   const padTop = 9;
@@ -2613,8 +2632,15 @@ function renderStudyChart(buckets, byBucket, subjectNames, labelFns) {
 
 function updateChartTitle() {
   document.getElementById("study-chart-title").textContent =
-    chartGranularity === "day" ? "Last 14 days" : `Last ${WEEKLY_CHART_WEEKS} weeks`;
+    chartGranularity === "day" ? `Last ${studyChartDays()} days` : `Last ${WEEKLY_CHART_WEEKS} weeks`;
 }
+
+// ウィンドウ幅が1280pxをまたいだら、日数と縦横比を合わせて描き直す
+STUDY_WIDE_MQ.addEventListener("change", () => {
+  updateChartTitle();
+  loadStudyChart();
+  loadHourlyChart();
+});
 
 // 以前は".period-btn"全部に付けていたため、Mood・Scores等の別の切り替えを押すと日/週グラフが週に戻り、
 // ほかの切り替えの選択表示も消えていた(2026-09-30修正)。Week/Dayのボタンだけを対象にする
@@ -2673,8 +2699,10 @@ function renderHourlyChart(minutes, days) {
     : `No study recorded in the ${periodLabel}`;
 
   const maxMin = Math.max(60, ...minutes);
-  const chartW = 320;
-  const chartH = 120;
+  // 2列表示の左の列はスマホより広く、同じviewBoxのままだと文字ごと2倍以上に拡大されて縦にも間延びする
+  const wide = STUDY_WIDE_MQ.matches;
+  const chartW = wide ? 480 : 320;
+  const chartH = wide ? 130 : 120;
   const padLeft = 26;
   const padTop = 9;
   const padBottom = 14;

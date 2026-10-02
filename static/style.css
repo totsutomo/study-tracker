@@ -1298,6 +1298,39 @@ body.focus-open #tabbar {
   margin: 6px 0 0;
 }
 
+/* ---- Study > Log のカード配置(2026-10-02) ----
+   HTMLは広いPC幅(1280px以上)の2列用にmain/sideでまとめてある。それより狭い幅では包みを
+   display:contentsで消し、orderで以前の縦一列の順(Activity→グラフ→時間帯→7日合計→履歴→What moves)に戻す。
+   flexの中では上下のmarginが重ならず足し算になるので、以前と同じ間隔になるよう見出しのmarginを詰めている */
+.study-dash {
+  display: flex;
+  flex-direction: column;
+}
+
+.study-dash-main,
+.study-dash-side {
+  display: contents;
+}
+
+.study-dash-activity { order: 1; }
+.study-dash-chart { order: 2; }
+.study-dash-hourly { order: 3; }
+.study-dash-summary { order: 4; }
+.study-dash-history { order: 5; }
+.study-dash-drivers { order: 6; }
+
+.study-dash-summary > h3 {
+  margin-top: 8px;
+}
+
+.study-dash-history > h3 {
+  margin-top: 12px;
+}
+
+.study-dash .drivers-card {
+  margin-top: 0;
+}
+
 /* 時間帯グラフの「一番勉強している時間帯」。グラフより先に目に入るよう本文色にする */
 .chart-card > p.meta.hourly-best {
   font-size: 13px;
@@ -2221,16 +2254,6 @@ body.focus-open #tabbar {
 
   .chart-grid .chart-card {
     max-width: none;
-  }
-
-  .study-history-row {
-    display: flex;
-    gap: 20px;
-  }
-
-  .study-history-row > div {
-    flex: 1;
-    min-width: 0;
   }
 
   /* ---- Mood: グラフを拡大するのではなく、モバイルでは「タップしないと出ない」
@@ -3242,5 +3265,72 @@ body.quick-open #tabbar {
   .sleep-chart-card,
   .insights-card {
     max-width: 560px;
+  }
+}
+
+/* ---- Study > Log: 広いPC幅では2列(2026-10-02) ----
+   以前はグラフのカードを820pxで頭打ちにしていたため、右側に大きな余白が残っていた。
+   左にグラフ2つ、右にActivity・7日合計・What moves my studyを置き、履歴は下に横幅いっぱいで置く。
+   Day表示の棒は28本にして(app.jsのstudyChartDays)、グラフの縦横比も左右の列の長さがそろうように変えている */
+@media (min-width: 1280px) {
+  .study-dash {
+    display: grid;
+    grid-template-columns: minmax(0, 1.65fr) minmax(0, 1fr);
+    gap: 14px;
+    align-items: start;
+  }
+
+  .study-dash-main,
+  .study-dash-side {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  .study-dash .chart-card,
+  .study-dash .drivers-card {
+    max-width: none;
+    margin: 0;
+  }
+
+  /* What moves my studyは元々小さめのgoal-progress-cardなので、並んだほかのカードと余白・角丸をそろえる */
+  .study-dash .drivers-card {
+    border-radius: var(--radius-lg);
+    padding: 16px 20px;
+  }
+
+  .study-dash-summary,
+  .study-dash-history {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-card);
+    padding: 16px 20px;
+  }
+
+  .study-dash-summary > h3,
+  .study-dash-history > h3 {
+    margin-top: 0;
+  }
+
+  .study-dash-summary .list li:last-child,
+  .study-dash-history .list li:last-child {
+    margin-bottom: 0;
+  }
+
+  .study-dash-history {
+    grid-column: 1 / -1;
+  }
+
+  /* 右の列の幅いっぱいにマスを広げる(固定11pxのままだと左に寄ってカードの右半分が空く) */
+  .study-dash .heatmap-col {
+    flex: 1;
+  }
+
+  .study-dash .heatmap-cell {
+    width: 100%;
+    height: auto;
+    aspect-ratio: 1;
+    border-radius: 3px;
   }
 }

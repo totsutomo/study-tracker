@@ -1272,7 +1272,9 @@ def study_log_minimum_achieved_days(year: int, month: int):
 
 
 @app.get("/api/study-logs/daily")
-def study_log_daily():
+def study_log_daily(days: int = 14):
+    # PCの2列表示では28日分を描く(2026-10-02)。スマホは従来どおり14日
+    days = max(1, min(days, 90))
     conn = get_connection()
     cur = conn.execute(
         """
@@ -1282,7 +1284,7 @@ def study_log_daily():
         GROUP BY d, subject
         ORDER BY d
         """,
-        (nz_day_bound(offset_days=-13),),
+        (nz_day_bound(offset_days=-(days - 1)),),
     )
     result = rows_to_dicts(cur)
     conn.close()
