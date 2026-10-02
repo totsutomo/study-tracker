@@ -18,6 +18,7 @@ function switchTab(tabId, { fromHistory = false } = {}) {
   if (tabId === "tab-calendar") onCalendarTabShown();
   if (tabId !== "tab-calendar" && typeof closeCalSheet === "function") closeCalSheet();
   if (tabId === "tab-todo" && typeof loadTodayPanel === "function") loadTodayPanel();
+  if (tabId === "tab-mood" && prevTab !== tabId && typeof resetMoodTabPicker === "function") resetMoodTabPicker();
 }
 
 tabButtons.forEach((btn) => {
@@ -2810,6 +2811,7 @@ async function loadGoalProgress() {
 }
 
 function renderGoalProgress(p) {
+  lastGoalProgress = p;
   document.getElementById("stat-today").textContent = formatDuration(p.today_minutes);
   document.getElementById("stat-month").textContent = formatDuration(p.month_minutes);
   document.getElementById("stat-total").textContent = formatDuration(p.total_minutes);
@@ -2912,140 +2914,528 @@ async function loadScreenBudget() {
   banner.classList.toggle("low", remaining > 0 && remaining <= s.budget_minutes * 0.2);
 }
 
-let selectedMoodScore = 5;
-let selectedMoodReason = null;
+// ---------- mood (2026-10-03 ボタン再設計) ----------
+// 詳細: Obsidian「アプリ開発/Compass/2026-10-02_Compass気分記録の見直し(ボタン再設計).md」
+// 以前は理由が「良い版/悪い版」のペアで1つしか選べず、65%が空欄だった(どれにも当てはまらない)。
+// 今は「数字を押した瞬間に保存 → 実際の気持ちに近いボタン12個から複数選べる → 合わなければOther…」。
+// 記録の入口(Moodタブ・⚡・寝る前・起床時・Back to work)は全部このcreateMoodPickerを使い、
+// どこから付けた記録かはkind(wake / moment / day / slacking)で区別する。
+const MOOD_TAGS = [
+  { tag: "Tired", icon: "😮‍💨" },
+  { tag: "Stressed", icon: "😰" },
+  { tag: "Lonely", icon: "🧍" },
+  { tag: "Meh", icon: "🌀" },
+  { tag: "Calm", icon: "😌" },
+  { tag: "Proud", icon: "💪" },
+  { tag: "Moved", icon: "🏃" },
+  { tag: "Too much", icon: "📋" },
+  { tag: "Study", icon: "📚" },
+  { tag: "English", icon: "🗣" },
+  { tag: "Friends", icon: "👫" },
+  { tag: "Family", icon: "🏡" },
+];
+const MOOD_OTHER_TAG = "Other";
+const MOOD_KIND_ICON = { wake: "☀", day: "🌙", slacking: "🧭" };
+const MOOD_LOW_SCORE = 4; // これ以下を付けたら「今日の最低ライン」と▶を出す(Phase 3)
 
-function moodTierForScore(score) {
-  if (score <= 4) return "low";
-  if (score >= 7) return "high";
-  return "mid";
+// Otherから自動で増えたボタン・天気の場所。/api/mood/overviewの返事で更新する
+let moodConfig = { custom_tags: [], location: "waiuku" };
+let lastGoalProgress = null; // 最低ライン表示用(renderGoalProgressで更新)
+
+function moodTagIcon(tag) {
+  return MOOD_TAGS.find((t) => t.tag === tag)?.icon || "";
 }
 
-function updateMoodReasonTierVisibility(score) {
-  const tier = moodTierForScore(score);
-  document.querySelectorAll("#mood-reason-picker .reason-btn").forEach((btn) => {
-    const visible = tier === "mid" || btn.dataset.tier === tier || btn.dataset.tier === "both";
-    btn.classList.toggle("hidden", !visible);
-    if (!visible && selectedMoodReason === btn.dataset.reason) {
-      setSelectedMoodReason(null);
+function moodTagLabel(tag) {
+  const icon = moodTagIcon(tag);
+  return `${icon ? `${icon} ` : ""}${tag}`;
+}
+
+// 対応するボタンがない古い理由(Felt motivated等)は、tagsが空のままreasonを表示する
+function moodEntryLabels(e) {
+  const labels = (e.tags || []).filter((t) => t !== MOOD_OTHER_TAG).map(moodTagLabel);
+  if (!e.tags?.length && e.reason) labels.push(e.reason);
+  if (e.note) labels.push(`“${e.note}”`);
+  else if ((e.tags || []).includes(MOOD_OTHER_TAG)) labels.push("Other");
+  return labels;
+}
+
+// 寝る前の振り返りを夜中(0〜5時)に付けた時は、前の日の記録にする
+function moodDateFor(kind) {
+  if (kind === "day" && new Date().getHours() < 5) return addDaysToDate(todayStr(), -1);
+  return todayStr();
+}
+
+function minimumLineHtml(withButton) {
+  const p = lastGoalProgress;
+  if (!p || !p.daily_minimum_minutes) return "";
+  const left = p.daily_minimum_minutes - p.today_minutes;
+  const text =
+    left > 0
+      ? `Today's minimum: ${p.daily_minimum_minutes} min · ${left} min to go. Just start, even for a few minutes.`
+      : `Today's minimum (${p.daily_minimum_minutes} min) is already done ${ICONS.check}`;
+  const btn = withButton && left > 0 ? `<button type="button" class="mood-min-start">▶ Start timer</button>` : "";
+  return `<p>${text}</p>${btn}`;
+}
+
+// 1回分の気分を付ける部品。opts:
+//   kind: "wake" | "moment" | "day" | "slacking"
+//   activationLogId: () => サボり記録のid(Back to workの時だけ)
+//   minimumButton: 低い数字の時の最低ライン表示に▶ボタンを付けるか(Back to workは自前の▶があるのでfalse)
+//   onChange: 保存・変更のたびに呼ぶ(Moodタブの描き直し等)
+//   onStartTimer: 最低ラインの▶を押した時(開いているパネルを閉じてから⚡を開く)
+function createMoodPicker(container, opts) {
+  const { kind, minimumButton = true } = opts;
+  let entry = null; // { saving: Promise<id>, id, score, tags, note, logged_at }
+
+  container.classList.add("mood-picker-box");
+  container.innerHTML = `
+    <div class="mood-scale-buttons">${Array.from({ length: 10 }, (_, i) => `<button type="button" class="mood-scale-btn" data-score="${i + 1}">${i + 1}</button>`).join("")}</div>
+    <div class="mood-scale-labels"><span>1: Rough</span><span>10: Great</span></div>
+    <div class="mood-tags hidden">
+      <div class="mood-tag-grid"></div>
+      <div class="mood-tags-foot">
+        <button type="button" class="link-btn mood-other-link">Other…</button>
+        <span class="meta mood-saved-note"></span>
+      </div>
+      <form class="mood-other-form hidden">
+        <input type="text" maxlength="40" placeholder="In your own words (optional)">
+        <button type="submit">Add</button>
+      </form>
+    </div>
+    <div class="mood-min-line hidden"></div>`;
+
+  const scaleBtns = [...container.querySelectorAll(".mood-scale-btn")];
+  const tagsBox = container.querySelector(".mood-tags");
+  const grid = container.querySelector(".mood-tag-grid");
+  const otherLink = container.querySelector(".mood-other-link");
+  const otherForm = container.querySelector(".mood-other-form");
+  const otherInput = otherForm.querySelector("input");
+  const savedNote = container.querySelector(".mood-saved-note");
+  const minLine = container.querySelector(".mood-min-line");
+
+  function renderGrid() {
+    const tags = [...MOOD_TAGS.map((t) => t.tag), ...moodConfig.custom_tags];
+    grid.innerHTML = tags
+      .map((t) => {
+        // 絵文字を上・名前を下に分けて、4列でも文字が途中で折れないようにする
+        const icon = moodTagIcon(t);
+        return `<button type="button" class="mood-tag-btn" data-tag="${escapeHtml(t)}">${icon ? `<span class="mood-tag-icon">${icon}</span>` : ""}<span class="mood-tag-name">${escapeHtml(t)}</span></button>`;
+      })
+      .join("");
+  }
+
+  function render() {
+    scaleBtns.forEach((b) => b.classList.toggle("active", !!entry && parseInt(b.dataset.score, 10) === entry.score));
+    tagsBox.classList.toggle("hidden", !entry);
+    if (!entry) {
+      otherForm.classList.add("hidden");
+      minLine.classList.add("hidden");
+      return;
+    }
+    if (grid.dataset.tags !== JSON.stringify(moodConfig.custom_tags)) {
+      renderGrid();
+      grid.dataset.tags = JSON.stringify(moodConfig.custom_tags);
+    }
+    grid.querySelectorAll(".mood-tag-btn").forEach((b) => b.classList.toggle("active", entry.tags.includes(b.dataset.tag)));
+    const hasOther = entry.tags.includes(MOOD_OTHER_TAG);
+    otherLink.classList.toggle("active", hasOther);
+    otherForm.classList.toggle("hidden", !hasOther);
+    savedNote.textContent = entry.id || entry.saving ? "Saved ✓" : "";
+    const showMin = entry.score <= MOOD_LOW_SCORE && kind !== "day";
+    minLine.innerHTML = showMin ? minimumLineHtml(minimumButton) : "";
+    minLine.classList.toggle("hidden", !showMin || !minLine.innerHTML);
+  }
+
+  async function entryId() {
+    if (entry.id) return entry.id;
+    entry.id = await entry.saving;
+    return entry.id;
+  }
+
+  function changed() {
+    opts.onChange?.(entry ? { ...entry } : null);
+  }
+
+  async function saveScore(score) {
+    if (entry) {
+      // 押し直しは同じ記録の数字だけ直す(1回の気分が2件に分かれないように)
+      const prev = entry.score;
+      entry.score = score;
+      render();
+      changed();
+      try {
+        await api(`/api/mood-logs/${await entryId()}`, { method: "PUT", body: JSON.stringify({ score }) });
+      } catch (err) {
+        entry.score = prev;
+        render();
+        showToast("気分の記録に失敗しました。もう一度お試しください");
+      }
+      changed();
+      return;
+    }
+    const body = {
+      date: moodDateFor(kind),
+      score,
+      kind,
+      tags: [],
+      logged_at: nowLocalTimestamp(),
+      activation_log_id: opts.activationLogId?.() ?? null,
+    };
+    const saving = api("/api/mood-logs", { method: "POST", body: JSON.stringify(body) }).then((r) => r.id);
+    entry = { saving, id: null, score, tags: [], note: null, logged_at: body.logged_at, date: body.date, kind };
+    render();
+    changed();
+    try {
+      entry.id = await saving;
+    } catch (err) {
+      entry = null;
+      render();
+      showToast("気分の記録に失敗しました。もう一度お試しください");
+    }
+    changed();
+  }
+
+  async function saveTags(tags, note) {
+    const prev = { tags: entry.tags, note: entry.note };
+    entry.tags = tags;
+    if (note !== undefined) entry.note = note;
+    render();
+    changed();
+    const body = { tags };
+    if (note !== undefined) body.note = note ?? "";
+    try {
+      const res = await api(`/api/mood-logs/${await entryId()}`, { method: "PUT", body: JSON.stringify(body) });
+      if (res.new_tag) {
+        moodConfig.custom_tags = [...moodConfig.custom_tags, res.new_tag];
+        showToast(`New button added: ${res.new_tag}`);
+        render();
+        renderMoodSettings();
+      }
+    } catch (err) {
+      Object.assign(entry, prev);
+      render();
+      showToast("保存に失敗しました。もう一度お試しください");
+    }
+    changed();
+  }
+
+  scaleBtns.forEach((b) => b.addEventListener("click", () => saveScore(parseInt(b.dataset.score, 10))));
+  grid.addEventListener("click", (e) => {
+    const btn = e.target.closest(".mood-tag-btn");
+    if (!btn || !entry) return;
+    const t = btn.dataset.tag;
+    saveTags(entry.tags.includes(t) ? entry.tags.filter((x) => x !== t) : [...entry.tags, t]);
+  });
+  otherLink.addEventListener("click", () => {
+    if (!entry) return;
+    if (entry.tags.includes(MOOD_OTHER_TAG)) {
+      saveTags(entry.tags.filter((x) => x !== MOOD_OTHER_TAG), null);
+      otherInput.value = "";
+    } else {
+      saveTags([...entry.tags, MOOD_OTHER_TAG]);
+      otherInput.value = entry.note || "";
+      setTimeout(() => otherInput.focus(), 0);
     }
   });
-}
-
-function setSelectedMoodScore(score) {
-  selectedMoodScore = score;
-  document.querySelectorAll(".mood-scale-btn").forEach((btn) => {
-    btn.classList.toggle("active", parseInt(btn.dataset.score, 10) === score);
+  otherForm.addEventListener("submit", (e) => {
+    e.preventDefault();
+    if (!entry) return;
+    const note = otherInput.value.trim();
+    saveTags(entry.tags.includes(MOOD_OTHER_TAG) ? entry.tags : [...entry.tags, MOOD_OTHER_TAG], note || null);
+    otherInput.blur();
   });
-  updateMoodReasonTierVisibility(score);
-}
-
-function setSelectedMoodReason(reason) {
-  selectedMoodReason = reason;
-  document.querySelectorAll("#mood-reason-picker .reason-btn").forEach((btn) => {
-    btn.classList.toggle("active", btn.dataset.reason === reason);
+  minLine.addEventListener("click", (e) => {
+    if (e.target.closest(".mood-min-start")) opts.onStartTimer?.();
   });
+
+  return {
+    reset() {
+      entry = null;
+      otherInput.value = "";
+      render();
+    },
+    // 既にある記録(今日のチップ)を開いて直す
+    edit(log) {
+      entry = {
+        saving: Promise.resolve(log.id),
+        id: log.id,
+        score: log.score,
+        tags: [...(log.tags || [])],
+        note: log.note,
+        logged_at: log.logged_at,
+        date: log.date,
+        kind: log.kind,
+      };
+      otherInput.value = log.note || "";
+      render();
+    },
+    refresh: render,
+    get entry() {
+      return entry;
+    },
+  };
 }
 
-function formatMoodEntryLine(entry) {
-  const time = (entry.logged_at || "").slice(11, 16);
-  const tags = [entry.reason, entry.note].filter(Boolean).join(" / ");
-  return `${time} Mood ${entry.score}${tags ? `(${tags})` : ""}`;
+// ---- Moodタブ ----
+
+// 気分の記録を保存した瞬間にグラフ・一覧へ出すため、最後に描いた材料を控えておく(2026-09-29)
+let lastMoodOverview = null;
+let moodTabPicker = null;
+let moodEditingId = null; // チップから開いて直している記録
+
+// サーバーのdaily_mood_by_dateと同じ規則: 寝る前の振り返り(kind=day)があればそれ、なければその日の平均
+function dailyMoodFromLogs(logs) {
+  const all = {};
+  const day = {};
+  logs.forEach((e) => {
+    (all[e.date] ||= []).push(e.score);
+    if (e.kind === "day") (day[e.date] ||= []).push(e.score);
+  });
+  const result = {};
+  Object.keys(all).forEach((d) => {
+    const use = day[d] || all[d];
+    result[d] = { value: Math.round((use.reduce((a, b) => a + b, 0) / use.length) * 10) / 10, review: !!day[d] };
+  });
+  return result;
+}
+
+function formatMoodEntryLine(e) {
+  const time = (e.logged_at || "").slice(11, 16);
+  const kindIcon = MOOD_KIND_ICON[e.kind] ? `${MOOD_KIND_ICON[e.kind]} ` : "";
+  const labels = moodEntryLabels(e);
+  return `${kindIcon}${time} · ${e.score}${labels.length ? ` · ${labels.join(", ")}` : ""}`;
+}
+
+function renderMoodChips(logs) {
+  const today = todayStr();
+  const todays = logs.filter((r) => r.date === today).slice().reverse();
+  document.getElementById("mood-today-status").textContent = todays.length ? `${todays.length} today` : "Not recorded";
+  const el = document.getElementById("mood-today-list");
+  const editing = moodEditingId != null ? `<div class="mood-edit-bar"><span class="meta">Editing ${escapeHtml(
+    (todays.find((e) => e.id === moodEditingId)?.logged_at || "").slice(11, 16)
+  )}</span><button type="button" class="link-btn" data-act="delete">Delete</button><button type="button" class="link-btn" data-act="new">+ New</button></div>` : "";
+  el.innerHTML =
+    editing +
+    todays
+      .map(
+        (e) =>
+          `<button type="button" class="mood-chip${e.id === moodEditingId ? " active" : ""}" data-id="${e.id ?? ""}">${escapeHtml(formatMoodEntryLine(e))}</button>`
+      )
+      .join("");
+}
+
+document.getElementById("mood-today-list").addEventListener("click", (e) => {
+  const act = e.target.closest("[data-act]")?.dataset.act;
+  if (act === "new") {
+    moodEditingId = null;
+    moodTabPicker.reset();
+    renderMoodChips(lastMoodOverview?.logs || []);
+    return;
+  }
+  if (act === "delete") {
+    const id = moodEditingId;
+    const before = lastMoodOverview;
+    moodEditingId = null;
+    moodTabPicker.reset();
+    undoableDelete("Deleted mood log", {
+      apply: () => {
+        if (before) renderMoodPanel({ ...before, logs: before.logs.filter((l) => l.id !== id) });
+      },
+      revert: () => loadMoodPanel(),
+      commit: async () => {
+        await api(`/api/mood-logs/${id}`, { method: "DELETE" });
+        loadMoodPanel();
+      },
+    });
+    return;
+  }
+  const chip = e.target.closest(".mood-chip");
+  if (!chip || !chip.dataset.id) return;
+  const log = lastMoodOverview?.logs.find((l) => String(l.id) === chip.dataset.id);
+  if (!log) return;
+  moodEditingId = log.id;
+  moodTabPicker.edit(log);
+  renderMoodChips(lastMoodOverview.logs);
+});
+
+// 保存の途中でも画面に出すため、手元の材料に今の記録を足して描き直す。サーバーの最新は少し待ってから取り直す
+let moodReloadTimer = null;
+function applyLocalMoodEntry(entry) {
+  if (entry && lastMoodOverview) {
+    const logs = lastMoodOverview.logs.filter((l) => !(entry.id && l.id === entry.id) && l._local !== entry.logged_at);
+    logs.push({ id: entry.id, date: entry.date, score: entry.score, tags: entry.tags, note: entry.note, reason: null, kind: entry.kind, logged_at: entry.logged_at, _local: entry.id ? undefined : entry.logged_at });
+    logs.sort((a, b) => (a.logged_at || "").localeCompare(b.logged_at || ""));
+    renderMoodPanel({ ...lastMoodOverview, logs });
+  }
+  clearTimeout(moodReloadTimer);
+  moodReloadTimer = setTimeout(() => loadMoodPanel(), 1500);
+}
+
+function renderMoodStats(o) {
+  const weekEl = document.getElementById("mood-stat-week");
+  if (o.week_avg == null) weekEl.textContent = "-";
+  else if (o.prev_week_avg == null) weekEl.textContent = `${o.week_avg}`;
+  else {
+    const diff = Math.round((o.week_avg - o.prev_week_avg) * 10) / 10;
+    const cls = diff > 0 ? "up" : diff < 0 ? "down" : "";
+    const arrow = diff > 0 ? `↑${diff}` : diff < 0 ? `↓${Math.abs(diff)}` : "±0";
+    weekEl.innerHTML = `${o.week_avg} <span class="mood-week-diff ${cls}" title="vs last week (${o.prev_week_avg})">${arrow}</span>`;
+  }
+  const s = o.low_mood;
+  const lowEl = document.getElementById("mood-stat-low-mood-rate");
+  if (s.status === "not_configured") lowEl.innerHTML = `<span class="stat-note">Set a daily minimum (Study)</span>`;
+  else if (s.status === "insufficient_data") lowEl.innerHTML = `<span class="stat-note">No low days (30d)</span>`;
+  else lowEl.textContent = `${s.achieved_days} / ${s.low_mood_days} days`;
+  lowEl.title = "Days with mood 4 or lower (last 30 days) where you still studied your daily minimum";
+}
+
+function renderMoodTagStats(o) {
+  const list = document.getElementById("mood-reason-stats");
+  list.innerHTML = o.tag_stats.length
+    ? o.tag_stats
+        .map((r) => `<li>${escapeHtml(r.tag === MOOD_OTHER_TAG ? "Other…" : moodTagLabel(r.tag))} · ${r.count}× · avg ${r.avg_score}</li>`)
+        .join("")
+    : "<li>No tags yet</li>";
+  // Otherの割合 = ボタンが合っていない率。高ければボタンを見直す目安にする
+  document.getElementById("mood-other-rate").textContent = o.tagged_logs
+    ? `Other used in ${o.other_logs} of ${o.tagged_logs} tagged logs (${Math.round((o.other_logs / o.tagged_logs) * 100)}%)`
+    : "";
+}
+
+function renderMoodPanel(o) {
+  lastMoodOverview = o;
+  renderMoodChips(o.logs);
+  renderMoodLogList(o.logs);
+  renderMoodStats(o);
+  renderMoodTagStats(o);
+  const dates = last14Dates();
+  const daily = dailyMoodFromLogs(o.logs);
+  const entriesByDate = {};
+  o.logs.forEach((row) => (entriesByDate[row.date] ||= []).push(row));
+  renderMoodChart(dates, dates.map((d) => daily[d] || null), entriesByDate);
 }
 
 // PC版のDaily log(mood-log-list)用。直近14日分の個別エントリを新しい順に並べる。
 function renderMoodLogList(rows) {
   const list = document.getElementById("mood-log-list");
   if (!list) return;
-  list.innerHTML = "";
   if (rows.length === 0) {
     list.innerHTML = "<li>No records yet</li>";
     return;
   }
-  rows
+  list.innerHTML = rows
     .slice()
     .reverse()
-    .forEach((e) => {
-      const li = document.createElement("li");
+    .map((e) => {
       const time = (e.logged_at || "").slice(11, 16);
-      const detail = [e.reason, e.note].filter(Boolean).map(escapeHtml).join(" / ") || "-";
-      li.innerHTML = `
+      const kindIcon = MOOD_KIND_ICON[e.kind] ? `${MOOD_KIND_ICON[e.kind]} ` : "";
+      const detail = moodEntryLabels(e).map(escapeHtml).join(", ") || "-";
+      return `<li>
         <span class="log-info">
-          <span class="log-subject">${e.date.slice(5)} ${time}</span>
+          <span class="log-subject">${kindIcon}${e.date.slice(5)} ${time}</span>
           <span class="log-time">${detail}</span>
         </span>
         <span class="log-duration">${e.score}/10</span>
-      `;
-      list.appendChild(li);
-    });
+      </li>`;
+    })
+    .join("");
 }
-
-function renderMoodPanel({ rows }) {
-  const today = todayStr();
-  const todayEntries = rows.filter((r) => r.date === today).slice().reverse();
-
-  const status = document.getElementById("mood-today-status");
-  const listEl = document.getElementById("mood-today-list");
-  if (todayEntries.length > 0) {
-    status.textContent = `${todayEntries.length} entries today`;
-    listEl.innerHTML = todayEntries.map((e) => `<div class="mood-today-entry">${formatMoodEntryLine(e)}</div>`).join("");
-  } else {
-    status.textContent = "Not recorded";
-    listEl.innerHTML = "";
-  }
-
-  // PC(md+)では余白を埋めるため、モバイルでは「点をタップ」しないと出ない
-  // 個々のエントリをDaily logとして常時一覧表示する(CSS側でmd+のみ表示)。
-  renderMoodLogList(rows);
-
-  const dates = last14Dates();
-  const entriesByDate = {};
-  rows.forEach((row) => {
-    if (!entriesByDate[row.date]) entriesByDate[row.date] = [];
-    entriesByDate[row.date].push(row);
-  });
-  const avgByDate = {};
-  Object.keys(entriesByDate).forEach((d) => {
-    const scores = entriesByDate[d].map((e) => e.score);
-    avgByDate[d] = Math.round((scores.reduce((a, b) => a + b, 0) / scores.length) * 10) / 10;
-  });
-
-  renderMoodChart(
-    dates,
-    dates.map((d) => (d in avgByDate ? avgByDate[d] : null)),
-    entriesByDate
-  );
-}
-
-// 気分の記録を保存した瞬間にグラフ・一覧へ出すため、最後に描いた材料を控えておく(2026-09-29)
-let lastMoodPanelData = null;
 
 async function loadMoodPanel() {
-  // 14日グラフは気分の線だけにした(2026-10-02)ので、勉強時間・スクリーンタイムは取りに行かない。
-  // それらと気分の関係は「What moves my mood」カード(loadMoodDrivers)が受け持つ
-  const rows = await api("/api/mood-logs?days=14");
-  lastMoodPanelData = { rows };
-  renderMoodPanel(lastMoodPanelData);
-  loadMoodStats();
-  loadMoodReasonStats();
-  loadLowMoodAchievement();
-  loadMoodDrivers();
+  // 記録・平均・ボタン別・低調な日を1本で取る(2026-10-03、以前は4本に分かれていた)
+  await apiCached("/api/mood/overview?days=14", (o) => {
+    moodConfig = { custom_tags: o.custom_tags || [], location: o.location || "waiuku" };
+    renderMoodSettings();
+    // 保存途中(idなし)の手元の記録は、サーバーの返事に入っていなければ残しておく
+    const pending = (lastMoodOverview?.logs || []).filter((l) => l._local && !o.logs.some((x) => x.logged_at === l._local));
+    renderMoodPanel(pending.length ? { ...o, logs: [...o.logs, ...pending] } : o);
+    moodTabPicker?.refresh();
+  });
+  if (document.getElementById("mood-fold-drivers").open) loadMoodDrivers();
   loadStudyTriggerStats();
   loadSleepPanel();
 }
 
-async function loadMoodStats() {
-  const s = await api("/api/mood-logs/stats");
-  document.getElementById("mood-stat-week").textContent = s.week_avg != null ? `${s.week_avg}` : "-";
-  document.getElementById("mood-stat-month").textContent = s.month_avg != null ? `${s.month_avg}` : "-";
+// 寝る前・起床時など、Moodタブ以外から付けた時の後始末
+function loadMoodStats() {
+  clearTimeout(moodReloadTimer);
+  moodReloadTimer = setTimeout(() => loadMoodPanel(), 800);
 }
 
-async function loadLowMoodAchievement() {
-  const s = await api("/api/mood-logs/low-mood-achievement?days=30");
-  const el = document.getElementById("mood-stat-low-mood-rate");
-  if (s.status === "not_configured") el.textContent = "Not set";
-  else if (s.status === "insufficient_data") el.textContent = "Not enough data";
-  else el.textContent = `${s.rate}% (${s.achieved_days}/${s.low_mood_days} days)`;
+// 開閉を端末ごとに覚える。What moves my moodは天気の取得もあるので開いた時に読み込む
+document.querySelectorAll(".mood-fold").forEach((d) => {
+  try {
+    if (localStorage.getItem(`moodFold:${d.id}`) === "1") d.open = true;
+  } catch {
+    // 既定は閉じたまま
+  }
+  d.addEventListener("toggle", () => {
+    try {
+      localStorage.setItem(`moodFold:${d.id}`, d.open ? "1" : "0");
+    } catch {
+      // 覚えられなくても開閉自体は効く
+    }
+    if (d.id === "mood-fold-drivers" && d.open) loadMoodDrivers();
+  });
+});
+
+function renderMoodSettings() {
+  const select = document.getElementById("mood-location-select");
+  if (select && document.activeElement !== select) select.value = moodConfig.location;
+  const list = document.getElementById("mood-custom-tags");
+  if (!list) return;
+  list.innerHTML = moodConfig.custom_tags
+    .map((t) => `<li>${escapeHtml(t)} <button type="button" class="link-btn" data-remove="${escapeHtml(t)}" aria-label="Remove ${escapeHtml(t)}">×</button></li>`)
+    .join("");
+}
+
+document.getElementById("mood-location-select").addEventListener("change", async (e) => {
+  try {
+    const res = await api("/api/mood/config", { method: "PUT", body: JSON.stringify({ location: e.target.value }) });
+    moodConfig = { ...moodConfig, ...res };
+    showToast(`Weather location: ${e.target.selectedOptions[0].textContent}`);
+  } catch (err) {
+    e.target.value = moodConfig.location;
+    showToast("保存に失敗しました。もう一度お試しください");
+  }
+});
+
+document.getElementById("mood-custom-tags").addEventListener("click", async (e) => {
+  const tag = e.target.closest("[data-remove]")?.dataset.remove;
+  if (!tag) return;
+  try {
+    const res = await api("/api/mood/config", { method: "PUT", body: JSON.stringify({ remove_custom_tag: tag }) });
+    moodConfig = { ...moodConfig, ...res };
+    renderMoodSettings();
+    moodTabPicker?.refresh();
+  } catch (err) {
+    showToast("削除に失敗しました。もう一度お試しください");
+  }
+});
+
+// 最低ラインの▶: 開いているパネルを閉じて、⚡メニューの科目から始める
+function startTimerFromMood() {
+  visiblePanels().forEach((p) => p.querySelector(".panel-close")?.click());
+  if (!quickPanel.classList.contains("hidden")) closeQuickPanel();
+  openQuickPanel();
+}
+
+moodTabPicker = createMoodPicker(document.getElementById("mood-tab-picker"), {
+  kind: "moment",
+  onChange: (entry) => {
+    // 付けたばかりの記録はそのまま直せるよう「編集中」にしておく(+ Newで次の記録)
+    if (entry?.id) moodEditingId = entry.id;
+    applyLocalMoodEntry(entry);
+  },
+  onStartTimer: startTimerFromMood,
+});
+
+// Moodタブを開き直したら、新しい1回分から始める
+function resetMoodTabPicker() {
+  moodEditingId = null;
+  moodTabPicker?.reset();
+  if (lastMoodOverview) renderMoodChips(lastMoodOverview.logs);
 }
 
 // ---------- What moves my mood / study, Insights (2026-10-02) ----------
@@ -3056,6 +3446,7 @@ async function loadLowMoodAchievement() {
 
 const DRIVER_MIN_DAYS = 6;
 const SLACKING_MIN_DAYS = 3;
+const RAIN_DAY_MM = 1; // 1日の降水量がこれ以上なら「雨の日」(2026-10-03、天気はOpen-Meteoから自動取得)
 
 function loadInsightsDaily() {
   return api("/api/insights/daily?days=30");
@@ -3065,9 +3456,11 @@ function compareHalves(rows, xKey, yKey) {
   const pairs = rows.filter((r) => r[xKey] != null && r[yKey] != null).map((r) => [r[xKey], r[yKey]]);
   const n = pairs.length;
   const avg = (xs, i) => xs.reduce((a, p) => a + p[i], 0) / xs.length;
-  if (xKey === "slacking") {
-    const hi = pairs.filter((p) => p[0] > 0);
-    const lo = pairs.filter((p) => p[0] === 0);
+  // サボり・雨は「あった日/なかった日」の2つに分ける(半分に割ると、少しだけ降った日が「雨の日」側に入るため)
+  if (xKey === "slacking" || xKey === "rain") {
+    const cut = xKey === "rain" ? RAIN_DAY_MM : 0;
+    const hi = pairs.filter((p) => (xKey === "rain" ? p[0] >= cut : p[0] > 0));
+    const lo = pairs.filter((p) => (xKey === "rain" ? p[0] < cut : p[0] === 0));
     if (hi.length < SLACKING_MIN_DAYS || lo.length < SLACKING_MIN_DAYS) return { n, enough: false, hiDays: hi.length };
     return { n, enough: true, hiX: hi.length, loX: lo.length, hiY: avg(hi, 1), loY: avg(lo, 1) };
   }
@@ -3085,6 +3478,9 @@ const DRIVER_DEFS = {
   screen: { icon: "📱", name: "Screen time", hi: "More screen", lo: "Less screen", fmt: (v) => formatShortDuration(v) },
   mood: { icon: "🙂", name: "Mood", hi: "Better mood", lo: "Worse mood", fmt: (v) => v.toFixed(1) },
   slacking: { icon: "🧭", name: "Slacking", hi: "Slacked", lo: "No slacking", fmt: (v) => `${v} days` },
+  rain: { icon: "🌧", name: "Rain", hi: "Rainy days", lo: "Dry days", fmt: (v) => `${v} days` },
+  sun: { icon: "☀", name: "Sunshine", hi: "Sunnier", lo: "Less sun", fmt: (v) => `${v.toFixed(1)} h` },
+  temp: { icon: "🌡", name: "Temperature (high)", hi: "Warmer", lo: "Cooler", fmt: (v) => `${v.toFixed(1)}°C` },
 };
 
 function renderDrivers(containerId, rows, target, keys) {
@@ -3102,14 +3498,16 @@ function renderDrivers(containerId, rows, target, keys) {
         const why =
           k === "slacking"
             ? `Not enough slacking logs (${r.hiDays ?? 0} days, need ${SLACKING_MIN_DAYS}+)`
-            : `Not enough data (need ${DRIVER_MIN_DAYS}+ days)`;
+            : k === "rain"
+              ? `Need ${SLACKING_MIN_DAYS}+ rainy and dry days each with a mood log`
+              : `Not enough data (need ${DRIVER_MIN_DAYS}+ days)`;
         return `<div class="driver"><div class="driver-head">${title}</div><p class="driver-na">${why}</p></div>`;
       }
       const diff = r.hiY - r.loY;
       const sign = diff >= 0 ? "+" : "−";
       const diffText = target === "mood" ? `${sign}${Math.abs(diff).toFixed(1)}` : `${sign}${formatShortDuration(Math.abs(diff))} study`;
       const bar = (v) => `<span class="driver-bar"><span style="width:${Math.max(2, (v / maxY) * 100)}%"></span></span>`;
-      const xText = (v) => (k === "slacking" ? def.fmt(v) : `avg ${def.fmt(v)}`);
+      const xText = (v) => (k === "slacking" || k === "rain" ? def.fmt(v) : `avg ${def.fmt(v)}`);
       return `<div class="driver">
         <div class="driver-head">${title}<span class="driver-diff ${diff >= 0 ? "up" : "down"}">${diffText}</span></div>
         <div class="driver-row"><span class="driver-label">${def.hi} (${xText(r.hiX)})</span>${bar(r.hiY)}<span class="driver-val">${fmtY(r.hiY)}</span></div>
@@ -3121,7 +3519,7 @@ function renderDrivers(containerId, rows, target, keys) {
 
 async function loadMoodDrivers() {
   const rows = await loadInsightsDaily();
-  renderDrivers("mood-drivers", rows, "mood", ["sleep", "study", "screen"]);
+  renderDrivers("mood-drivers", rows, "mood", ["sleep", "study", "screen", "rain", "sun", "temp"]);
 }
 
 async function loadStudyDrivers() {
@@ -3214,22 +3612,6 @@ async function loadInsightsMatrix() {
   });
 }
 
-async function loadMoodReasonStats() {
-  const rows = await api("/api/mood-logs/reason-stats?days=30");
-  const list = document.getElementById("mood-reason-stats");
-  list.innerHTML = "";
-  if (rows.length === 0) {
-    list.classList.add("hidden");
-    return;
-  }
-  list.classList.remove("hidden");
-  rows.forEach((r) => {
-    const li = document.createElement("li");
-    li.textContent = `${r.reason}: mood ${r.avg_score} · ${r.count}×`;
-    list.appendChild(li);
-  });
-}
-
 function renderMoodChart(dates, scores, entriesByDate) {
   const container = document.getElementById("mood-chart");
   // 以前は勉強時間の棒・スクリーンタイムの点線も重ねていたが、3つが重なって読めなかったので
@@ -3261,16 +3643,18 @@ function renderMoodChart(dates, scores, entriesByDate) {
   let pathD = "";
   let drawing = false;
   const dots = [];
+  // scoresは日ごとの{value, review}。寝る前の振り返りがある日は塗りつぶし、平均の日は白抜きの点にする
   dates.forEach((d, i) => {
-    const score = scores[i];
-    if (score == null) {
+    const point = scores[i];
+    if (point == null) {
       drawing = false;
       return;
     }
-    const y = yOf(score);
+    const y = yOf(point.value);
     pathD += `${drawing ? "L" : "M"}${xs[i]},${y} `;
     drawing = true;
-    dots.push(`<circle cx="${xs[i]}" cy="${y}" r="4" fill="var(--accent)" data-date="${d}" data-score="${score}"></circle>`);
+    const fill = point.review ? "var(--accent)" : "var(--card)";
+    dots.push(`<circle cx="${xs[i]}" cy="${y}" r="4" fill="${fill}" stroke="var(--accent)" stroke-width="1.6" data-date="${d}" data-score="${point.value}" data-review="${point.review ? 1 : 0}"></circle>`);
   });
 
   const path = pathD
@@ -3281,53 +3665,14 @@ function renderMoodChart(dates, scores, entriesByDate) {
 
   container.querySelectorAll("circle[data-date]").forEach((circle) => {
     circle.addEventListener("click", () => {
-      const { date: d, score } = circle.dataset;
+      const { date: d, score, review } = circle.dataset;
       const entries = (entriesByDate[d] || []).slice().reverse();
       const detail = document.getElementById("mood-chart-detail");
-      if (entries.length === 0) {
-        detail.textContent = `${d} Mood avg: ${score}/10`;
-        return;
-      }
-      const lines = entries.map((e) => formatMoodEntryLine(e));
-      detail.textContent = `${d} Mood avg: ${score}/10 / ${lines.join(" / ")}`;
+      const head = `${d} ${review === "1" ? "Day review" : "Avg"}: ${score}/10`;
+      detail.textContent = entries.length ? `${head} / ${entries.map((e) => formatMoodEntryLine(e)).join(" / ")}` : head;
     });
   });
 }
-
-document.querySelectorAll(".mood-scale-btn").forEach((btn) => {
-  btn.addEventListener("click", () => setSelectedMoodScore(parseInt(btn.dataset.score, 10)));
-});
-
-document.querySelectorAll("#mood-reason-picker .reason-btn").forEach((btn) => {
-  btn.addEventListener("click", () => {
-    const isSame = selectedMoodReason === btn.dataset.reason;
-    setSelectedMoodReason(isSame ? null : btn.dataset.reason);
-  });
-});
-
-document.getElementById("mood-save-btn").addEventListener("click", async () => {
-  const score = selectedMoodScore;
-  const noteInput = document.getElementById("mood-note");
-  const note = noteInput.value.trim();
-  const reason = selectedMoodReason;
-  noteInput.value = "";
-  setSelectedMoodScore(5);
-  setSelectedMoodReason(null);
-  const entry = { date: todayStr(), score, note: note || null, reason, logged_at: nowLocalTimestamp() };
-  // サーバーの保存とグラフ3本の取り直しを待たず、手元の材料に足して先に描く(2026-09-29)
-  const before = lastMoodPanelData;
-  if (before) renderMoodPanel({ ...before, rows: [...before.rows, { id: null, ...entry }] });
-  try {
-    await api("/api/mood-logs", { method: "POST", body: JSON.stringify(entry) });
-    loadMoodPanel();
-  } catch (err) {
-    if (before) renderMoodPanel(before);
-    noteInput.value = note;
-    setSelectedMoodScore(score);
-    setSelectedMoodReason(reason);
-    showToast("気分の記録に失敗しました。もう一度お試しください");
-  }
-});
 
 guardedSubmit(document.getElementById("goal-minutes-form"), async (e) => {
   const dailyMinutes = parseInt(document.getElementById("daily-goal-input").value, 10);
@@ -4013,15 +4358,59 @@ async function loadActivationActive() {
   renderActivationStatus();
 }
 
+// Slackingは押した瞬間に始める(2026-10-03)。ホーム画面ショートカット・⚡のどちらからも質問なし。
+// 以前は「⚡ → 🧭 → 気分 → Log」の4タップで、2か月で8件しか記録されなかった
+async function startSlacking() {
+  if (activationActiveLog) {
+    showToast("Already slacking. Tap Back to work when you return");
+    return;
+  }
+  const payload = { triggered_at: nowLocalTimestamp() };
+  const saving = api("/api/activation-logs", { method: "POST", body: JSON.stringify(payload) }).then((r) => r.id);
+  const log = { id: null, ...payload, saving }; // idはPOST応答で入る
+  activationActiveLog = log;
+  renderActivationStatus();
+  try {
+    log.id = await saving;
+  } catch (err) {
+    if (activationActiveLog === log) activationActiveLog = null;
+    renderActivationStatus();
+    showToast("記録の開始に失敗しました。もう一度お試しください");
+    return;
+  }
+  showToast(
+    `Slacking from ${payload.triggered_at.slice(11, 16)}. Tap Back to work when you return`,
+    {
+      label: "Undo",
+      onClick: async () => {
+        if (activationActiveLog === log) activationActiveLog = null;
+        renderActivationStatus();
+        try {
+          await api(`/api/activation-logs/${log.id}`, { method: "DELETE" });
+        } finally {
+          refreshActivation();
+        }
+      },
+    },
+    6000
+  );
+  refreshActivation();
+}
+
 async function returnActivation() {
   if (!activationActiveLog) return;
   const activeLog = activationActiveLog;
   activationActiveLog = null;
   renderActivationStatus(); // 楽観的に即座に「未Active」表示へ切り替える
+  const returnedAt = nowLocalTimestamp();
+  // 気分はここで聞く(開始時に聞くと押す手間が増えるため)。保存を待たずに出す
+  const idPromise = activeLog.id ? Promise.resolve(activeLog.id) : activeLog.saving;
+  openReturnPanel(activeLog, returnedAt, idPromise);
   try {
-    await api(`/api/activation-logs/${activeLog.id}/return`, {
+    const id = await idPromise;
+    await api(`/api/activation-logs/${id}/return`, {
       method: "PUT",
-      body: JSON.stringify({ returned_at: nowLocalTimestamp() }),
+      body: JSON.stringify({ returned_at: returnedAt }),
     });
   } catch (err) {
     showToast("復帰の記録に失敗しました。もう一度お試しください");
@@ -4029,6 +4418,43 @@ async function returnActivation() {
     refreshActivation(); // 成功・失敗いずれも正本で確定させる(失敗時はここでActiveに戻る)
   }
 }
+
+// ---- Back to work: 気分(1〜10+ボタン)→ そのまま▶で勉強に戻る ----
+let returnLogId = null;
+const returnPanel = document.getElementById("return-panel");
+const returnBackdrop = document.getElementById("return-backdrop");
+const returnPicker = createMoodPicker(document.getElementById("return-mood-picker"), {
+  kind: "slacking",
+  minimumButton: false, // 下に▶ Start timerを常に出しているので重ねない
+  activationLogId: () => returnLogId,
+  onChange: applyLocalMoodEntry,
+});
+
+function openReturnPanel(log, returnedAt, idPromise) {
+  returnLogId = log.id;
+  if (!returnLogId && idPromise) idPromise.then((id) => { returnLogId = id; }).catch(() => {});
+  returnPicker.reset();
+  const minutes = Math.max(0, Math.round((new Date(returnedAt.replace(" ", "T")) - new Date(log.triggered_at.replace(" ", "T"))) / 60000));
+  document.getElementById("return-summary").textContent =
+    `Slacked ${formatLogDuration(minutes)} (${log.triggered_at.slice(11, 16)}–${returnedAt.slice(11, 16)})`;
+  returnPanel.classList.remove("hidden");
+  returnBackdrop.classList.remove("hidden");
+}
+
+function closeReturnPanel() {
+  returnPanel.classList.add("hidden");
+  returnBackdrop.classList.add("hidden");
+  loadActivationList();
+  loadActivationMoodReasons();
+}
+
+document.getElementById("return-close").addEventListener("click", closeReturnPanel);
+document.getElementById("return-done-btn").addEventListener("click", closeReturnPanel);
+returnBackdrop.addEventListener("click", closeReturnPanel);
+document.getElementById("return-start-btn").addEventListener("click", () => {
+  closeReturnPanel();
+  openQuickPanel();
+});
 
 async function loadActivationStats() {
   const s = await api("/api/activation-logs/stats");
@@ -4047,21 +4473,16 @@ async function loadActivationPostReturnStats() {
       : "Study after return (last 30 days): no data";
 }
 
+// Back to workで付けた気分のボタン別回数(2026-10-03以前の開始時の理由も合算)
 async function loadActivationMoodReasons() {
-  const rows = await api("/api/activation-logs/mood-reasons?days=30");
+  const res = await api("/api/activation-logs/mood-reasons?days=30");
+  const rows = res.reasons || [];
   const list = document.getElementById("activation-mood-reasons");
-  list.innerHTML = "";
-  document.getElementById("activation-mood-reasons-heading").classList.toggle("hidden", rows.length === 0);
-  if (rows.length === 0) {
-    list.classList.add("hidden");
-    return;
-  }
-  list.classList.remove("hidden");
-  rows.forEach((r) => {
-    const li = document.createElement("li");
-    li.textContent = `${r.mood_reason} ${r.count}`;
-    list.appendChild(li);
-  });
+  const empty = rows.length === 0 && !res.logged;
+  document.getElementById("activation-mood-reasons-heading").classList.toggle("hidden", empty);
+  list.classList.toggle("hidden", empty);
+  const avg = res.avg_score != null ? `<li>Avg mood ${res.avg_score} (${res.logged})</li>` : "";
+  list.innerHTML = avg + rows.map((r) => `<li>${escapeHtml(moodTagLabel(r.mood_reason))} ${r.count}</li>`).join("");
 }
 
 // start_triggerには他アプリ連携の内部名("vocab-app:review"等)がそのまま入っているので、表示用に言い換える
@@ -4117,11 +4538,17 @@ async function loadActivationList() {
         l.post_return_minutes > 0 ? `${l.post_return_minutes} min studied after return` : "No study logged";
       postReturnMark = `<span class="meta">${label}</span>`;
     }
+    const m = l.return_mood;
+    const moodLabels = m ? moodEntryLabels(m) : [];
+    const moodMark = m
+      ? `<span class="meta">Mood after: ${m.score}${moodLabels.length ? ` · ${escapeHtml(moodLabels.join(", "))}` : ""}</span>`
+      : "";
     li.innerHTML = `
       <span class="log-info">
         <span>${formatLoggedAt(l.triggered_at)} ${returnedPart}</span>
         ${noteMark}
         ${postReturnMark}
+        ${moodMark}
       </span>
       <button class="delete-btn" title="Delete">×</button>
     `;
@@ -4152,81 +4579,7 @@ function refreshActivation() {
   loadCalendar();
 }
 
-const activationPanel = document.getElementById("activation-panel");
-const activationBackdrop = document.getElementById("activation-backdrop");
-let activationSelectedMood = null;
-let activationSelectedReason = null;
-
-document.querySelectorAll("#activation-mood-picker .mood-btn").forEach((btn) => {
-  btn.addEventListener("click", () => {
-    const isSame = activationSelectedMood === btn.dataset.mood;
-    activationSelectedMood = isSame ? null : btn.dataset.mood;
-    document.querySelectorAll("#activation-mood-picker .mood-btn").forEach((b) => {
-      b.classList.toggle("active", b === btn && !isSame);
-    });
-    const reasonPicker = document.getElementById("activation-reason-picker");
-    reasonPicker.classList.toggle("hidden", activationSelectedMood !== "heavy");
-    if (activationSelectedMood !== "heavy") {
-      activationSelectedReason = null;
-      document.querySelectorAll("#activation-reason-picker .reason-btn").forEach((b) => b.classList.remove("active"));
-    }
-  });
-});
-
-document.querySelectorAll("#activation-reason-picker .reason-btn").forEach((btn) => {
-  btn.addEventListener("click", () => {
-    const isSame = activationSelectedReason === btn.dataset.reason;
-    activationSelectedReason = isSame ? null : btn.dataset.reason;
-    document.querySelectorAll("#activation-reason-picker .reason-btn").forEach((b) => {
-      b.classList.toggle("active", b === btn && !isSame);
-    });
-  });
-});
-
-function openActivationPanel() {
-  activationPanel.classList.remove("hidden");
-  activationBackdrop.classList.remove("hidden");
-  document.getElementById("activation-time-preview").textContent = `Time: ${nowHHMM()}`;
-  document.getElementById("activation-note").value = "";
-  activationSelectedMood = null;
-  activationSelectedReason = null;
-  document.querySelectorAll("#activation-mood-picker .mood-btn").forEach((b) => b.classList.remove("active"));
-  document.querySelectorAll("#activation-reason-picker .reason-btn").forEach((b) => b.classList.remove("active"));
-  document.getElementById("activation-reason-picker").classList.add("hidden");
-  document.getElementById("activation-note").focus();
-}
-
-function closeActivationPanel() {
-  activationPanel.classList.add("hidden");
-  activationBackdrop.classList.add("hidden");
-}
-
-document.getElementById("activation-close").addEventListener("click", closeActivationPanel);
-activationBackdrop.addEventListener("click", closeActivationPanel);
-
 guardedClick(document.getElementById("slack-now-return-btn"), returnActivation);
-
-guardedSubmit(document.getElementById("activation-form"), async (e) => {
-  const note = document.getElementById("activation-note").value.trim() || null;
-  const payload = {
-    triggered_at: nowLocalTimestamp(),
-    note,
-    mood: activationSelectedMood,
-    mood_reason: activationSelectedReason,
-  };
-  closeActivationPanel();
-  activationActiveLog = { id: null, ...payload }; // idはPOST応答後にrefreshActivation()で正しい値に上書きされる
-  renderActivationStatus();
-  try {
-    await api("/api/activation-logs", { method: "POST", body: JSON.stringify(payload) });
-  } catch (err) {
-    activationActiveLog = null;
-    renderActivationStatus();
-    showToast("記録の開始に失敗しました。もう一度お試しください");
-    return;
-  }
-  refreshActivation();
-});
 
 document.getElementById("activation-export-btn").addEventListener("click", async () => {
   const since = `${addDaysToDate(todayStr(), -6)} 00:00:00`;
@@ -4254,7 +4607,6 @@ document.getElementById("activation-copy-btn").addEventListener("click", async (
 
 let sleepActiveLog = null;
 let sleepTickInterval = null;
-let wakeMoodScore = null;
 
 // サボりモード(発動ログ)のバナー・アイコン点滅と同じ「今この状態だとひと目でわかる」表現を、
 // 睡眠モードにも用意する。ただし睡眠は焦らせる状態ではないので、色はdangerではなくaccent、
@@ -4360,9 +4712,7 @@ document.getElementById("wake-bed-input").addEventListener("input", updateWakeSl
 function openWakeMoodPanel(log = null, mode = "recorded") {
   const panel = document.getElementById("wake-mood-panel");
   const backdrop = document.getElementById("wake-mood-backdrop");
-  const buttons = document.getElementById("wake-mood-buttons");
-  setBedtimeMoodScore(buttons, null);
-  wakeMoodScore = null;
+  wakePicker.reset();
   wakePanelMode = mode;
   wakePanelLog = mode === "backfill" ? { bedtime_at: null, wake_at: nowLocalTimestamp() } : log;
   const note = document.getElementById("wake-panel-note");
@@ -4758,54 +5108,26 @@ async function openBedtimePanel() {
   document.getElementById("bedtime-added-list").innerHTML = "";
   document.getElementById("bedtime-sabori-note").value = "";
   document.getElementById("bedtime-sabori-list").innerHTML = "";
-  bedtimeMoodScore = null;
-  setBedtimeMoodScore(bedtimeMoodButtons, null);
+  bedtimePicker.reset();
   await renderBedtimeCarryoverList();
 }
 
-let bedtimeMoodScore = null;
-
-function setBedtimeMoodScore(container, score) {
-  container.querySelectorAll(".mood-scale-btn").forEach((btn) => {
-    btn.classList.toggle("active", parseInt(btn.dataset.score, 10) === score);
-  });
-  return score;
-}
-
-const bedtimeMoodButtons = document.getElementById("bedtime-mood-buttons");
-bedtimeMoodButtons.querySelectorAll(".mood-scale-btn").forEach((btn) => {
-  btn.addEventListener("click", () => {
-    bedtimeMoodScore = setBedtimeMoodScore(bedtimeMoodButtons, parseInt(btn.dataset.score, 10));
-  });
+// 寝る前は「今日1日の振り返り」(kind=day)。グラフの点はこれが優先される(2026-10-03)
+const bedtimePicker = createMoodPicker(document.getElementById("bedtime-mood-picker"), {
+  kind: "day",
+  onChange: applyLocalMoodEntry,
 });
-
-async function saveMoodScoreOnly(score) {
-  if (score == null) return;
-  await api("/api/mood-logs", {
-    method: "POST",
-    body: JSON.stringify({ date: todayStr(), score, logged_at: nowLocalTimestamp() }),
-  });
-  loadMoodStats();
-}
 
 document.getElementById("bedtime-step1-next").addEventListener("click", () => {
   document.getElementById("bedtime-step1").classList.add("hidden");
-  bedtimeMoodScore = null;
-  setBedtimeMoodScore(bedtimeMoodButtons, null);
+  bedtimePicker.reset();
   document.getElementById("bedtime-step-mood").classList.remove("hidden");
 });
 
-document.getElementById("bedtime-mood-next").addEventListener("click", async () => {
-  const score = bedtimeMoodScore;
+// 数字・ボタンは押した瞬間に保存済みなので、Nextは進むだけ
+document.getElementById("bedtime-mood-next").addEventListener("click", () => {
   document.getElementById("bedtime-step-mood").classList.add("hidden");
   document.getElementById("bedtime-step-sabori").classList.remove("hidden");
-  if (score != null) {
-    try {
-      await saveMoodScoreOnly(score);
-    } catch (err) {
-      showToast("気分の記録に失敗しました。もう一度お試しください");
-    }
-  }
 });
 
 guardedSubmit(document.getElementById("bedtime-sabori-form"), async (e) => {
@@ -4883,10 +5205,12 @@ async function goToBed() {
 
 guardedClick(document.getElementById("sleep-now-wake-btn"), wakeUp);
 
-document.getElementById("wake-mood-buttons").querySelectorAll(".mood-scale-btn").forEach((btn) => {
-  btn.addEventListener("click", () => {
-    wakeMoodScore = setBedtimeMoodScore(document.getElementById("wake-mood-buttons"), parseInt(btn.dataset.score, 10));
-  });
+// 起床時の気分(kind=wake)。押した瞬間に保存し、Doneは睡眠時刻の直しだけを保存する
+// (朝のパネルは閉じると起床の記録が保存されないことがあるので、最低ラインの▶はここでは出さない)
+const wakePicker = createMoodPicker(document.getElementById("wake-mood-picker"), {
+  kind: "wake",
+  minimumButton: false,
+  onChange: applyLocalMoodEntry,
 });
 
 document.getElementById("wake-mood-close").addEventListener("click", dismissWakeMoodPanel);
@@ -4924,7 +5248,6 @@ async function saveMorningSleep(mode, log, correctedWake, bed) {
 }
 
 document.getElementById("wake-mood-save").addEventListener("click", async () => {
-  const score = wakeMoodScore;
   const log = wakePanelLog;
   const mode = wakePanelMode;
   const correctedWake = wakeTimeFromInput();
@@ -4942,12 +5265,6 @@ document.getElementById("wake-mood-save").addEventListener("click", async () => 
         showToast("起床時刻の修正に失敗しました。Sleepの履歴から直せます");
       }
     }
-  }
-  if (score == null) return;
-  try {
-    await saveMoodScoreOnly(score);
-  } catch (err) {
-    showToast("気分の記録に失敗しました。もう一度お試しください");
   }
 });
 
@@ -6521,6 +6838,18 @@ async function hydrateFromCache() {
     loadCalendar({ refreshTodayPanel: false }),
   ]);
 
+  // ホーム画面ショートカット(manifest.jsonのshortcuts、2026-10-03)。/?action=slackingで開かれたら、
+  // 進行中の記録を確かめてから(同じ通信を共有するので往復は増えない)その場でSlackingを始める
+  const launchAction = new URLSearchParams(location.search).get("action");
+  if (launchAction) {
+    history.replaceState(history.state, "", location.pathname + location.hash);
+    if (launchAction === "slacking") {
+      loadActivationActive()
+        .catch(() => {})
+        .then(() => startSlacking());
+    }
+  }
+
   const criticalResults = await critical;
   criticalResults.filter((r) => r.status === "rejected").forEach((r) => console.error("init load failed:", r.reason));
   document.getElementById("boot-loading")?.classList.add("hidden");
@@ -6587,12 +6916,10 @@ try {
 const quickPanel = document.getElementById("quick-panel");
 const quickBackdrop = document.getElementById("quick-backdrop");
 let quickNowTick = null;
-// メニューを開いている間に保存した気分(数字を押し直したら新規ではなく上書きにする)
-let quickMood = null; // { id, score, saving: Promise }
 
 function openQuickPanel() {
   if (!quickPanel.classList.contains("hidden")) return;
-  quickMood = null;
+  quickMoodPicker.reset();
   renderQuickPanel();
   quickPanel.classList.remove("hidden");
   quickBackdrop.classList.remove("hidden");
@@ -6685,86 +7012,27 @@ document.getElementById("quick-now-list").addEventListener("click", async (e) =>
   else if (act === "return") await returnActivation();
 });
 
-// ---- Mood: 数字を押した瞬間に保存し、そのあと理由を小さく聞く ----
+// ---- Mood: 数字を押した瞬間に保存し、そのあとボタン(複数可)を小さく聞く ----
+// メニューを開くたびに新しい1回分として始める(押し直しは同じ記録の上書き)
+const quickMoodPicker = createMoodPicker(document.getElementById("quick-mood-picker"), {
+  kind: "moment",
+  onChange: (entry) => {
+    applyLocalMoodEntry(entry);
+    renderQuickMoodStatus();
+  },
+  onStartTimer: startTimerFromMood,
+});
+
+function renderQuickMoodStatus() {
+  const status = document.getElementById("quick-mood-status");
+  const todays = (lastMoodOverview?.logs || []).filter((r) => r.date === todayStr());
+  const last = todays[todays.length - 1];
+  status.textContent = quickMoodPicker.entry ? "" : last ? `Last: ${last.score} at ${(last.logged_at || "").slice(11, 16)}` : "Not logged today";
+}
 
 function renderQuickMood() {
-  const row = document.getElementById("quick-mood-row");
-  if (!row.children.length) {
-    row.innerHTML = Array.from({ length: 10 }, (_, i) => `<button type="button" class="quick-mood-btn" data-score="${i + 1}">${i + 1}</button>`).join("");
-    row.querySelectorAll(".quick-mood-btn").forEach((btn) => {
-      btn.addEventListener("click", () => quickSaveMood(parseInt(btn.dataset.score, 10)));
-    });
-  }
-  row.querySelectorAll(".quick-mood-btn").forEach((b) => {
-    b.classList.toggle("active", !!quickMood && parseInt(b.dataset.score, 10) === quickMood.score);
-  });
-  document.getElementById("quick-mood-reason").classList.toggle("hidden", !quickMood);
-  const status = document.getElementById("quick-mood-status");
-  const todays = (lastMoodPanelData?.rows || []).filter((r) => r.date === todayStr());
-  const last = todays[todays.length - 1];
-  status.textContent = quickMood ? "" : last ? `Last: ${last.score} at ${(last.logged_at || "").slice(11, 16)}` : "Not logged today";
-}
-
-function renderQuickMoodReasons(score) {
-  const tier = moodTierForScore(score);
-  // 理由の候補はMoodタブの選択肢と同じものを使う(ラベルを2か所で持たないため)
-  const reasons = [...document.querySelectorAll("#mood-reason-picker .reason-btn")]
-    .filter((b) => tier === "mid" || b.dataset.tier === tier || b.dataset.tier === "both")
-    .map((b) => ({ reason: b.dataset.reason, label: b.textContent }));
-  const picker = document.getElementById("quick-mood-reason-picker");
-  picker.innerHTML = reasons
-    .map((r) => `<button type="button" class="reason-btn" data-reason="${escapeHtml(r.reason)}">${escapeHtml(r.label)}</button>`)
-    .join("");
-  picker.querySelectorAll(".reason-btn").forEach((btn) => {
-    btn.addEventListener("click", () => quickSetMoodReason(btn.dataset.reason));
-  });
-}
-
-async function quickSaveMood(score) {
-  if (quickMood) {
-    // 押し直しは同じ記録の数字だけ直す(1回の気分が2件に分かれないように)
-    quickMood.score = score;
-    renderQuickMood();
-    renderQuickMoodReasons(score);
-    try {
-      const id = await quickMood.saving;
-      await api(`/api/mood-logs/${id}`, { method: "PUT", body: JSON.stringify({ score }) });
-      loadMoodPanel();
-    } catch (err) {
-      showToast("気分の記録に失敗しました。もう一度お試しください");
-    }
-    return;
-  }
-  const entry = { date: todayStr(), score, logged_at: nowLocalTimestamp() };
-  const before = lastMoodPanelData;
-  if (before) renderMoodPanel({ ...before, rows: [...before.rows, { id: null, note: null, reason: null, ...entry }] });
-  const saving = api("/api/mood-logs", { method: "POST", body: JSON.stringify(entry) }).then((r) => r.id);
-  quickMood = { score, saving };
-  renderQuickMood();
-  renderQuickMoodReasons(score);
-  try {
-    await saving;
-    loadMoodPanel();
-    loadMoodStats();
-  } catch (err) {
-    if (before) renderMoodPanel(before);
-    quickMood = null;
-    renderQuickMood();
-    showToast("気分の記録に失敗しました。もう一度お試しください");
-  }
-}
-
-async function quickSetMoodReason(reason) {
-  const mood = quickMood;
-  if (!mood) return;
-  closeQuickPanel();
-  try {
-    const id = await mood.saving;
-    await api(`/api/mood-logs/${id}`, { method: "PUT", body: JSON.stringify({ reason }) });
-    loadMoodPanel();
-  } catch (err) {
-    showToast("理由の保存に失敗しました。Moodタブから記録できます");
-  }
+  quickMoodPicker.refresh();
+  renderQuickMoodStatus();
 }
 
 // ---- Life / Add / Settings ----
@@ -6775,7 +7043,7 @@ document.getElementById("quick-bed-btn").addEventListener("click", () => {
 });
 document.getElementById("quick-slack-btn").addEventListener("click", () => {
   closeQuickPanel();
-  openActivationPanel();
+  startSlacking();
 });
 document.getElementById("quick-todo-btn").addEventListener("click", () => {
   closeQuickPanel();

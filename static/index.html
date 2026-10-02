@@ -455,72 +455,47 @@
     </div>
 
     <div class="mood-subpanel" data-sub="mood">
-    <div class="goal-progress-card">
+    <!-- 2026-10-03 ボタン再設計: 数字を押した瞬間に保存 → ボタン12個(複数可)。Saveボタンはなし。
+         ボタンの中身はapp.jsのMOOD_TAGS。今日の記録はチップで並べ、タップでその記録を直す -->
+    <div class="goal-progress-card mood-entry-card">
       <div class="goal-progress-row">
-        <span>Current mood</span>
+        <span>Mood now</span>
         <span class="meta" id="mood-today-status">Not recorded</span>
       </div>
-      <div class="mood-scale-buttons" id="mood-scale-buttons">
-        <button type="button" class="mood-scale-btn" data-score="1">1</button>
-        <button type="button" class="mood-scale-btn" data-score="2">2</button>
-        <button type="button" class="mood-scale-btn" data-score="3">3</button>
-        <button type="button" class="mood-scale-btn" data-score="4">4</button>
-        <button type="button" class="mood-scale-btn" data-score="5">5</button>
-        <button type="button" class="mood-scale-btn" data-score="6">6</button>
-        <button type="button" class="mood-scale-btn" data-score="7">7</button>
-        <button type="button" class="mood-scale-btn" data-score="8">8</button>
-        <button type="button" class="mood-scale-btn" data-score="9">9</button>
-        <button type="button" class="mood-scale-btn" data-score="10">10</button>
-      </div>
-      <div class="mood-scale-labels"><span>1: Rough</span><span>10: Great</span></div>
-      <div class="mood-reason-picker" id="mood-reason-picker">
-        <button type="button" class="reason-btn" data-reason="Not feeling well" data-tier="low">Not feeling well</button>
-        <button type="button" class="reason-btn" data-reason="Lack of sleep" data-tier="low">Lack of sleep</button>
-        <button type="button" class="reason-btn" data-reason="Relationship stress" data-tier="low">Relationship</button>
-        <button type="button" class="reason-btn" data-reason="Fatigue" data-tier="low">Fatigue</button>
-        <button type="button" class="reason-btn" data-reason="Couldn't communicate in English" data-tier="low">English trouble</button>
-        <button type="button" class="reason-btn" data-reason="Study went well" data-tier="high">Study went well</button>
-        <button type="button" class="reason-btn" data-reason="Felt motivated" data-tier="high">Felt motivated</button>
-        <button type="button" class="reason-btn" data-reason="Slept well" data-tier="high">Slept well</button>
-        <button type="button" class="reason-btn" data-reason="Something fun happened" data-tier="high">Something fun</button>
-        <button type="button" class="reason-btn" data-reason="Communicated well in English" data-tier="high">English went well</button>
-        <button type="button" class="reason-btn" data-reason="Nothing in particular" data-tier="both">Nothing specific</button>
-      </div>
-      <input type="text" id="mood-note" placeholder="Note (optional)">
-      <div class="mood-today-list" id="mood-today-list"></div>
-      <button type="button" id="mood-save-btn">Save</button>
+      <div id="mood-tab-picker"></div>
+      <div class="mood-chips" id="mood-today-list"></div>
     </div>
 
-    <div class="stats-header">
-      <div class="stat-cell"><span class="stat-label">Week avg</span><span class="stat-value" id="mood-stat-week"></span></div>
-      <div class="stat-cell"><span class="stat-label">Month avg</span><span class="stat-value" id="mood-stat-month"></span></div>
-      <div class="stat-cell"><span class="stat-label">Hit minimum on low days</span><span class="stat-value" id="mood-stat-low-mood-rate"></span></div>
+    <div class="stats-header mood-stats">
+      <div class="stat-cell"><span class="stat-label">This week</span><span class="stat-value" id="mood-stat-week"></span></div>
+      <div class="stat-cell"><span class="stat-label">Low days, still hit minimum</span><span class="stat-value" id="mood-stat-low-mood-rate"></span></div>
     </div>
 
-    <div class="mood-chart-row">
-      <div class="goal-progress-card mood-chart-main">
-        <div class="goal-progress-row">
-          <span>Mood trend (last 14 days)</span>
-        </div>
-        <div id="mood-chart"></div>
-        <p class="meta" id="mood-chart-detail">Tap a point for details</p>
+    <div class="goal-progress-card mood-chart-main">
+      <div class="goal-progress-row">
+        <span>Mood trend (last 14 days)</span>
       </div>
-      <div class="mood-chart-side">
-        <h3 class="mood-chart-side-heading">Reason breakdown (30d)</h3>
-        <ul id="mood-reason-stats" class="mood-reason-list hidden"></ul>
-      </div>
+      <div id="mood-chart"></div>
+      <p class="meta mood-chart-detail" id="mood-chart-detail">● Bedtime review · ○ Day average · Tap a point for details</p>
     </div>
 
-    <div class="goal-progress-card drivers-card">
-      <h3 class="drivers-heading">What moves my mood <span class="drivers-period">· last 30 days</span></h3>
+    <!-- グラフより下は普段見ないので折りたたむ(開閉は端末ごとに覚える) -->
+    <details class="mood-fold" id="mood-fold-tags">
+      <summary>Tags <span class="drivers-period">· last 30 days</span></summary>
+      <ul id="mood-reason-stats" class="mood-reason-list"></ul>
+      <p class="meta" id="mood-other-rate"></p>
+    </details>
+
+    <details class="mood-fold" id="mood-fold-drivers">
+      <summary>What moves my mood <span class="drivers-period">· last 30 days</span></summary>
       <div id="mood-drivers" class="drivers-list"></div>
-      <p class="meta">Days split in half by each measure, mood avg compared. Shows a link, not a cause.</p>
-    </div>
+      <p class="meta">Days split in half by each measure (rain: rainy vs dry days), mood avg compared. Shows a link, not a cause.</p>
+    </details>
 
-    <div class="mood-log-card">
-      <h3>Daily log</h3>
+    <details class="mood-fold" id="mood-fold-log">
+      <summary>Daily log <span class="drivers-period">· last 14 days</span></summary>
       <ul id="mood-log-list" class="list"></ul>
-    </div>
+    </details>
 
     </div>
 
@@ -532,7 +507,7 @@
       <div class="stat-cell"><span class="stat-label">Total</span><span class="stat-value" id="activation-stat-total"></span></div>
     </div>
     <p class="meta" id="activation-post-return-stats"></p>
-    <h3 id="activation-mood-reasons-heading" class="hidden">Mood when slacking started (30d)</h3>
+    <h3 id="activation-mood-reasons-heading" class="hidden">Mood after slacking (30d)</h3>
     <ul id="activation-mood-reasons" class="mood-reason-list hidden"></ul>
     <h3 id="study-trigger-heading" class="hidden">How study sessions started (30d)</h3>
     <ul id="study-trigger-stats" class="mood-reason-list hidden"></ul>
@@ -846,11 +821,7 @@
   </div>
   <div class="quick-section">
     <div class="quick-section-head"><span>Mood now</span><span class="quick-head-note" id="quick-mood-status"></span></div>
-    <div class="quick-mood-row" id="quick-mood-row"></div>
-    <div class="quick-mood-reason hidden" id="quick-mood-reason">
-      <p class="meta">Saved. Add a reason?</p>
-      <div class="mood-reason-picker" id="quick-mood-reason-picker"></div>
-    </div>
+    <div id="quick-mood-picker"></div>
   </div>
   <div class="quick-section" id="quick-life-section">
     <div class="quick-section-head"><span>Life</span></div>
@@ -928,6 +899,19 @@
   </div>
 
   <div class="settings-group">
+    <h3>Mood</h3>
+    <label class="settings-inline" for="mood-location-select">Weather location
+      <select id="mood-location-select">
+        <option value="waiuku">Waiuku, NZ</option>
+        <option value="kyodo">Kyodo, Tokyo</option>
+      </select>
+    </label>
+    <p class="meta">Days before you switch keep the old place's weather.</p>
+    <p class="meta" id="mood-custom-tags-note">Buttons added from "Other" (same words twice) show up here.</p>
+    <ul id="mood-custom-tags" class="mood-reason-list"></ul>
+  </div>
+
+  <div class="settings-group">
     <h3>Data</h3>
     <p class="meta">Export ToDos and study logs as CSV (zip file)</p>
     <button type="button" id="export-data-btn" class="secondary">Export data</button>
@@ -945,28 +929,21 @@
   </div>
 </div>
 
-<div id="activation-backdrop" class="backdrop hidden"></div>
-<div id="activation-panel" class="add-panel hidden">
+<!-- Slackingは押した瞬間に記録が始まる(2026-10-03、ホーム画面ショートカット・⚡とも質問なし)。
+     気分は開始時ではなくBack to workの時にここで聞き、そのまま勉強に戻れるよう▶を並べる -->
+<div id="return-backdrop" class="backdrop hidden"></div>
+<div id="return-panel" class="add-panel hidden">
   <div class="panel-header">
-    <h3>Log Activation</h3>
-    <button type="button" id="activation-close" class="panel-close" aria-label="Close">×</button>
+    <h3>Back to work</h3>
+    <button type="button" id="return-close" class="panel-close" aria-label="Close">×</button>
   </div>
-  <form id="activation-form" class="add-form">
-    <p class="meta" id="activation-time-preview"></p>
-    <textarea id="activation-note" rows="3" placeholder="Trigger (optional)"></textarea>
-    <div class="mood-picker" id="activation-mood-picker">
-      <button type="button" class="mood-btn" data-mood="good">Great</button>
-      <button type="button" class="mood-btn" data-mood="normal">Normal</button>
-      <button type="button" class="mood-btn" data-mood="heavy">Heavy</button>
-    </div>
-    <div class="mood-reason-picker hidden" id="activation-reason-picker">
-      <button type="button" class="reason-btn" data-reason="Lack of sleep">Lack of sleep</button>
-      <button type="button" class="reason-btn" data-reason="Fell behind yesterday">Fell behind</button>
-      <button type="button" class="reason-btn" data-reason="Too many tasks">Too many tasks</button>
-      <button type="button" class="reason-btn" data-reason="Nothing in particular">Nothing specific</button>
-    </div>
-    <button type="submit">Log</button>
-  </form>
+  <p class="meta" id="return-summary"></p>
+  <h4>How do you feel now?</h4>
+  <div id="return-mood-picker"></div>
+  <div class="return-actions">
+    <button type="button" id="return-start-btn">▶ Start timer</button>
+    <button type="button" id="return-done-btn" class="secondary">Done</button>
+  </div>
 </div>
 
 <div id="bedtime-backdrop" class="backdrop hidden"></div>
@@ -982,20 +959,8 @@
     <button type="button" id="bedtime-step1-next">Next</button>
   </div>
   <div id="bedtime-step-mood" class="hidden">
-    <h4>Today's mood</h4>
-    <div class="mood-scale-buttons" id="bedtime-mood-buttons">
-      <button type="button" class="mood-scale-btn" data-score="1">1</button>
-      <button type="button" class="mood-scale-btn" data-score="2">2</button>
-      <button type="button" class="mood-scale-btn" data-score="3">3</button>
-      <button type="button" class="mood-scale-btn" data-score="4">4</button>
-      <button type="button" class="mood-scale-btn" data-score="5">5</button>
-      <button type="button" class="mood-scale-btn" data-score="6">6</button>
-      <button type="button" class="mood-scale-btn" data-score="7">7</button>
-      <button type="button" class="mood-scale-btn" data-score="8">8</button>
-      <button type="button" class="mood-scale-btn" data-score="9">9</button>
-      <button type="button" class="mood-scale-btn" data-score="10">10</button>
-    </div>
-    <div class="mood-scale-labels"><span>1: Rough</span><span>10: Great</span></div>
+    <h4>How was today overall?</h4>
+    <div id="bedtime-mood-picker"></div>
     <button type="button" id="bedtime-mood-next">Next</button>
   </div>
   <div id="bedtime-step-sabori" class="hidden">
@@ -1039,20 +1004,8 @@
     <span class="meta" id="wake-slept-label"></span>
   </div>
   <h4>How are you feeling?</h4>
-  <div class="mood-scale-buttons" id="wake-mood-buttons">
-    <button type="button" class="mood-scale-btn" data-score="1">1</button>
-    <button type="button" class="mood-scale-btn" data-score="2">2</button>
-    <button type="button" class="mood-scale-btn" data-score="3">3</button>
-    <button type="button" class="mood-scale-btn" data-score="4">4</button>
-    <button type="button" class="mood-scale-btn" data-score="5">5</button>
-    <button type="button" class="mood-scale-btn" data-score="6">6</button>
-    <button type="button" class="mood-scale-btn" data-score="7">7</button>
-    <button type="button" class="mood-scale-btn" data-score="8">8</button>
-    <button type="button" class="mood-scale-btn" data-score="9">9</button>
-    <button type="button" class="mood-scale-btn" data-score="10">10</button>
-  </div>
-  <div class="mood-scale-labels"><span>1: Rough</span><span>10: Great</span></div>
-  <button type="button" id="wake-mood-save">Save</button>
+  <div id="wake-mood-picker"></div>
+  <button type="button" id="wake-mood-save">Done</button>
 </div>
 
 <div id="copyweek-backdrop" class="backdrop hidden"></div>

@@ -30,5 +30,20 @@
       "type": "image/png",
       "purpose": "maskable"
     }
+  ],
+  "shortcuts": [
+    {
+      "name": "Slacking",
+      "short_name": "Slacking",
+      "description": "Start logging slacking right now (no questions)",
+      "url": "/?action=slacking",
+      "icons": [
+        {
+          "src": "/static/icon-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
+    }
   ]
 }

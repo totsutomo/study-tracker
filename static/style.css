@@ -857,15 +857,6 @@ button.secondary {
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
 }
 
-.mood-picker {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 2px;
-  background: var(--card-hover);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  padding: 3px;
-}
 
 .mood-reason-picker {
   display: flex;
@@ -873,18 +864,6 @@ button.secondary {
   gap: 6px;
 }
 
-.mood-btn {
-  flex: 1;
-  min-width: 70px;
-  background: none;
-  color: var(--text-muted);
-  border: 1px solid transparent;
-  border-radius: calc(var(--radius-sm) - 3px);
-  padding: 10px 6px;
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-}
 
 /* reason-btn(気分の理由/発動のきっかけ等)は複数同時選択できるタグ群のため、トラックには
    まとめず、控えめなゴースト調のチップのまま独立させる */
@@ -904,12 +883,6 @@ button.secondary {
   cursor: pointer;
 }
 
-.mood-btn.active {
-  background: var(--accent);
-  color: var(--on-accent);
-  border-color: var(--accent);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
-}
 
 .reason-btn.active {
   background: var(--accent-dim);
@@ -1465,27 +1438,9 @@ body.focus-open #tabbar {
   margin: 4px 0 10px;
 }
 
-#mood-note {
-  width: 100%;
-  box-sizing: border-box;
-  margin-bottom: 8px;
-}
 
-.mood-today-list {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  margin-top: 4px;
-}
 
-.mood-today-entry {
-  font-size: 12px;
-  color: var(--text-muted);
-}
 
-#mood-save-btn {
-  width: 100%;
-}
 
 .stats-header {
   display: flex;
@@ -2385,16 +2340,6 @@ body:has(#tab-calendar.active) {
   display: none;
 }
 
-/* Mood: PC版だけ追加する「理由内訳」の見出しと「Daily log」一覧(2026-08-29)。
-   モバイルでは今まで通りタップしないと個々のエントリが出ない挙動のまま変えない。 */
-.mood-chart-side-heading {
-  display: none;
-}
-
-.mood-log-card {
-  display: none;
-}
-
 /* ---------- desktop layout (md+) ----------
    PC表示だとモバイル用レイアウトのまま余白だけ増えて、グラフはつまり、カレンダーの予定/ToDoは
    1件+「+N件」に丸められて見えない、という問題への対応(2026-08-29)。
@@ -2553,50 +2498,10 @@ body:has(#tab-calendar.active) {
     max-width: none;
   }
 
-  /* ---- Mood: グラフを拡大するのではなく、モバイルでは「タップしないと出ない」
-     情報を常設パネル化して空きスペースを埋める(2026-08-29)。
-     右に理由別の平均スコア、下に個々のエントリを新しい順に並べたDaily logを追加。 */
-  .mood-chart-row {
-    display: flex;
-    align-items: flex-start;
-    gap: 20px;
-  }
-
+  /* ---- Mood: グラフはStudyのchart-cardと同じ理由(SVGが幅に比例して縦にも伸びる)で頭打ちにする。
+     2026-10-03以降、理由別・Daily logはグラフ下の折りたたみ(.mood-fold)に移した */
   .mood-chart-main {
-    /* Studyのchart-cardと同じ理由(SVGが幅に比例して縦にも伸びる)で頭打ちにする */
     max-width: 640px;
-    margin-bottom: 0;
-  }
-
-  .mood-chart-side {
-    width: 280px;
-    flex-shrink: 0;
-  }
-
-  .mood-chart-side-heading {
-    display: block;
-    margin: 0 0 8px;
-    font-size: 15px;
-  }
-
-  .mood-log-card {
-    display: block;
-    background: var(--card);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-lg);
-    box-shadow: var(--shadow-card);
-    padding: 16px 20px;
-    margin-bottom: 12px;
-    max-width: 640px;
-  }
-
-  .mood-log-card h3 {
-    margin: 0 0 10px;
-  }
-
-  .mood-log-card .list {
-    max-height: 420px;
-    overflow-y: auto;
   }
 
   /* ---- Calendar(2026-10-02に作り直し): カード枠と余白をなくしてグリッドを右下まで広げ、
@@ -3273,34 +3178,10 @@ body.quick-open #tabbar {
   cursor: not-allowed;
 }
 
-.quick-mood-row {
-  display: grid;
-  grid-template-columns: repeat(10, 1fr);
-  gap: 4px;
-}
 
-.quick-mood-btn {
-  min-height: 42px;
-  padding: 0;
-  background: var(--card-hover);
-  color: var(--text);
-  border: 1px solid var(--border);
-  font-size: 14px;
-}
 
-.quick-mood-btn.active {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: var(--on-accent);
-}
 
-.quick-mood-reason {
-  margin-top: 10px;
-}
 
-.quick-mood-reason .meta {
-  margin: 0 0 6px;
-}
 
 .quick-grid {
   display: grid;
@@ -3682,4 +3563,225 @@ body.quick-open #tabbar {
     aspect-ratio: 1;
     border-radius: 3px;
   }
+}
+
+/* ---------- Mood buttons (2026-10-03 ボタン再設計) ----------
+   数字 → ボタン12個(4列×3行、複数可)→ 小さいOther…。以前の理由ボタンは文字が途中で折れていた
+   (「Relationsh ip」)ので、絵文字を上・名前を下にして1行に収める */
+.mood-tags {
+  margin-top: 2px;
+}
+
+.mood-tag-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.mood-tag-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  min-height: 48px;
+  padding: 6px 2px;
+  background: transparent;
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.2;
+  cursor: pointer;
+}
+
+.mood-tag-icon {
+  font-size: 16px;
+  line-height: 1;
+}
+
+.mood-tag-name {
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mood-tag-btn.active {
+  background: var(--accent-dim);
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.mood-tags-foot {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 6px;
+  min-height: 24px;
+}
+
+.mood-other-link {
+  font-size: 13px;
+}
+
+.mood-other-link.active {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.mood-saved-note {
+  font-size: 12px;
+}
+
+.mood-other-form {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.mood-other-form input {
+  flex: 1;
+  min-width: 0;
+}
+
+/* 4以下を付けた時の「今日の最低ライン」(Phase 3)。付けて終わりにせず、すぐ次の一歩に繋げる */
+.mood-min-line {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--accent-dim);
+  font-size: 13px;
+}
+
+.mood-min-line p {
+  margin: 0;
+}
+
+.mood-min-start {
+  width: 100%;
+  margin-top: 8px;
+}
+
+.mood-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.mood-chip {
+  max-width: 100%;
+  padding: 5px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--card-hover);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 500;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
+.mood-chip.active {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.mood-edit-bar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+}
+
+.mood-edit-bar .meta {
+  margin: 0;
+  flex: 1;
+}
+
+.mood-stats .stat-label {
+  white-space: normal;
+}
+
+.mood-week-diff {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.mood-week-diff.up {
+  color: var(--success);
+}
+
+.mood-week-diff.down {
+  color: var(--danger);
+}
+
+.mood-chart-main {
+  margin-bottom: 12px;
+}
+
+.mood-fold {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 12px 16px;
+  margin-bottom: 10px;
+  max-width: 640px;
+}
+
+.mood-fold > summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.mood-fold[open] > summary {
+  margin-bottom: 8px;
+}
+
+.mood-fold > p.meta {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin: 6px 0 0;
+}
+
+.mood-fold .list {
+  max-height: 420px;
+  overflow-y: auto;
+}
+
+.return-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.return-actions button {
+  flex: 1;
+}
+
+.settings-inline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+#mood-custom-tags li {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.stat-note {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
+.mood-chart-detail {
+  font-size: 12px;
+  margin: 4px 0 0;
 }

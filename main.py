@@ -361,6 +361,8 @@ class PushSubscribeIn(BaseModel):
 class ActivationLogCreate(BaseModel):
     triggered_at: str  # "YYYY-MM-DD HH:MM:SS", client local time
     note: str | None = None
+    # 開始時の気分(Great/Normal/Heavy)は2026-10-03で聞くのをやめた(Back to work時にmood_logsへ1〜10で記録)。
+    # 古いクライアントや過去の記録のために列と受け口は残している
     mood: str | None = None  # "good" | "normal" | "heavy"
     mood_reason: str | None = None  # only meaningful when mood == "heavy"
 
@@ -373,14 +375,23 @@ class MoodLogCreate(BaseModel):
     date: str  # "YYYY-MM-DD", client local date
     score: int  # 1-10
     note: str | None = None
-    reason: str | None = None
+    reason: str | None = None  # 旧来の理由(1つだけ)。2026-10-03以降の画面はtagsを使う
     logged_at: str | None = None  # "YYYY-MM-DD HH:MM:SS", client local time
+    tags: list[str] | None = None  # 選んだボタン(複数可)。"Other"の時はnoteに本人の言葉
+    kind: str | None = None  # wake / moment / day / slacking
+    activation_log_id: int | None = None  # kind='slacking'の時のサボり記録
 
 
 class MoodLogUpdate(BaseModel):
     score: int | None = None
     reason: str | None = None
     note: str | None = None
+    tags: list[str] | None = None  # []で全部外す
+
+
+class MoodConfigUpdate(BaseModel):
+    location: str | None = None  # WEATHER_LOCATIONSのキー。切り替えた日から新しい場所の天気を取る
+    remove_custom_tag: str | None = None
 
 
 class SleepLogCreate(BaseModel):
@@ -1322,41 +1333,213 @@ def study_log_daily(days: int = 14):
     return result
 
 
-LOW_MOOD_THRESHOLD = 4  # mood_logs.score の日平均がこれ以下なら「低気分日」
+LOW_MOOD_THRESHOLD = 4  # 日ごとの気分(daily_mood_by_date)がこれ以下なら「低調な日」
+
+# ---------- mood (2026-10-03 ボタン再設計) ----------
+# 詳細: Obsidian「アプリ開発/Compass/2026-10-02_Compass気分記録の見直し(ボタン再設計).md」
+# 画面のボタンの並び・絵文字はapp.jsのMOOD_TAGSが正。ここはサーバー側の判定に使う名前だけ持つ
+MOOD_BUILTIN_TAGS = [
+    "Tired", "Stressed", "Lonely", "Meh", "Calm", "Proud", "Moved", "Too much",
+    "Study", "English", "Friends", "Family",
+]
+MOOD_OTHER_TAG = "Other"
+MOOD_KINDS = ("wake", "moment", "day", "slacking")
+# Otherに同じ言葉をこの回数書いたら、ボタンとして自動で足す
+MOOD_CUSTOM_TAG_PROMOTE_COUNT = 2
+MOOD_CUSTOM_TAGS_KEY = "mood_custom_tags"
+
+
+def _parse_tags(raw) -> list[str]:
+    if not raw:
+        return []
+    try:
+        tags = json.loads(raw)
+    except (TypeError, ValueError):
+        return []
+    return [t for t in tags if isinstance(t, str)] if isinstance(tags, list) else []
+
+
+def _clean_tags(tags: list[str] | None) -> str | None:
+    """重複・空文字を除いてJSON文字列にする。何も残らなければNone"""
+    if tags is None:
+        return None
+    seen = []
+    for t in tags:
+        t = (t or "").strip()[:40]
+        if t and t not in seen:
+            seen.append(t)
+    return json.dumps(seen, ensure_ascii=False) if seen else None
+
+
+def daily_mood_by_date(rows) -> dict[str, float]:
+    """(date, score, kind) の並びから、日ごとの代表値を出す。
+    寝る前の「1日の振り返り」(kind='day')があればそれを使い、なければその日の記録の平均にする
+    (朝・昼・寝る前を単純平均すると、グラフの点同士を比べにくかったため)"""
+    all_scores: dict[str, list[int]] = {}
+    day_scores: dict[str, list[int]] = {}
+    for d, score, kind in rows:
+        all_scores.setdefault(d, []).append(score)
+        if kind == "day":
+            day_scores.setdefault(d, []).append(score)
+    result = {}
+    for d, scores in all_scores.items():
+        use = day_scores.get(d) or scores
+        result[d] = sum(use) / len(use)
+    return result
+
+
+def _mood_rows_since(conn, since: str):
+    return conn.execute(
+        "SELECT date, score, kind FROM mood_logs WHERE date >= ?", (since,)
+    ).fetchall()
+
+
+def _read_custom_mood_tags(conn) -> list[str]:
+    row = conn.execute("SELECT value FROM settings WHERE key = ?", (MOOD_CUSTOM_TAGS_KEY,)).fetchone()
+    return _parse_tags(row[0]) if row else []
+
+
+def _write_custom_mood_tags(conn, tags: list[str]):
+    conn.execute(
+        "INSERT INTO settings (key, value) VALUES (?, ?) "
+        "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        (MOOD_CUSTOM_TAGS_KEY, json.dumps(tags, ensure_ascii=False)),
+    )
+
+
+def _maybe_promote_other(conn, tags_json: str | None, note: str | None) -> str | None:
+    """Otherに書いた言葉が2回目なら、ボタン一覧(settings)に足して、その名前を返す。
+    過去の記録はOther+noteのまま残す(「ボタンが合っていなかった率」を正しく数えるため)"""
+    if not note or MOOD_OTHER_TAG not in _parse_tags(tags_json):
+        return None
+    phrase = note.strip()[:40]
+    if not phrase:
+        return None
+    key = phrase.casefold()
+    custom = _read_custom_mood_tags(conn)
+    if key in {t.casefold() for t in MOOD_BUILTIN_TAGS + custom}:
+        return None
+    count = conn.execute(
+        "SELECT COUNT(*) FROM mood_logs WHERE tags LIKE ? AND lower(trim(note)) = ?",
+        (f'%"{MOOD_OTHER_TAG}"%', phrase.lower()),
+    ).fetchone()[0]
+    if count < MOOD_CUSTOM_TAG_PROMOTE_COUNT:
+        return None
+    label = phrase[0].upper() + phrase[1:]  # ボタンの見た目を他とそろえる(homesick → Homesick)
+    _write_custom_mood_tags(conn, custom + [label])
+    return label
+
+
+def _mood_log_dict(row: dict) -> dict:
+    row["tags"] = _parse_tags(row.get("tags"))
+    return row
 
 
 @app.get("/api/mood-logs")
 def list_mood_logs(days: int = 14):
     conn = get_connection()
     cur = conn.execute(
-        "SELECT id, date, score, note, reason, logged_at FROM mood_logs "
+        "SELECT id, date, score, note, reason, tags, kind, activation_log_id, logged_at FROM mood_logs "
         "WHERE date >= ? ORDER BY logged_at ASC",
         ((nz_today() - timedelta(days=days - 1)).isoformat(),),
     )
-    result = rows_to_dicts(cur)
+    result = [_mood_log_dict(r) for r in rows_to_dicts(cur)]
     conn.close()
     return result
 
 
+def _low_mood_achievement(daily: dict[str, float], minutes_by_date: dict[str, int], minimum: int | None) -> dict:
+    if not minimum:
+        return {"status": "not_configured", "low_mood_days": 0, "achieved_days": 0, "rate": None}
+    low_mood_dates = [d for d, v in daily.items() if v <= LOW_MOOD_THRESHOLD]
+    if not low_mood_dates:
+        return {"status": "insufficient_data", "low_mood_days": 0, "achieved_days": 0, "rate": None}
+    achieved_days = sum(1 for d in low_mood_dates if (minutes_by_date.get(d) or 0) >= minimum)
+    return {
+        "status": "ok",
+        "low_mood_days": len(low_mood_dates),
+        "achieved_days": achieved_days,
+        "rate": round(achieved_days / len(low_mood_dates) * 100),
+    }
+
+
+def _avg(values) -> float | None:
+    values = list(values)
+    return round(sum(values) / len(values), 1) if values else None
+
+
+@app.get("/api/mood/overview")
+def mood_overview(days: int = 14):
+    """Moodタブを開いた時に要るものを1回で返す(2026-10-03)。
+    以前は記録・平均・理由別・低調な日の4本を別々に取っていて、NZ→東京Tursoの往復がその分積み上がっていた。
+    ここではDBへの問い合わせを3回(30日分の記録・勉強時間・設定)にまとめ、残りはPythonで数える"""
+    today = nz_today()
+    since30 = (today - timedelta(days=30)).isoformat()
+    conn = get_connection()
+    cur = conn.execute(
+        "SELECT id, date, score, note, reason, tags, kind, activation_log_id, logged_at FROM mood_logs "
+        "WHERE date >= ? ORDER BY logged_at ASC",
+        (since30,),
+    )
+    rows = [_mood_log_dict(r) for r in rows_to_dicts(cur)]
+    study_rows = conn.execute(
+        "SELECT date(logged_at) AS d, SUM(minutes) FROM study_logs WHERE logged_at >= ? GROUP BY d",
+        (nz_day_bound(offset_days=-30),),
+    ).fetchall()
+    settings_rows = dict(conn.execute("SELECT key, value FROM settings").fetchall())
+    conn.close()
+
+    daily = daily_mood_by_date([(r["date"], r["score"], r["kind"]) for r in rows])
+    week_start = (today - timedelta(days=6)).isoformat()
+    prev_start = (today - timedelta(days=13)).isoformat()
+    week_avg = _avg(v for d, v in daily.items() if d >= week_start)
+    prev_week_avg = _avg(v for d, v in daily.items() if prev_start <= d < week_start)
+
+    # ボタン別: 回数と、そのボタンが付いた記録の気分の平均。対応するボタンがない古い理由はその名前のまま数える
+    tag_stats: dict[str, list[int]] = {}
+    tagged_logs = 0
+    other_logs = 0
+    for r in rows:
+        labels = r["tags"] or ([r["reason"]] if r["reason"] else [])
+        if r["tags"]:
+            tagged_logs += 1
+            if MOOD_OTHER_TAG in r["tags"]:
+                other_logs += 1
+        for t in labels:
+            tag_stats.setdefault(t, []).append(r["score"])
+    tags = sorted(
+        ({"tag": t, "count": len(s), "avg_score": round(sum(s) / len(s), 1)} for t, s in tag_stats.items()),
+        key=lambda x: (-x["count"], x["avg_score"]),
+    )
+
+    minimum = int(settings_rows["daily_minimum_minutes"]) if settings_rows.get("daily_minimum_minutes") else None
+    since_days = (today - timedelta(days=days - 1)).isoformat()
+    return {
+        "logs": [r for r in rows if r["date"] >= since_days],
+        "daily": {d: round(v, 2) for d, v in daily.items() if d >= since_days},
+        "week_avg": week_avg,
+        "prev_week_avg": prev_week_avg,
+        "low_mood": _low_mood_achievement(daily, dict(study_rows), minimum),
+        "tag_stats": tags,
+        "tagged_logs": tagged_logs,
+        "other_logs": other_logs,
+        "custom_tags": _parse_tags(settings_rows.get(MOOD_CUSTOM_TAGS_KEY)),
+        "location": _current_weather_location(settings_rows),
+    }
+
+
 @app.get("/api/mood-logs/stats")
 def mood_log_stats():
-    # 1日に複数件記録できるため、まず日次平均に集計してから週/月平均を出す
+    # 日ごとの代表値(寝る前の振り返り優先、なければ平均)にしてから週/月平均を出す
     # (記録件数が多い日に平均が引っ張られないよう、日ごとの重みを揃える)
     conn = get_connection()
-    week_avg = conn.execute(
-        "SELECT AVG(day_avg) FROM (SELECT AVG(score) AS day_avg FROM mood_logs "
-        "WHERE date >= ? GROUP BY date)",
-        ((nz_today() - timedelta(days=6)).isoformat(),),
-    ).fetchone()[0]
-    month_avg = conn.execute(
-        "SELECT AVG(day_avg) FROM (SELECT AVG(score) AS day_avg FROM mood_logs "
-        "WHERE date >= ? GROUP BY date)",
-        (nz_today().replace(day=1).isoformat(),),
-    ).fetchone()[0]
+    month_start = nz_today().replace(day=1)
+    week_start = nz_today() - timedelta(days=6)
+    daily = daily_mood_by_date(_mood_rows_since(conn, min(month_start, week_start).isoformat()))
     conn.close()
     return {
-        "week_avg": round(week_avg, 1) if week_avg is not None else None,
-        "month_avg": round(month_avg, 1) if month_avg is not None else None,
+        "week_avg": _avg(v for d, v in daily.items() if d >= week_start.isoformat()),
+        "month_avg": _avg(v for d, v in daily.items() if d >= month_start.isoformat()),
     }
 
 
@@ -1379,78 +1562,214 @@ def mood_log_reason_stats(days: int = 30):
 @app.get("/api/mood-logs/low-mood-achievement")
 def mood_log_low_mood_achievement(days: int = 30):
     conn = get_connection()
-    settings = _read_settings(conn)
-    minimum = settings.get("daily_minimum_minutes")
+    minimum = _read_settings(conn).get("daily_minimum_minutes")
     if not minimum:
         conn.close()
-        return {"status": "not_configured", "low_mood_days": 0, "achieved_days": 0, "rate": None}
-
-    mood_rows = conn.execute(
-        "SELECT date, score FROM mood_logs WHERE date >= ?",
-        ((nz_today() - timedelta(days=days)).isoformat(),),
-    ).fetchall()
-    scores_by_date = {}
-    for d, score in mood_rows:
-        scores_by_date.setdefault(d, []).append(score)
-    low_mood_dates = [
-        d for d, scores in scores_by_date.items() if sum(scores) / len(scores) <= LOW_MOOD_THRESHOLD
-    ]
-
-    if not low_mood_dates:
-        conn.close()
-        return {"status": "insufficient_data", "low_mood_days": 0, "achieved_days": 0, "rate": None}
-
+        return _low_mood_achievement({}, {}, None)
+    daily = daily_mood_by_date(_mood_rows_since(conn, (nz_today() - timedelta(days=days)).isoformat()))
     study_rows = conn.execute(
         "SELECT date(logged_at) AS d, SUM(minutes) AS total_minutes FROM study_logs "
         "WHERE logged_at >= ? GROUP BY d",
         (nz_day_bound(offset_days=-days),),
     ).fetchall()
-    minutes_by_date = dict(study_rows)
     conn.close()
+    return _low_mood_achievement(daily, dict(study_rows), minimum)
 
-    achieved_days = sum(1 for d in low_mood_dates if minutes_by_date.get(d, 0) >= minimum)
-    return {
-        "status": "ok",
-        "low_mood_days": len(low_mood_dates),
-        "achieved_days": achieved_days,
-        "rate": round(achieved_days / len(low_mood_dates) * 100),
-    }
+
+def _validate_mood_kind(kind: str | None):
+    if kind is not None and kind not in MOOD_KINDS:
+        raise HTTPException(status_code=422, detail=f"kind must be one of {MOOD_KINDS}")
 
 
 @app.post("/api/mood-logs")
 def create_mood_log(payload: MoodLogCreate):
+    _validate_mood_kind(payload.kind)
+    tags_json = _clean_tags(payload.tags)
     conn = get_connection()
+    cols = ["date", "score", "note", "reason", "tags", "kind", "activation_log_id"]
+    values = [payload.date, payload.score, payload.note, payload.reason, tags_json, payload.kind, payload.activation_log_id]
     if payload.logged_at:
-        cur = conn.execute(
-            "INSERT INTO mood_logs (date, score, note, reason, logged_at) VALUES (?, ?, ?, ?, ?)",
-            (payload.date, payload.score, payload.note, payload.reason, payload.logged_at),
-        )
-    else:
-        cur = conn.execute(
-            "INSERT INTO mood_logs (date, score, note, reason) VALUES (?, ?, ?, ?)",
-            (payload.date, payload.score, payload.note, payload.reason),
-        )
-    conn.commit()
+        cols.append("logged_at")
+        values.append(payload.logged_at)
+    cur = conn.execute(
+        f"INSERT INTO mood_logs ({', '.join(cols)}) VALUES ({', '.join('?' for _ in cols)})",
+        values,
+    )
     new_id = cur.lastrowid
+    new_tag = _maybe_promote_other(conn, tags_json, payload.note)
+    conn.commit()
     conn.close()
-    # idは⚡メニューで「数字を押した瞬間に保存→あとから理由を足す」ために返す(2026-10-02)
-    return {"ok": True, "id": new_id}
+    # idは「数字を押した瞬間に保存→あとからボタンを足す」ために返す(2026-10-02)
+    return {"ok": True, "id": new_id, "new_tag": new_tag}
 
 
 @app.put("/api/mood-logs/{log_id}")
 def update_mood_log(log_id: int, payload: MoodLogUpdate):
     conn = get_connection()
-    cur = conn.execute("SELECT id FROM mood_logs WHERE id = ?", (log_id,))
-    if cur.fetchone() is None:
+    row = conn.execute("SELECT tags, note FROM mood_logs WHERE id = ?", (log_id,)).fetchone()
+    if row is None:
         conn.close()
         raise HTTPException(status_code=404, detail="mood log not found")
     fields = {k: v for k, v in (("score", payload.score), ("reason", payload.reason), ("note", payload.note)) if v is not None}
+    if payload.tags is not None:
+        fields["tags"] = _clean_tags(payload.tags)
+    new_tag = None
     if fields:
+        if "note" in fields and fields["note"] == "":
+            fields["note"] = None
         sets = ", ".join(f"{k} = ?" for k in fields)
         conn.execute(f"UPDATE mood_logs SET {sets} WHERE id = ?", (*fields.values(), log_id))
+        tags_json = fields["tags"] if "tags" in fields else row[0]
+        note = fields["note"] if "note" in fields else row[1]
+        if "note" in fields or "tags" in fields:
+            new_tag = _maybe_promote_other(conn, tags_json, note)
         conn.commit()
     conn.close()
+    return {"ok": True, "new_tag": new_tag}
+
+
+@app.delete("/api/mood-logs/{log_id}")
+def delete_mood_log(log_id: int):
+    conn = get_connection()
+    conn.execute("DELETE FROM mood_logs WHERE id = ?", (log_id,))
+    conn.commit()
+    conn.close()
     return {"ok": True}
+
+
+@app.put("/api/mood/config")
+def update_mood_config(payload: MoodConfigUpdate):
+    conn = get_connection()
+    if payload.location is not None:
+        if payload.location not in WEATHER_LOCATIONS:
+            conn.close()
+            raise HTTPException(status_code=422, detail=f"location must be one of {list(WEATHER_LOCATIONS)}")
+        settings_rows = dict(conn.execute("SELECT key, value FROM settings").fetchall())
+        history = _weather_location_history(settings_rows)
+        if not history or history[-1]["key"] != payload.location:
+            today = nz_today().isoformat()
+            history = [h for h in history if h["since"] < today] + [{"since": today, "key": payload.location}]
+            conn.execute(
+                "INSERT INTO settings (key, value) VALUES (?, ?) "
+                "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                (WEATHER_LOCATION_HISTORY_KEY, json.dumps(history)),
+            )
+    if payload.remove_custom_tag:
+        custom = [t for t in _read_custom_mood_tags(conn) if t != payload.remove_custom_tag]
+        _write_custom_mood_tags(conn, custom)
+    conn.commit()
+    settings_rows = dict(conn.execute("SELECT key, value FROM settings").fetchall())
+    conn.close()
+    return {
+        "custom_tags": _parse_tags(settings_rows.get(MOOD_CUSTOM_TAGS_KEY)),
+        "location": _current_weather_location(settings_rows),
+    }
+
+
+# ---------- weather (Open-Meteo、2026-10-03) ----------
+# 「天気が悪いと気分が下がる」をボタンにせず自動で記録する。登録・APIキー不要。
+# 直近は予報API、それより前は過去データAPI(数日遅れで入る)から取る。予報APIは過去約60日分しか値がなく
+# (2026-10-03に確認、それより前はnullが返る)、どちらかで値が空だった日はもう一方で取り直す。
+# 1度取った日は保存して取り直さない。取得に失敗しても気分の画面は止めない(天気が空になるだけ)。
+WEATHER_LOCATIONS = {
+    "waiuku": {"label": "Waiuku, NZ", "lat": -37.25, "lon": 174.73},
+    "kyodo": {"label": "Kyodo, Tokyo", "lat": 35.65, "lon": 139.63},
+}
+WEATHER_DEFAULT_LOCATION = "waiuku"
+WEATHER_LOCATION_HISTORY_KEY = "weather_location_history"  # [{"since": "YYYY-MM-DD", "key": "kyodo"}, ...]
+WEATHER_FORECAST_MAX_PAST_DAYS = 55
+WEATHER_TIMEOUT_S = 6
+# 取得に失敗したら、しばらくは取りに行かない(Open-Meteoが落ちている間、毎回6秒待たされないように)
+WEATHER_RETRY_WAIT_S = 30 * 60
+_weather_retry_after = 0.0
+
+
+def _weather_location_history(settings_rows: dict) -> list[dict]:
+    try:
+        history = json.loads(settings_rows.get(WEATHER_LOCATION_HISTORY_KEY) or "[]")
+    except ValueError:
+        history = []
+    return [h for h in history if isinstance(h, dict) and h.get("key") in WEATHER_LOCATIONS and h.get("since")]
+
+
+def _current_weather_location(settings_rows: dict) -> str:
+    history = _weather_location_history(settings_rows)
+    return history[-1]["key"] if history else WEATHER_DEFAULT_LOCATION
+
+
+def _weather_location_on(history: list[dict], d: str) -> str:
+    """その日にいた場所。設定を切り替えた日より前は前の場所(帰国後も過去の日はNZの天気になる)"""
+    key = WEATHER_DEFAULT_LOCATION
+    for h in history:
+        if h["since"] <= d:
+            key = h["key"]
+    return key
+
+
+def _fetch_open_meteo(location: str, start: str, end: str, archive: bool) -> list[tuple]:
+    loc = WEATHER_LOCATIONS[location]
+    base = "https://archive-api.open-meteo.com/v1/archive" if archive else "https://api.open-meteo.com/v1/forecast"
+    url = (
+        f"{base}?latitude={loc['lat']}&longitude={loc['lon']}"
+        "&daily=precipitation_sum,sunshine_duration,temperature_2m_max,temperature_2m_min,weather_code"
+        f"&timezone=auto&start_date={start}&end_date={end}"
+    )
+    with urllib.request.urlopen(url, timeout=WEATHER_TIMEOUT_S) as res:
+        data = json.loads(res.read().decode("utf-8"))
+    daily = data.get("daily") or {}
+    out = []
+    for i, d in enumerate(daily.get("time") or []):
+        precip = daily["precipitation_sum"][i]
+        sunshine = daily["sunshine_duration"][i]
+        tmax = daily["temperature_2m_max"][i]
+        if precip is None and sunshine is None and tmax is None:
+            continue  # 値がない日は保存しない(呼び出し側がもう一方のAPIで取り直す・次回また取りに行く)
+        out.append((
+            d, location, precip,
+            round(sunshine / 3600, 1) if sunshine is not None else None,
+            tmax, daily["temperature_2m_min"][i], daily["weather_code"][i],
+        ))
+    return out
+
+
+def _ensure_weather(conn, dates: list[str], have: dict[str, dict]) -> dict[str, dict]:
+    """dates(今日より前)の天気を返す。haveは保存済みの分({date: {rain, sun, temp}})。
+    保存されていない日だけOpen-Meteoから取って保存する(普段はDBへの追加の往復なし)"""
+    global _weather_retry_after
+    missing = [d for d in dates if d not in have]
+    if missing and time.time() >= _weather_retry_after:
+        settings_rows = dict(conn.execute("SELECT key, value FROM settings").fetchall())
+        history = _weather_location_history(settings_rows)
+        by_loc: dict[str, list[str]] = {}
+        for d in missing:
+            by_loc.setdefault(_weather_location_on(history, d), []).append(d)
+        recent_limit = (nz_today() - timedelta(days=WEATHER_FORECAST_MAX_PAST_DAYS)).isoformat()
+        fetched = []
+        for loc, ds in by_loc.items():
+            # 予報APIと過去データAPIの境目をまたぐ時は2回に分け、値が空だった日はもう一方で取り直す
+            for part, archive in (([d for d in ds if d < recent_limit], True), ([d for d in ds if d >= recent_limit], False)):
+                for use_archive in (archive, not archive):
+                    if not part:
+                        break
+                    try:
+                        got = [r for r in _fetch_open_meteo(loc, min(part), max(part), use_archive) if r[0] in set(part)]
+                    except (urllib.error.URLError, TimeoutError, ValueError, KeyError, OSError) as e:
+                        print(f"weather fetch failed ({loc} {min(part)}..{max(part)}): {e}")
+                        _weather_retry_after = time.time() + WEATHER_RETRY_WAIT_S
+                        break
+                    fetched += got
+                    got_dates = {r[0] for r in got}
+                    part = [d for d in part if d not in got_dates]
+        if fetched:
+            conn.executemany(
+                "INSERT OR REPLACE INTO weather_daily "
+                "(date, location, precip_mm, sunshine_h, temp_max, temp_min, weather_code) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                fetched,
+            )
+            conn.commit()
+            for d, _loc, p, s, t, _tmin, _code in fetched:
+                have[d] = {"rain": p, "sun": s, "temp": t}
+    return have
 
 
 WEEKLY_CHART_WEEKS = 10
@@ -1594,6 +1913,19 @@ def list_activation_logs(limit: int = 200):
         row["post_return_minutes"] = (
             _post_return_minutes(conn, row["returned_at"]) if row["returned_at"] else None
         )
+    # Back to workの時に付けた気分(2026-10-03〜)。1回の問い合わせでまとめて取る
+    ids = [row["id"] for row in result]
+    moods = {}
+    if ids:
+        mood_rows = conn.execute(
+            f"SELECT activation_log_id, score, tags, note FROM mood_logs "
+            f"WHERE activation_log_id IN ({', '.join('?' for _ in ids)}) ORDER BY logged_at ASC",
+            ids,
+        ).fetchall()
+        for aid, score, tags, note in mood_rows:
+            moods[aid] = {"score": score, "tags": _parse_tags(tags), "note": note}
+    for row in result:
+        row["return_mood"] = moods.get(row["id"])
     conn.close()
     return result
 
@@ -1654,17 +1986,28 @@ def activation_log_post_return_stats(days: int = 30):
 
 @app.get("/api/activation-logs/mood-reasons")
 def activation_log_mood_reasons(days: int = 30):
+    """サボりのあとの気分(Back to workで付けたボタン)の内訳。2026-10-03以前の開始時の理由(Heavyの時だけ)も合算する"""
     conn = get_connection()
-    cur = conn.execute(
-        "SELECT mood_reason, COUNT(*) AS count FROM activation_logs "
-        "WHERE mood = 'heavy' AND mood_reason IS NOT NULL "
-        "AND triggered_at >= ? "
-        "GROUP BY mood_reason ORDER BY count DESC",
-        (nz_day_bound(offset_days=-days),),
-    )
-    result = rows_to_dicts(cur)
+    rows = conn.execute(
+        "SELECT 'tags', tags, score FROM mood_logs WHERE kind = 'slacking' AND date >= ? "
+        "UNION ALL SELECT 'legacy', mood_reason, NULL FROM activation_logs "
+        "WHERE mood = 'heavy' AND mood_reason IS NOT NULL AND triggered_at >= ?",
+        ((nz_today() - timedelta(days=days)).isoformat(), nz_day_bound(offset_days=-days)),
+    ).fetchall()
     conn.close()
-    return result
+    counts: dict[str, int] = {}
+    scores = []
+    for src, value, score in rows:
+        labels = _parse_tags(value) if src == "tags" else [value]
+        if score is not None:
+            scores.append(score)
+        for label in labels:
+            counts[label] = counts.get(label, 0) + 1
+    return {
+        "reasons": [{"mood_reason": k, "count": v} for k, v in sorted(counts.items(), key=lambda kv: -kv[1])],
+        "avg_score": _avg(scores),
+        "logged": len(scores),
+    }
 
 
 @app.get("/api/activation-logs/export")
@@ -1834,8 +2177,8 @@ def delete_sleep_log(log_id: int):
 
 # ---------- insights (2026-10-02) ----------
 # 「What moves my mood / study」カードとStudy › Insightsの表の材料。
-# 1日1行に、気分平均・勉強分・睡眠分(その日の朝に起きた夜の睡眠)・スクリーンタイム・サボり回数・
-# 日記スコアを並べて返す。比べ方(2グループ比較・関係の強さ)はクライアント側で計算する。
+# 1日1行に、気分(日ごとの代表値)・勉強分・睡眠分(その日の朝に起きた夜の睡眠)・スクリーンタイム・サボり回数・
+# 日記スコア・天気(雨mm・日照時間・最高気温、2026-10-03)を並べて返す。比べ方(2グループ比較・関係の強さ)はクライアント側で計算する。
 # Tursoは東京にあり1クエリごとに往復が積み上がるので、UNION ALLで1回にまとめる。
 
 @app.get("/api/insights/daily")
@@ -1846,7 +2189,7 @@ def insights_daily(days: int = 30):
     since_ts = nz_day_bound(offset_days=-days)
     conn = get_connection()
     rows = conn.execute(
-        "SELECT 'mood', date, AVG(score), NULL FROM mood_logs WHERE date >= ? GROUP BY date "
+        "SELECT 'mood', date, score, kind FROM mood_logs WHERE date >= ? "
         "UNION ALL SELECT 'study', date(logged_at), SUM(minutes), NULL FROM study_logs "
         "WHERE logged_at >= ? GROUP BY date(logged_at) "
         "UNION ALL SELECT 'screen', date, SUM(total_minutes), NULL FROM screen_time_logs "
@@ -1855,16 +2198,33 @@ def insights_daily(days: int = 30):
         "WHERE triggered_at >= ? GROUP BY date(triggered_at) "
         "UNION ALL SELECT 'diary', date, overall, NULL FROM diary_scores WHERE date >= ? "
         "UNION ALL SELECT 'sleep', bedtime_at, NULL, wake_at FROM sleep_logs "
-        "WHERE wake_at IS NOT NULL AND wake_at >= ?",
-        (since, since_ts, since, since_ts, since, since_ts),
+        "WHERE wake_at IS NOT NULL AND wake_at >= ? "
+        "UNION ALL SELECT 'rain', date, precip_mm, NULL FROM weather_daily WHERE date >= ? "
+        "UNION ALL SELECT 'sun', date, sunshine_h, NULL FROM weather_daily WHERE date >= ? "
+        "UNION ALL SELECT 'temp', date, temp_max, NULL FROM weather_daily WHERE date >= ?",
+        (since, since_ts, since, since_ts, since, since_ts, since, since, since),
     ).fetchall()
-    conn.close()
-
     # 今日は勉強・スクリーンタイムが途中なので入れない
     dates = [(today - timedelta(days=i)).isoformat() for i in range(days, 0, -1)]
+    stored_weather: dict[str, dict] = {}
+    for kind, key, value, _ in rows:
+        if kind in ("rain", "sun", "temp"):
+            stored_weather.setdefault(key, {})[kind] = value
+    weather = _ensure_weather(conn, dates, stored_weather)
+    conn.close()
+
     by_date = {d: {"date": d, "mood": None, "study": 0, "sleep": None, "screen": None,
-                   "slacking": 0, "diary": None} for d in dates}
+                   "slacking": 0, "diary": None, "rain": None, "sun": None, "temp": None} for d in dates}
+    for d, w in weather.items():
+        if d in by_date:
+            by_date[d].update(w)
+    # 気分は日ごとの代表値(寝る前の振り返り優先、2026-10-03)
+    for d, v in daily_mood_by_date([(key, value, extra) for kind, key, value, extra in rows if kind == "mood"]).items():
+        if d in by_date:
+            by_date[d]["mood"] = round(v, 2)
     for kind, key, value, extra in rows:
+        if kind in ("mood", "rain", "sun", "temp"):
+            continue
         if kind == "sleep":
             if sleep_kind(key, extra) != "main":
                 continue
@@ -1875,9 +2235,7 @@ def insights_daily(days: int = 30):
             continue
         if key not in by_date:
             continue
-        if kind == "mood":
-            by_date[key]["mood"] = round(value, 2)
-        elif kind == "diary":
+        if kind == "diary":
             by_date[key]["diary"] = value
         else:
             by_date[key][kind] = int(value or 0)
@@ -1960,21 +2318,10 @@ def screen_time_mood_correlation(days: int = 30):
         "WHERE date >= ? GROUP BY date",
         (since,),
     ).fetchall()
-    mood_rows = conn.execute(
-        "SELECT date, score FROM mood_logs WHERE date >= ?",
-        (since,),
-    ).fetchall()
+    daily = daily_mood_by_date(_mood_rows_since(conn, since))
     conn.close()
 
-    scores_by_date: dict[str, list[int]] = {}
-    for d, score in mood_rows:
-        scores_by_date.setdefault(d, []).append(score)
-
-    paired = [
-        (minutes, sum(scores_by_date[d]) / len(scores_by_date[d]))
-        for d, minutes in screen_rows
-        if d in scores_by_date
-    ]
+    paired = [(minutes, daily[d]) for d, minutes in screen_rows if d in daily]
     if len(paired) < 4:
         return {"status": "insufficient_data", "paired_days": len(paired)}
 

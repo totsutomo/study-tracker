@@ -85,6 +85,19 @@ CREATE TABLE IF NOT EXISTS mood_logs (
 
 CREATE INDEX IF NOT EXISTS idx_mood_logs_date ON mood_logs(date);
 
+-- 気分と比べるための日ごとの天気(Open-Meteo、2026-10-03)。1度取った日は取り直さない。
+-- locationは取得した時点の場所(waiuku / kyodo)。帰国後も過去の日はNZの天気のまま残る
+CREATE TABLE IF NOT EXISTS weather_daily (
+    date TEXT PRIMARY KEY,
+    location TEXT NOT NULL,
+    precip_mm REAL,
+    sunshine_h REAL,
+    temp_max REAL,
+    temp_min REAL,
+    weather_code INTEGER,
+    fetched_at TEXT DEFAULT (datetime('now'))
+);
+
 -- 日記(Obsidian Diaryスキル)・英検準1級ライティング(Obsidian eiken-writingスキル)の採点結果。
 -- 採点の実体はObsidianのfrontmatterにあり、ここはCompassでグラフ表示するためのミラー(採点skill側からPOSTされる)。
 CREATE TABLE IF NOT EXISTS diary_scores (
@@ -181,6 +194,18 @@ CREATE TABLE IF NOT EXISTS pending_changes (
 """
 
 DEFAULT_CATEGORIES = ("英語", "数学", "世界史", "その他")
+
+# 旧来の気分の理由 → 新しいボタン(2026-10-03)。_migrate()の1度きりの振り分けで使う
+MOOD_REASON_TO_TAG = {
+    "Not feeling well": "Tired",
+    "Lack of sleep": "Tired",
+    "Fatigue": "Tired",
+    "Relationship stress": "Stressed",
+    "Couldn't communicate in English": "English",
+    "Communicated well in English": "English",
+    "Study went well": "Study",
+    "Nothing in particular": "Meh",
+}
 
 
 # リクエストのたびに(特にTursoのようなリモートDBへ)新規接続を張ると、往復のたびに接続
@@ -399,6 +424,28 @@ def _migrate(conn):
         )
         conn.execute("DROP TABLE mood_logs_old")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_mood_logs_date ON mood_logs(date)")
+
+    # 気分のボタン再設計(2026-10-03、Obsidian「2026-10-02_Compass気分記録の見直し(ボタン再設計).md」)。
+    # tags = 選んだボタン(JSON配列、複数可)。新しい表にせずここに持つのは、表示のたびのTurso往復を増やさないため。
+    # kind = wake(起床時)/ moment(その場)/ day(寝る前の1日の振り返り)/ slacking(Back to work時)。NULLは移行前の記録
+    # activation_log_id = kind='slacking' の時、どのサボり記録のあとに付けた気分か
+    mood_log_cols = [row[1] for row in conn.execute("PRAGMA table_info(mood_logs)").fetchall()]
+    if "tags" not in mood_log_cols:
+        conn.execute("ALTER TABLE mood_logs ADD COLUMN tags TEXT")
+    if "kind" not in mood_log_cols:
+        conn.execute("ALTER TABLE mood_logs ADD COLUMN kind TEXT")
+    if "activation_log_id" not in mood_log_cols:
+        conn.execute("ALTER TABLE mood_logs ADD COLUMN activation_log_id INTEGER")
+    # 過去の理由(reason)を新しいボタンに振り分ける(1度だけ)。reason列はそのまま残す。
+    # 対応がない理由(Felt motivated / Slept well / Something fun happened)はtagsを空のままにし、画面ではreasonを出す
+    done_key = "migrated_mood_reason_to_tags"
+    if conn.execute("SELECT 1 FROM settings WHERE key = ?", (done_key,)).fetchone() is None:
+        for reason, tag in MOOD_REASON_TO_TAG.items():
+            conn.execute(
+                "UPDATE mood_logs SET tags = ? WHERE reason = ? AND tags IS NULL",
+                (f'["{tag}"]', reason),
+            )
+        conn.execute("INSERT INTO settings (key, value) VALUES (?, '1')", (done_key,))
 
     study_log_cols = [row[1] for row in conn.execute("PRAGMA table_info(study_logs)").fetchall()]
     if "start_trigger" not in study_log_cols:
