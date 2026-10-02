@@ -5114,9 +5114,6 @@ async function openBedtimePanel() {
   document.getElementById("bedtime-step1").classList.remove("hidden");
   document.getElementById("bedtime-step-mood").classList.add("hidden");
   document.getElementById("bedtime-step-sabori").classList.add("hidden");
-  document.getElementById("bedtime-step2").classList.add("hidden");
-  document.getElementById("bedtime-add-title").value = "";
-  document.getElementById("bedtime-added-list").innerHTML = "";
   document.getElementById("bedtime-sabori-note").value = "";
   document.getElementById("bedtime-sabori-list").innerHTML = "";
   bedtimePicker.reset();
@@ -5168,34 +5165,8 @@ guardedSubmit(document.getElementById("bedtime-sabori-form"), async (e) => {
   }
 });
 
-document.getElementById("bedtime-sabori-next").addEventListener("click", () => {
-  document.getElementById("bedtime-step-sabori").classList.add("hidden");
-  document.getElementById("bedtime-sabori-list").innerHTML = "";
-  document.getElementById("bedtime-step2").classList.remove("hidden");
-});
-
-guardedSubmit(document.getElementById("bedtime-add-form"), async (e) => {
-  const titleInput = document.getElementById("bedtime-add-title");
-  const title = titleInput.value.trim();
-  if (!title) return;
-  titleInput.value = "";
-  const li = document.createElement("li");
-  li.innerHTML = `<span class="log-info"><span>${escapeHtml(title)}</span></span>`;
-  document.getElementById("bedtime-added-list").appendChild(li);
-  try {
-    await api("/api/todos", {
-      method: "POST",
-      body: JSON.stringify({ title, due_date: addDaysToDate(todayStr(), 1) }),
-    });
-    loadTodos();
-    loadCalendar();
-  } catch (err) {
-    li.remove();
-    showToast(`「${title}」の追加に失敗しました。もう一度お試しください`);
-  }
-});
-
-document.getElementById("bedtime-step2-done").addEventListener("click", closeBedtimePanel);
+// サボりの振り返りが最後の段階(2026-10-03に「Tomorrow's tasks」を廃止)
+document.getElementById("bedtime-sabori-next").addEventListener("click", closeBedtimePanel);
 
 async function goToBed() {
   if (sleepActiveLog) return;
@@ -6601,13 +6572,6 @@ guardedClick(document.getElementById("copyweek-commit"), async () => {
 
 document.getElementById("cal-copy-week-btn").addEventListener("click", () => {
   openCopyweekPanel(calWeekStart);
-});
-
-// 就寝前パネルからも同じ導線を開けるようにする(ハイブリッド配置、2026-09-02決定)。
-// 対象は「明日を含む週」(明日が週をまたぐ場合はその翌週)。
-document.getElementById("bedtime-copy-week-btn").addEventListener("click", () => {
-  closeBedtimePanel();
-  openCopyweekPanel(mondayOf(addDaysToDate(todayStr(), 1)));
 });
 
 // ---------- event detail panel ----------
