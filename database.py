@@ -486,6 +486,17 @@ def _migrate(conn):
         conn.execute("ALTER TABLE categories ADD COLUMN counts_as_study INTEGER NOT NULL DEFAULT 1")
         conn.execute("UPDATE categories SET counts_as_study = 0 WHERE name IN ('other', 'その他')")
 
+    # 毎日の勉強ToDoは「繰り返し」ではなく、study-tracker-planスキルが毎日1件ずつ単発で作っていたため、
+    # show_on_calendarの初期値(単発=ON)のままだとカレンダーのマスが埋まった(2026-10-02、本番で判明)。
+    # 一度だけ、勉強カテゴリの既存ToDoをOFFにする(以後スキルはOFFで登録する)。済んだ印はsettingsに残す
+    done_key = "migrated_show_on_calendar_study_off"
+    if conn.execute("SELECT 1 FROM settings WHERE key = ?", (done_key,)).fetchone() is None:
+        conn.execute(
+            "UPDATE todos SET show_on_calendar = 0 "
+            "WHERE category IN (SELECT name FROM categories WHERE counts_as_study = 1)"
+        )
+        conn.execute("INSERT INTO settings (key, value) VALUES (?, '1')", (done_key,))
+
     # 犬育成機能を廃止したため、既存環境(ローカルdata.db・本番Turso)に残っているテーブル・設定を掃除する
     conn.execute("DROP TABLE IF EXISTS pet_feedings")
     conn.execute("DROP TABLE IF EXISTS pet_generations")
