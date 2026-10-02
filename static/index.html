@@ -178,6 +178,7 @@
         <button type="button" class="weekday-btn" data-day="fri">Fri</button>
         <button type="button" class="weekday-btn" data-day="sat">Sat</button>
       </div>
+      <label class="checkbox-label"><input type="checkbox" id="todo-show-cal" checked> Show on calendar</label>
       <textarea id="todo-note" rows="3" placeholder="Note (optional)"></textarea>
       <button type="submit">+ Add</button>
     </form>
@@ -239,6 +240,7 @@
         <button type="button" class="weekday-btn" data-day="fri">Fri</button>
         <button type="button" class="weekday-btn" data-day="sat">Sat</button>
       </div>
+      <label class="checkbox-label"><input type="checkbox" id="todo-detail-show-cal" checked> Show on calendar</label>
       <textarea id="todo-detail-note" rows="3" placeholder="Note (optional)"></textarea>
       <button type="submit">Save</button>
     </form>
@@ -570,20 +572,24 @@
 
 
   <section id="tab-calendar" class="tab-panel">
-    <h2>Calendar</h2>
-
+    <!-- 見出し(Calendar)とカードの枠をやめ、マス目を画面いっぱいに広げた(2026-10-02)。
+         上の操作は「月名 / Today / ‹ › / M・W / ＋New event(PCのみ)」の1行にまとめる -->
     <div class="cal-split">
       <div class="cal-board">
-        <div class="cal-view-toggle" id="cal-view-toggle">
-          <button type="button" class="cal-view-btn active" data-view="month">Month</button>
-          <button type="button" class="cal-view-btn" data-view="week">Week</button>
+        <div class="cal-toolbar">
+          <span id="cal-month-label" class="cal-title"></span>
+          <div class="cal-toolbar-actions">
+            <button type="button" id="cal-today-btn" class="cal-today-btn">Today</button>
+            <button type="button" id="cal-prev" class="icon-btn" aria-label="Previous">‹</button>
+            <button type="button" id="cal-next" class="icon-btn" aria-label="Next">›</button>
+            <div class="cal-view-toggle" id="cal-view-toggle">
+              <button type="button" class="cal-view-btn active" data-view="month" aria-label="Month"><span class="cal-view-long">Month</span><span class="cal-view-short">M</span></button>
+              <button type="button" class="cal-view-btn" data-view="week" aria-label="Week"><span class="cal-view-long">Week</span><span class="cal-view-short">W</span></button>
+            </div>
+            <button type="button" id="cal-new-btn" class="cal-new-btn">+ New event</button>
+          </div>
         </div>
         <button type="button" id="cal-copy-week-btn" class="secondary copyweek-trigger-btn hidden">Copy last week's schedule</button>
-        <div class="month-nav">
-          <button type="button" id="cal-prev" class="icon-btn" aria-label="Previous">‹</button>
-          <span id="cal-month-label"></span>
-          <button type="button" id="cal-next" class="icon-btn" aria-label="Next">›</button>
-        </div>
         <div class="cal-weekday-row" id="cal-weekday-row">
           <span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span class="sat">Sat</span><span class="sun">Sun</span>
         </div>
@@ -600,60 +606,98 @@
         </div>
       </div>
 
-      <div class="cal-day-detail">
-        <h3 id="cal-detail-title">Select a date</h3>
+      <!-- 選んだ日の中身。PCは右の列、スマホは日付をタップすると下から出るパネル -->
+      <div id="cal-sheet-backdrop" class="backdrop cal-sheet-backdrop hidden"></div>
+      <div class="cal-day-detail" id="cal-day-detail">
+        <div class="cal-sheet-handle" aria-hidden="true"></div>
+        <div class="cal-detail-head">
+          <span id="cal-detail-title" class="cal-detail-title">Select a date</span>
+          <button type="button" id="cal-detail-add" class="cal-detail-add">+ Add</button>
+        </div>
+        <p id="cal-detail-study" class="cal-detail-study"></p>
+        <h3>Events</h3>
         <ul id="cal-event-list" class="list"></ul>
         <h3>Tasks due</h3>
         <ul id="cal-todo-list" class="list"></ul>
       </div>
     </div>
 
+    <button type="button" id="cal-fab" class="cal-fab" aria-label="Add event or task">
+      <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+    </button>
+
   </section>
 
   <!-- 予定の追加・詳細パネルはToDoタブ横の「今日の予定」からも開くため、カレンダータブの外に置く。
        タブの中にあると、他のタブを表示している間はタブごと非表示になり開けない(2026-09-27) -->
   <div id="event-add-backdrop" class="backdrop hidden"></div>
+  <!-- カレンダーの「＋」から思いついた予定を10秒で入れるためのパネル(2026-10-02)。
+       最初に見せるのは What / Day / Start の3つだけ。終了時刻は開始+1時間を自動で入れ、残りはMore optionsへ。
+       Taskに切り替えると、同じ入力欄からToDo(カレンダーに表示ON)として登録する -->
   <div id="event-add-panel" class="add-panel hidden">
     <div class="panel-header">
-      <h3>New Event</h3>
+      <h3 id="event-add-heading">New event</h3>
       <button type="button" id="event-add-close" class="panel-close" aria-label="Close">×</button>
     </div>
-    <form id="event-form" class="add-form">
-      <input type="text" id="event-title" placeholder="Event title" required>
-      <select id="event-category">
-        <option value="">Category: None</option>
-      </select>
-      <div class="form-row">
-        <input type="date" id="event-date" required>
-      </div>
-      <div class="form-row">
+    <div class="add-kind-toggle" id="add-kind-toggle">
+      <button type="button" class="add-kind-btn active" data-kind="event">Event</button>
+      <button type="button" class="add-kind-btn" data-kind="task">Task</button>
+    </div>
+    <form id="event-form" class="add-form quick-add-form">
+      <label class="field-label" for="event-title">What</label>
+      <input type="text" id="event-title" placeholder="e.g. Call Mio" required autocomplete="off">
+      <span class="field-label">Day</span>
+      <div class="day-chips" id="event-day-chips"></div>
+      <input type="date" id="event-date" class="day-chip-date" required tabindex="-1" aria-hidden="true">
+      <label class="field-label" for="event-start-time" id="event-start-label">Start</label>
+      <div class="start-row">
         <input type="time" id="event-start-time" required>
-        <input type="time" id="event-end-time" required>
+        <span class="meta" id="event-end-hint"></span>
       </div>
-      <select id="event-notify">
-        <option value="">No notification</option>
-        <option value="0">Notify at start time</option>
-        <option value="10">Notify 10 min before</option>
-        <option value="30">Notify 30 min before</option>
-        <option value="60">Notify 1 hr before</option>
-      </select>
-      <div class="due-row">
-        <button type="button" class="quick-date-btn" data-recur-preset="daily">Daily</button>
-        <button type="button" class="quick-date-btn" data-recur-preset="weekdays">Weekdays</button>
-        <button type="button" class="quick-date-btn" data-recur-preset="clear">Clear</button>
-      </div>
-      <div class="weekday-picker" id="event-recurrence-picker">
-        <button type="button" class="weekday-btn" data-day="mon">Mon</button>
-        <button type="button" class="weekday-btn" data-day="tue">Tue</button>
-        <button type="button" class="weekday-btn" data-day="wed">Wed</button>
-        <button type="button" class="weekday-btn" data-day="thu">Thu</button>
-        <button type="button" class="weekday-btn" data-day="fri">Fri</button>
-        <button type="button" class="weekday-btn" data-day="sat">Sat</button>
-        <button type="button" class="weekday-btn" data-day="sun">Sun</button>
-      </div>
-      <input type="date" id="event-recurrence-until" placeholder="Recurrence end date (optional)">
-      <textarea id="event-note" rows="3" placeholder="Note (optional)"></textarea>
-      <button type="submit">+ Add</button>
+      <details class="more-options" id="event-more-options">
+        <summary id="event-more-summary">More options</summary>
+        <div class="more-options-body">
+          <select id="event-category">
+            <option value="">Category: None</option>
+          </select>
+          <div class="event-only">
+            <label class="field-label" for="event-end-time">End</label>
+            <input type="time" id="event-end-time" required>
+            <select id="event-notify">
+              <option value="">No notification</option>
+              <option value="0">Notify at start time</option>
+              <option value="10">Notify 10 min before</option>
+              <option value="30">Notify 30 min before</option>
+              <option value="60">Notify 1 hr before</option>
+            </select>
+            <div class="due-row">
+              <button type="button" class="quick-date-btn" data-recur-preset="daily">Daily</button>
+              <button type="button" class="quick-date-btn" data-recur-preset="weekdays">Weekdays</button>
+              <button type="button" class="quick-date-btn" data-recur-preset="clear">Clear</button>
+            </div>
+            <div class="weekday-picker" id="event-recurrence-picker">
+              <button type="button" class="weekday-btn" data-day="mon">Mon</button>
+              <button type="button" class="weekday-btn" data-day="tue">Tue</button>
+              <button type="button" class="weekday-btn" data-day="wed">Wed</button>
+              <button type="button" class="weekday-btn" data-day="thu">Thu</button>
+              <button type="button" class="weekday-btn" data-day="fri">Fri</button>
+              <button type="button" class="weekday-btn" data-day="sat">Sat</button>
+              <button type="button" class="weekday-btn" data-day="sun">Sun</button>
+            </div>
+            <input type="date" id="event-recurrence-until" placeholder="Recurrence end date (optional)">
+          </div>
+          <div class="task-only">
+            <select id="quick-task-priority">
+              <option value="high">Priority: High</option>
+              <option value="medium" selected>Priority: Medium</option>
+              <option value="low">Priority: Low</option>
+            </select>
+            <label class="checkbox-label"><input type="checkbox" id="quick-task-show-cal" checked> Show on calendar</label>
+          </div>
+          <textarea id="event-note" rows="3" placeholder="Note (optional)"></textarea>
+        </div>
+      </details>
+      <button type="submit" id="event-submit">Save</button>
     </form>
   </div>
 
@@ -662,6 +706,10 @@
     <div class="panel-header">
       <h3>Edit Event</h3>
       <button type="button" id="event-detail-close" class="panel-close" aria-label="Close">×</button>
+    </div>
+    <!-- 削除はカレンダーの一覧の×から、ここへ移した(タイトルのすぐ横で押し間違えやすかったため、2026-10-02) -->
+    <div class="todo-detail-actions">
+      <button type="button" id="event-detail-delete" class="danger-outline">Delete</button>
     </div>
     <form id="event-detail-form" class="add-form">
       <input type="text" id="event-detail-title" placeholder="Event title" required>

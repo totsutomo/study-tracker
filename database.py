@@ -341,6 +341,13 @@ def _migrate(conn):
     # 'overdue' = 期限切れで自動スキップされた(=やり損ねた)もの。NULLは自分で「やらない」と決めたスキップ
     if "skip_reason" not in cols:
         conn.execute("ALTER TABLE todos ADD COLUMN skip_reason TEXT")
+    # 月カレンダーのマス目にこのToDoを出すか(2026-10-02)。単発=1・繰り返し=0が初期値
+    # (繰り返しの勉強ToDoは完了済みの行が毎日残るので、出すと過去の日が埋まる)。既存行もこの規則で埋める
+    if "show_on_calendar" not in cols:
+        conn.execute("ALTER TABLE todos ADD COLUMN show_on_calendar INTEGER")
+        conn.execute(
+            "UPDATE todos SET show_on_calendar = CASE WHEN COALESCE(recurrence, '') = '' THEN 1 ELSE 0 END"
+        )
     conn.execute("UPDATE todos SET recurrence = 'mon,tue,wed,thu,fri,sat,sun' WHERE recurrence = 'daily'")
     conn.execute("UPDATE todos SET recurrence = 'mon,tue,wed,thu,fri' WHERE recurrence = 'weekdays'")
 

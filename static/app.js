@@ -13,10 +13,10 @@ function switchTab(tabId, { fromHistory = false } = {}) {
   if (typeof timerSubject !== "undefined" && timerSubject && !overlayMinimized) {
     minimizeFocusOverlay();
   }
-  // タブが非表示(display:none)の間はグリッドの位置が測れないため、Calendarタブが
-  // 表示された瞬間に高さを再計算する(updateCalGridHeightはapp.js後方で定義、
-  // switchTab自体はクリック時にしか呼ばれないのでhoisting上の問題はない)
-  if (tabId === "tab-calendar" && typeof updateCalGridHeight === "function") updateCalGridHeight();
+  // タブが非表示(display:none)の間はグリッドの位置が測れず、マスに入る帯の本数も決められないため、
+  // Calendarタブが表示された瞬間に描き直す(onCalendarTabShownはapp.js後方で定義)
+  if (tabId === "tab-calendar") onCalendarTabShown();
+  if (tabId !== "tab-calendar" && typeof closeCalSheet === "function") closeCalSheet();
   if (tabId === "tab-todo" && typeof loadTodayPanel === "function") loadTodayPanel();
 }
 
@@ -846,8 +846,7 @@ function renderTodaySchedule(events) {
     btn.addEventListener("click", () => openEventDetail(events[Number(btn.dataset.i)]));
   });
   el.querySelector("#today-add-event").addEventListener("click", () => {
-    openEventAddPanel();
-    document.getElementById("event-date").value = todayStr();
+    openEventAddPanel({ date: todayStr() });
   });
 }
 
@@ -877,6 +876,8 @@ const todoAddBackdrop = document.getElementById("todo-add-backdrop");
 function openTodoAddPanel() {
   todoAddPanel.classList.remove("hidden");
   todoAddBackdrop.classList.remove("hidden");
+  showCalTouched["todo-show-cal"] = false;
+  syncShowCalDefault("todo-show-cal", selectedRecurrenceDays.size > 0);
   document.getElementById("todo-title").focus();
 }
 
@@ -903,16 +904,38 @@ document.querySelectorAll("[data-quick]").forEach((btn) => {
   });
 });
 
+// ---------- show on calendar (2026-10-02) ----------
+// 月カレンダーのマス目にそのToDoを出すか。初期値は「単発ならON・繰り返しならOFF」で、
+// 手で切り替えるまでは繰り返しの設定に合わせて自動で変わる(毎回判断する手間を省くため)。
+// 値の無い古いキャッシュ(列の追加前)も同じ規則で扱う
+function showsOnCalendar(t) {
+  return t.show_on_calendar == null ? !t.recurrence : !!t.show_on_calendar;
+}
+
+const showCalTouched = { "todo-show-cal": false, "todo-detail-show-cal": false };
+
+function syncShowCalDefault(id, hasRecurrence) {
+  if (!showCalTouched[id]) document.getElementById(id).checked = !hasRecurrence;
+}
+
+Object.keys(showCalTouched).forEach((id) => {
+  document.getElementById(id).addEventListener("change", () => {
+    showCalTouched[id] = true;
+  });
+});
+
 // ---------- recurrence weekday picker ----------
 
 const selectedRecurrenceDays = new Set();
 
+// 以前は".weekday-btn"を画面全体から拾っていて、予定やToDo詳細の曜日ボタンの見た目まで書き換えていた
 function setRecurrenceDays(days) {
   selectedRecurrenceDays.clear();
   days.forEach((d) => selectedRecurrenceDays.add(d));
-  document.querySelectorAll(".weekday-btn").forEach((btn) => {
+  document.querySelectorAll("#todo-recurrence-picker .weekday-btn").forEach((btn) => {
     btn.classList.toggle("active", selectedRecurrenceDays.has(btn.dataset.day));
   });
+  syncShowCalDefault("todo-show-cal", selectedRecurrenceDays.size > 0);
 }
 
 document.querySelectorAll("#todo-recurrence-picker .weekday-btn").forEach((btn) => {
@@ -924,6 +947,7 @@ document.querySelectorAll("#todo-recurrence-picker .weekday-btn").forEach((btn) 
       selectedRecurrenceDays.add(day);
     }
     btn.classList.toggle("active", selectedRecurrenceDays.has(day));
+    syncShowCalDefault("todo-show-cal", selectedRecurrenceDays.size > 0);
   });
 });
 
@@ -944,6 +968,7 @@ function setDetailRecurrenceDays(days) {
   document.querySelectorAll("#todo-detail-recurrence-picker .weekday-btn").forEach((btn) => {
     btn.classList.toggle("active", selectedDetailRecurrenceDays.has(btn.dataset.day));
   });
+  syncShowCalDefault("todo-detail-show-cal", selectedDetailRecurrenceDays.size > 0);
 }
 
 document.querySelectorAll("#todo-detail-recurrence-picker .weekday-btn").forEach((btn) => {
@@ -955,6 +980,7 @@ document.querySelectorAll("#todo-detail-recurrence-picker .weekday-btn").forEach
       selectedDetailRecurrenceDays.add(day);
     }
     btn.classList.toggle("active", selectedDetailRecurrenceDays.has(day));
+    syncShowCalDefault("todo-detail-show-cal", selectedDetailRecurrenceDays.size > 0);
   });
 });
 
@@ -1210,8 +1236,9 @@ guardedSubmit(document.getElementById("todo-form"), async (e) => {
   const recurrence =
     selectedRecurrenceDays.size > 0 ? WEEKDAY_ORDER.filter((d) => selectedRecurrenceDays.has(d)).join(",") : null;
   const note = document.getElementById("todo-note").value.trim() || null;
+  const show_on_calendar = document.getElementById("todo-show-cal").checked;
   if (!title) return;
-  const payload = { title, category, priority, due_date, due_time, recurrence, notify_offset_minutes, note };
+  const payload = { title, category, priority, due_date, due_time, recurrence, notify_offset_minutes, note, show_on_calendar };
   // 保存を待たずフォームを閉じる(「受け付けた」感を即座に出す)。保存自体はこの後裏で進む
   document.getElementById("todo-title").value = "";
   document.getElementById("todo-category").value = ""; // 毎回「カテゴリなし」に戻す(前回の科目を引き継がない)
@@ -1222,6 +1249,7 @@ guardedSubmit(document.getElementById("todo-form"), async (e) => {
   document.getElementById("todo-notify").style.display = "none";
   document.getElementById("todo-note").value = "";
   document.getElementById("todo-time-toggle").textContent = "+ Add time";
+  showCalTouched["todo-show-cal"] = false;
   setRecurrenceDays([]);
   closeTodoAddPanel();
   // 保存と一覧の取り直しを待たず、仮の行として先に一覧へ出す(2026-09-29)
@@ -1234,6 +1262,7 @@ guardedSubmit(document.getElementById("todo-form"), async (e) => {
   try {
     await api("/api/todos", { method: "POST", body: JSON.stringify(payload) });
     loadTodos();
+    if (due_date) refreshCalTodos();
   } catch (err) {
     allTodos = allTodos.filter((t) => t !== tempTodo);
     renderTodos();
@@ -1267,7 +1296,10 @@ function openTodoDetail(t) {
     timeInput.value = "";
     notifySelect.value = "";
   }
+  showCalTouched["todo-detail-show-cal"] = true; // 下の曜日の反映で、保存済みの値を上書きしないように
   setDetailRecurrenceDays(t.recurrence ? t.recurrence.split(",") : []);
+  document.getElementById("todo-detail-show-cal").checked = showsOnCalendar(t);
+  showCalTouched["todo-detail-show-cal"] = false;
   document.getElementById("todo-detail-note").value = t.note || "";
   document.getElementById("todo-detail-status").textContent = "";
   document.getElementById("todo-detail-reschedule").classList.toggle("hidden", !canReschedule(t));
@@ -1287,7 +1319,7 @@ function closeTodoDetail() {
 document.getElementById("todo-detail-close").addEventListener("click", closeTodoDetail);
 
 function currentDetailTodo() {
-  return allTodos.find((x) => x.id === currentDetailTodoId);
+  return allTodos.find((x) => x.id === currentDetailTodoId) || calTodosCache.find((x) => x.id === currentDetailTodoId);
 }
 
 document.querySelectorAll("[data-detail-reschedule]").forEach((btn) => {
@@ -1328,8 +1360,9 @@ guardedSubmit(document.getElementById("todo-detail-form"), async (e) => {
       ? WEEKDAY_ORDER.filter((d) => selectedDetailRecurrenceDays.has(d)).join(",")
       : null;
   const note = document.getElementById("todo-detail-note").value.trim() || null;
+  const show_on_calendar = document.getElementById("todo-detail-show-cal").checked;
   if (!title) return;
-  const payload = { title, category, priority, due_date, due_time, recurrence, notify_offset_minutes, note };
+  const payload = { title, category, priority, due_date, due_time, recurrence, notify_offset_minutes, note, show_on_calendar };
   const todoId = currentDetailTodoId;
   const t = allTodos.find((x) => x.id === todoId);
   const prev = t ? { ...t } : null;
@@ -4964,9 +4997,8 @@ async function refreshIfDayChanged() {
 }
 setInterval(refreshIfDayChanged, 60000);
 let calTodosCache = [];
-let calStudyDaysCache = new Set();
-let calActivationDaysCache = new Set();
-let calMinAchievedDaysCache = new Set();
+// 日付 → { minutes, min_reached }。マス目の✓と日付パネルの「Studied N min」に使う
+let calStudyTotalsCache = new Map();
 // 月("YYYY-M")ごとの予定・記録マークの手持ちデータ。上のcalXxxCache(描画用)は、今表示している
 // 期間に必要な月の分だけをここから組み立て直したもの(rebuildCalCaches)。以前は描画用キャッシュが
 // 「最後に取った月」の分しか持たず、週表示が月をまたぐ(例: 9/28〜10/4)と取得完了まで画面が
@@ -5012,49 +5044,55 @@ const CAL_MONTH_EN = [
   "July", "August", "September", "October", "November", "December",
 ];
 
+const CAL_MONTH_SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
 function formatCalDetailTitle(dateStr) {
   const d = new Date(dateStr + "T00:00:00");
-  const label = `${CAL_MONTH_EN[d.getMonth()]} ${d.getDate()} (${CAL_WEEKDAY_EN[d.getDay()]})`;
+  const label = `${CAL_WEEKDAY_EN[d.getDay()]}, ${CAL_MONTH_SHORT[d.getMonth()]} ${d.getDate()}`;
   return dateStr === todayStr() ? `${label} · Today` : label;
 }
 
+// 2026-10-02に4本→2本にした(マス目の勉強・サボりの点をやめ、日ごとの勉強時間を1本で取る)
 function calMonthPaths(key) {
   const [y, m] = key.split("-").map(Number);
-  return [
-    `/api/events?year=${y}&month=${m}`,
-    `/api/study-logs/days?year=${y}&month=${m}`,
-    `/api/activation-logs/days?year=${y}&month=${m}`,
-    `/api/study-logs/minimum-achieved-days?year=${y}&month=${m}`,
-  ];
+  return [`/api/events?year=${y}&month=${m}`, `/api/study-logs/day-totals?year=${y}&month=${m}`];
 }
 
 // 端末のIndexedDBに前回分が残っていれば、まだ手持ちが無い月にだけ入れる(サーバーの結果は上書きしない)
 async function hydrateCalMonthFromCache(key) {
   if (calMonthData.has(key)) return false;
-  const [events, studyDays, activationDays, minAchievedDays] = await Promise.all(calMonthPaths(key).map(cacheGet));
+  const [events, studyTotals] = await Promise.all(calMonthPaths(key).map(cacheGet));
   if (events === undefined || calMonthData.has(key)) return false;
-  calMonthData.set(key, {
-    events,
-    studyDays: studyDays || [],
-    activationDays: activationDays || [],
-    minAchievedDays: minAchievedDays || [],
-  });
+  calMonthData.set(key, { events, studyTotals: studyTotals || [] });
   return true;
 }
 
 async function fetchCalMonth(key) {
   const seq = (calMonthFetchSeq.get(key) || 0) + 1;
   calMonthFetchSeq.set(key, seq);
-  const [events, studyDays, activationDays, minAchievedDays] = await Promise.all(calMonthPaths(key).map((p) => api(p)));
+  const [events, studyTotals] = await Promise.all(calMonthPaths(key).map((p) => api(p)));
   if (calMonthFetchSeq.get(key) !== seq) return;
-  calMonthData.set(key, { events, studyDays, activationDays, minAchievedDays });
+  calMonthData.set(key, { events, studyTotals });
 }
 
+// 期限つきのToDoは完了・スキップ済みも含めて全部持つ(日付パネルにはその日のものを全部出す)。
+// マス目に出すのは「Show on calendar」がONで、スキップしていないものだけ(calGridTodos)
 async function fetchCalTodos() {
   const seq = ++calTodosFetchSeq;
   const todos = await api("/api/todos");
   if (seq !== calTodosFetchSeq) return;
   calTodosCache = todos.filter((t) => t.due_date);
+}
+
+// ToDoを足した・完了した後に、カレンダーのToDoだけ取り直して描き直す(繰り返しの次の回もここで載る)
+function refreshCalTodos() {
+  fetchCalTodos()
+    .then(() => renderCalendarView())
+    .catch((err) => console.error("calendar todos refresh failed:", err));
+}
+
+function calGridTodos(dateStr) {
+  return calTodosCache.filter((t) => t.due_date === dateStr && !t.skipped && showsOnCalendar(t));
 }
 
 // ×で消した直後〜削除が確定するまで(Undoの5秒+通信)の予定。この間に別の理由で再描画されても
@@ -5064,9 +5102,7 @@ const pendingEventDeleteIds = new Set();
 function rebuildCalCaches() {
   const parts = [...neededCalMonthKeys()].map((k) => calMonthData.get(k)).filter(Boolean);
   calEventsCache = parts.flatMap((p) => p.events).filter((e) => !pendingEventDeleteIds.has(e.id));
-  calStudyDaysCache = new Set(parts.flatMap((p) => p.studyDays));
-  calActivationDaysCache = new Set(parts.flatMap((p) => p.activationDays));
-  calMinAchievedDaysCache = new Set(parts.flatMap((p) => p.minAchievedDays));
+  calStudyTotalsCache = new Map(parts.flatMap((p) => p.studyTotals || []).map((r) => [r.d, r]));
 }
 
 // 予定タブは起動時にアクティブでないため後回しにされがちで、実際に開いたときに
@@ -5183,38 +5219,62 @@ function scheduleCalPrefetch() {
   }, 1500);
 }
 
-// セル幅に余裕のあるPC(md+)では、1件+「+N件」に丸めず何件かそのまま表示できる。
-// styleのbreakpoint(768px)と合わせておく。
+// PC(md+)かどうか。styleのbreakpoint(768px)と合わせておく
 const CAL_EVENT_MEDIA_QUERY = window.matchMedia("(min-width: 768px)");
-function calEventDisplayCap() {
-  return CAL_EVENT_MEDIA_QUERY.matches ? 3 : 1;
-}
 // ウィンドウ幅がbreakpointをまたいだ場合に再描画(タブレット回転・ウィンドウリサイズ対応)
 CAL_EVENT_MEDIA_QUERY.addEventListener("change", () => {
-  if (document.getElementById("tab-calendar").classList.contains("active")) renderCalGrid();
+  if (!CAL_EVENT_MEDIA_QUERY.matches) return;
+  closeCalSheet(); // PCでは日付パネルは右の列に常に出ている
 });
 
-// PC(md+)では月グリッド(5〜6週分)がビューポートより縦に長くなり、下端を見るのに
-// スクロールが必要になる問題への対応(2026-08-29)。header/バナー等の高さは可変で
-// 固定値を引き算できないため、実際にグリッドが始まる位置を都度測ってビューポート内に
-// 収まる高さを算出し、.cal-gridに直接セットする(CSS側はgrid-auto-rows:1frで行に均等分配)。
+// 1マスに並べる帯の大きさ(style.cssの.cal-band・.cal-day-headと合わせる)。スマホは文字だけ、PCは時刻つき
+function calBandMetrics() {
+  return CAL_EVENT_MEDIA_QUERY.matches ? { head: 30, band: 20 } : { head: 22, band: 15 };
+}
+const CAL_BAND_MAX = 6;
+
+// 月グリッドを、上の操作行の下から画面の下端(スマホは下のタブバー・進行中の帯の上)までぴったり広げる。
+// header/バナー等の高さは可変で固定値を引き算できないため、実際にグリッドが始まる位置を都度測る
+// (CSS側はgrid-auto-rows:1frで行に均等分配)。2026-08-29はPCだけだったが、2026-10-02にスマホにも広げた。
 function updateCalGridHeight() {
   const grid = document.getElementById("cal-grid");
-  if (!grid) return;
-  if (!CAL_EVENT_MEDIA_QUERY.matches) {
-    grid.style.height = ""; // モバイルは従来通りaspect-ratio任せ(この関数は何もしない)
-    return;
-  }
+  if (!grid) return 0;
   const top = grid.getBoundingClientRect().top;
-  if (top <= 0) return; // タブが非表示(display:none)でまだ測れない場合はスキップ
-  // 40pxは.cal-boardの下padding(10px)+margin(18px)+少し余裕、を差し引いてぴったり収める
-  const available = window.innerHeight - top - 40;
-  grid.style.height = `${Math.max(available, 420)}px`;
+  if (top <= 0) return 0; // タブが非表示(display:none)でまだ測れない場合はスキップ
+  const tabbarH = document.getElementById("tabbar").getBoundingClientRect().height;
+  const dockH = document.getElementById("now-dock").getBoundingClientRect().height;
+  const available = window.innerHeight - top - tabbarH - dockH;
+  const height = Math.max(Math.floor(available), CAL_EVENT_MEDIA_QUERY.matches ? 420 : 320);
+  grid.style.height = `${height}px`;
+  return height;
 }
 
+let calResizeTimer = null;
 window.addEventListener("resize", () => {
-  if (document.getElementById("tab-calendar").classList.contains("active")) updateCalGridHeight();
+  clearTimeout(calResizeTimer);
+  calResizeTimer = setTimeout(() => {
+    if (document.getElementById("tab-calendar").classList.contains("active") && calViewMode === "month") renderCalGrid();
+  }, 100);
 });
+
+// マスに並べる中身(予定は開始時刻順→ToDo)。帯がマスに入りきらない分は「+N」にまとめる
+function calCellBands(dateStr, capacity, withTime) {
+  const items = [
+    ...calEventsCache
+      .filter((e) => e.occurrence_date === dateStr)
+      .sort((a, b) => (a.start_time || "").localeCompare(b.start_time || ""))
+      .map((e) => {
+        const time = withTime && e.start_time ? `<b>${e.start_time}</b> ` : "";
+        return `<span class="cal-band" style="--c:${colorFor(e.category || "")}">${time}${escapeHtml(e.title)}</span>`;
+      }),
+    ...calGridTodos(dateStr).map(
+      (t) => `<span class="cal-band cal-band-todo${t.done ? " done" : ""}"><i class="cal-band-box"></i>${escapeHtml(t.title)}</span>`,
+    ),
+  ];
+  if (items.length <= capacity) return items.join("");
+  const shown = Math.max(capacity - 1, 0);
+  return items.slice(0, shown).join("") + `<span class="cal-band-more">+${items.length - shown}</span>`;
+}
 
 function renderCalGrid() {
   const grid = document.getElementById("cal-grid");
@@ -5235,39 +5295,23 @@ function renderCalGrid() {
     cells.push({ day: nextDay++, otherMonth: true, date: null });
   }
 
+  // マスの高さから、帯が何本入るかを決める(最大6本。2026-10-02、参考アプリに合わせて文字を小さくし本数を増やした)
+  const gridHeight = updateCalGridHeight();
+  const { head, band } = calBandMetrics();
+  const cellHeight = gridHeight ? gridHeight / (cells.length / 7) : head + band * 3;
+  const capacity = Math.min(CAL_BAND_MAX, Math.max(1, Math.floor((cellHeight - head) / band)));
+  const withTime = CAL_EVENT_MEDIA_QUERY.matches;
   const today = todayStr();
 
+  // マスの中身は色付きの帯(予定)と点線の帯(Show on calendarがONのToDo)。以前の赤・緑・灰の点は
+  // 意味が画面のどこにも書かれていなかったのでやめ、最低ライン達成の✓だけ日付の横に残した(2026-10-02)
   grid.innerHTML = cells
     .map((c, i) => {
       if (c.otherMonth) {
-        return `<div class="cal-day other-month"><span class="cal-day-num">${c.day}</span></div>`;
+        return `<div class="cal-day other-month"><div class="cal-day-head"><span class="cal-day-num">${c.day}</span></div></div>`;
       }
-      const dayEvents = calEventsCache.filter((e) => e.occurrence_date === c.date);
-      const dayTodos = calTodosCache.filter((t) => t.due_date === c.date);
-      // 予定(events)は「何日に何があるか」がドットだと分からないという指摘を受け、
-      // 名前をそのまま短縮テキストで表示する。ToDoの期限は件数が多く/カレンダー上では
-      // ToDo画面ほど重要でないため、従来通りドットのまま(2026-08-16)。
-      // セル幅に余裕のあるPC(md+)では1件+「+N件」に丸めず最大3件まで表示する(2026-08-29)。
-      // スマホ幅では1件+「英語シ… +9 more」が読めなかったため、2件以上ある日は件数だけにする
-      // (中身は日付をタップした下の一覧で見る)。1件だけの日は2026-08-16の方針通り名前を出す(2026-09-27)。
-      const eventCap = calEventDisplayCap();
-      let eventMark = "";
-      if (dayEvents.length > 1 && eventCap === 1) {
-        eventMark = `<div class="cal-events"><span class="cal-event-count"><i style="background:${colorFor(dayEvents[0].category || "")}"></i>${dayEvents.length}</span></div>`;
-      } else if (dayEvents.length > 0) {
-        const shown = dayEvents.slice(0, eventCap);
-        const restCount = dayEvents.length - shown.length;
-        eventMark = `<div class="cal-events">${shown
-          .map(
-            (e) =>
-              `<span class="cal-event-label" style="color:${colorFor(e.category || "")}">${escapeHtml(e.title)}</span>`,
-          )
-          .join("")}${restCount > 0 ? `<span class="cal-event-more">+${restCount} more</span>` : ""}</div>`;
-      }
-      const todoMark = dayTodos.length ? `<span class="cal-todo-dot"></span>` : "";
-      const studyMark = calStudyDaysCache.has(c.date) ? `<span class="cal-log-dot"></span>` : "";
-      const activationMark = calActivationDaysCache.has(c.date) ? `<span class="cal-activation-dot"></span>` : "";
-      const minAchievedMark = calMinAchievedDaysCache.has(c.date) ? `<span class="cal-min-mark">${ICONS.check}</span>` : "";
+      const minReached = calStudyTotalsCache.get(c.date)?.min_reached;
+      const minAchievedMark = minReached ? `<span class="cal-min-mark" title="Minimum reached">${ICONS.check}</span>` : "";
       const classes = ["cal-day"];
       const weekdayCol = i % 7;
       if (weekdayCol === 5) classes.push("sat");
@@ -5276,24 +5320,65 @@ function renderCalGrid() {
       if (c.date === selectedCalDate) classes.push("selected");
       return `
         <div class="${classes.join(" ")}" data-date="${c.date}">
-          <span class="cal-day-num">${c.day}</span>
-          ${eventMark}
-          <div class="cal-day-marks">${todoMark}${studyMark}${activationMark}${minAchievedMark}</div>
+          <div class="cal-day-head"><span class="cal-day-num">${c.day}</span>${minAchievedMark}</div>
+          <div class="cal-bands">${calCellBands(c.date, capacity, withTime)}</div>
         </div>
       `;
     })
     .join("");
 
   grid.querySelectorAll(".cal-day[data-date]").forEach((el) => {
-    el.addEventListener("click", () => {
-      selectedCalDate = el.dataset.date;
-      renderCalGrid();
-      renderCalDayDetail();
-    });
+    el.addEventListener("click", () => selectCalDate(el.dataset.date));
   });
-
-  updateCalGridHeight();
 }
+
+function onCalendarTabShown() {
+  try {
+    if (calViewMode === "month") renderCalGrid();
+  } catch (err) {
+    // 起動処理の途中(カレンダーの状態を作る前)に呼ばれた場合。後のloadCalendarで描かれる
+  }
+}
+
+// 日付を選ぶ。スマホでは下から日付パネルを出す(PCは右の列に常に出ている)
+function selectCalDate(dateStr) {
+  selectedCalDate = dateStr;
+  if (calViewMode === "week") renderWeekTimeGrid();
+  else renderCalGrid();
+  renderCalDayDetail();
+  openCalSheet();
+}
+
+function openCalSheet() {
+  if (CAL_EVENT_MEDIA_QUERY.matches) return;
+  document.getElementById("cal-day-detail").classList.add("open");
+  document.getElementById("cal-sheet-backdrop").classList.remove("hidden");
+}
+
+function closeCalSheet() {
+  document.getElementById("cal-day-detail").classList.remove("open");
+  document.getElementById("cal-sheet-backdrop").classList.add("hidden");
+}
+
+function isCalSheetOpen() {
+  return document.getElementById("cal-day-detail").classList.contains("open");
+}
+
+document.getElementById("cal-sheet-backdrop").addEventListener("click", closeCalSheet);
+
+// 下に引っぱって閉じる(つまみ・見出しのあたりから)
+(() => {
+  const sheet = document.getElementById("cal-day-detail");
+  let startY = null;
+  sheet.addEventListener("touchstart", (e) => {
+    startY = sheet.scrollTop <= 0 && e.touches.length === 1 ? e.touches[0].clientY : null;
+  }, { passive: true });
+  sheet.addEventListener("touchend", (e) => {
+    if (startY === null) return;
+    if (e.changedTouches[0].clientY - startY > 60) closeCalSheet();
+    startY = null;
+  }, { passive: true });
+})();
 
 function layoutDayEvents(events) {
   const sorted = [...events].sort((a, b) => timeToMinutes(a.start_time) - timeToMinutes(b.start_time));
@@ -5348,11 +5433,7 @@ function renderWeekTimeGrid() {
       .join("");
 
   header.querySelectorAll(".cal-week-daycol").forEach((el) => {
-    el.addEventListener("click", () => {
-      selectedCalDate = el.dataset.date;
-      renderWeekTimeGrid();
-      renderCalDayDetail();
-    });
+    el.addEventListener("click", () => selectCalDate(el.dataset.date));
   });
 
   axis.innerHTML = Array.from({ length: 24 }, (_, h) => `<span class="cal-time-slot" style="top:${h * CAL_HOUR_HEIGHT}px">${pad2(h)}:00</span>`).join("");
@@ -5415,72 +5496,63 @@ function renderWeekTimeGrid() {
 
 function renderCalDayDetail() {
   const title = document.getElementById("cal-detail-title");
+  const studyLine = document.getElementById("cal-detail-study");
   const eventList = document.getElementById("cal-event-list");
   const todoList = document.getElementById("cal-todo-list");
   if (!selectedCalDate) {
     title.textContent = "Select a date";
+    studyLine.innerHTML = "";
     eventList.innerHTML = "";
     todoList.innerHTML = "";
     return;
   }
   title.textContent = formatCalDetailTitle(selectedCalDate);
 
+  // 勉強の達成状況(以前はマス目の緑の点・✓で、意味がどこにも書かれていなかった)
+  const study = calStudyTotalsCache.get(selectedCalDate);
+  if (study) {
+    studyLine.innerHTML = `${study.min_reached ? `<span class="cal-detail-min">${ICONS.check} Minimum reached</span> · ` : ""}Studied ${study.minutes} min`;
+  } else {
+    studyLine.textContent = selectedCalDate <= todayStr() ? "No study logged" : "";
+  }
+
   const dayEvents = calEventsCache
     .filter((e) => e.occurrence_date === selectedCalDate)
     .sort((a, b) => a.start_time.localeCompare(b.start_time));
   eventList.innerHTML = "";
   if (dayEvents.length === 0) {
-    eventList.innerHTML = "<li>No events</li>";
+    eventList.innerHTML = `<li class="cal-empty">No events</li>`;
   }
+  // 削除の×はここから外し、予定を開いた中(Delete)に移した。タイトルのすぐ横にあって押し間違えやすかったため(2026-10-02)
   dayEvents.forEach((ev) => {
     const li = document.createElement("li");
+    li.className = "cal-event-row clickable";
     const noteMark = ev.note ? ` ${ICONS.note}` : "";
     li.innerHTML = `
-      <span class="log-icon" style="background:${colorFor(ev.category || "")}"></span>
-      <span class="log-info">
-        <span class="log-subject">${escapeHtml(ev.title)}${noteMark}</span>
-        <span class="log-time">${ev.start_time}〜${ev.end_time}${ev.recurrence ? ` ${ICONS.repeat}` : ""}</span>
-      </span>
-      ${ev.id == null ? "" : `<button class="delete-btn" title="Delete">×</button>`}
+      <span class="cal-event-row-time">${ev.start_time}</span>
+      <span class="cal-event-row-bar" style="background:${colorFor(ev.category || "")}"></span>
+      <span class="cal-event-row-title">${escapeHtml(ev.title)}${ev.recurrence ? ` ${ICONS.repeat}` : ""}${noteMark}</span>
+      <span class="cal-event-row-chevron" aria-hidden="true">›</span>
     `;
-    li.querySelector(".delete-btn")?.addEventListener("click", async (e) => {
-      e.stopPropagation();
-      if (ev.recurrence && !confirm("This is a recurring event. Delete the entire series?")) return;
-      // 以前はパネルの行を消すだけで、月グリッドには残り、Undo待ちの間に再描画されると行も復活していた
-      undoableDelete(`Deleted "${ev.title}"`, {
-        apply: () => {
-          pendingEventDeleteIds.add(ev.id);
-          renderCalendarView();
-        },
-        revert: () => {
-          pendingEventDeleteIds.delete(ev.id);
-          loadCalendar();
-        },
-        commit: async () => {
-          await api(`/api/events/${ev.id}`, { method: "DELETE" });
-          await loadCalendar().catch((err) => console.error("calendar reload failed:", err)); // 削除自体は成功しているので「失敗」扱いにしない
-          pendingEventDeleteIds.delete(ev.id);
-          renderCalendarView();
-        },
-      });
-    });
-    li.classList.add("clickable");
     li.addEventListener("click", () => openEventDetail(ev));
     eventList.appendChild(li);
   });
 
+  // その日が期限のToDoは、Show on calendarの設定に関係なく全部出す
   const dayTodos = calTodosCache.filter((t) => t.due_date === selectedCalDate);
   todoList.innerHTML = "";
   if (dayTodos.length === 0) {
-    todoList.innerHTML = "<li>No tasks due</li>";
+    todoList.innerHTML = `<li class="cal-empty">No tasks due</li>`;
   }
   dayTodos.forEach((t) => {
     const li = document.createElement("li");
+    li.className = "cal-todo-row clickable";
     if (t.done) li.classList.add("done");
+    if (t.skipped) li.classList.add("skipped");
     li.innerHTML = `
-      <input type="checkbox" ${t.done ? "checked" : ""}>
-      <span>${escapeHtml(t.title)}</span>
-      <span class="meta">${t.due_time || ""}</span>
+      <input type="checkbox" ${t.done ? "checked" : ""} ${t.id == null ? "disabled" : ""}>
+      <span class="cal-todo-title">${escapeHtml(t.title)}</span>
+      <span class="meta">${t.skipped ? "Skipped" : t.due_time || ""}</span>
     `;
     li.querySelector("input").addEventListener("click", async (e) => {
       e.stopPropagation();
@@ -5489,22 +5561,36 @@ function renderCalDayDetail() {
       t.done = t.done ? 0 : 1;
       li.classList.toggle("done", !!t.done);
       checkbox.checked = !!t.done;
+      renderCalGrid();
       try {
         await api(`/api/todos/${t.id}/toggle`, { method: "POST" });
         loadTodos();
         loadTodoStats();
+        refreshCalTodos();
       } catch (err) {
         t.done = prevDone;
         li.classList.toggle("done", !!t.done);
         checkbox.checked = !!t.done;
+        renderCalGrid();
         showToast("保存に失敗しました。もう一度お試しください");
       }
     });
-    li.classList.add("clickable");
-    li.addEventListener("click", () => openTodoDetail(t));
+    li.addEventListener("click", () => {
+      if (t.id != null) openTodoDetail(t);
+    });
     todoList.appendChild(li);
   });
 }
+
+document.getElementById("cal-detail-add").addEventListener("click", () => {
+  openEventAddPanel({ date: selectedCalDate || todayStr() });
+});
+document.getElementById("cal-fab").addEventListener("click", () => {
+  openEventAddPanel({ date: selectedCalDate || todayStr() });
+});
+document.getElementById("cal-new-btn").addEventListener("click", () => {
+  openEventAddPanel({ date: selectedCalDate || todayStr() });
+});
 
 // 月/週を移動した先に「今日」が含まれていればそれを選択、含まれなければ
 // 表示範囲の先頭日を選択する(前後に移動しても詳細欄が空にならないように)。
@@ -5547,6 +5633,15 @@ function calGoNext() {
 
 document.getElementById("cal-prev").addEventListener("click", calGoPrev);
 document.getElementById("cal-next").addEventListener("click", calGoNext);
+document.getElementById("cal-today-btn").addEventListener("click", () => {
+  const today = todayStr();
+  const d = new Date(today + "T00:00:00");
+  calYear = d.getFullYear();
+  calMonth = d.getMonth() + 1;
+  calWeekStart = mondayOf(today);
+  selectedCalDate = today;
+  loadCalendar({ refreshTodayPanel: false });
+});
 
 // スワイプでの月/週送り
 (() => {
@@ -5610,16 +5705,122 @@ document.querySelectorAll("#cal-view-toggle .cal-view-btn").forEach((btn) => {
 const eventAddPanel = document.getElementById("event-add-panel");
 const eventAddBackdrop = document.getElementById("event-add-backdrop");
 
-function openEventAddPanel() {
+// 2026-10-02: 最初に見せるのは What / Day / Start の3つだけ。終了時刻は開始+1時間を自動で入れ、
+// 手で変えたらそれ以降は追従させない。Taskに切り替えると同じ欄からToDo(Show on calendar=ON)を作る
+let addKind = "event";
+let eventEndTouched = false;
+
+function openEventAddPanel({ date = null, kind = "event" } = {}) {
+  const form = document.getElementById("event-form");
+  form.reset();
+  setEventRecurrenceDays([]);
+  document.getElementById("event-more-options").open = false;
+  eventEndTouched = false;
+  document.getElementById("event-date").value = date || selectedCalDate || todayStr();
+  setAddKind(kind);
   eventAddPanel.classList.remove("hidden");
   eventAddBackdrop.classList.remove("hidden");
-  document.getElementById("event-date").value = selectedCalDate || todayStr();
   document.getElementById("event-title").focus();
 }
+
+function setAddKind(kind) {
+  addKind = kind;
+  const isTask = kind === "task";
+  document.querySelectorAll("#add-kind-toggle .add-kind-btn").forEach((b) => b.classList.toggle("active", b.dataset.kind === kind));
+  eventAddPanel.classList.toggle("is-task", isTask);
+  document.getElementById("event-add-heading").textContent = isTask ? "New task" : "New event";
+  document.getElementById("event-start-label").textContent = isTask ? "Time (optional)" : "Start";
+  document.getElementById("event-more-summary").textContent = isTask
+    ? "More options — category · priority · show on calendar · note"
+    : "More options — category · end time · notify · repeat · note";
+  const start = document.getElementById("event-start-time");
+  start.required = !isTask;
+  document.getElementById("event-end-time").required = !isTask;
+  if (isTask) {
+    start.value = "";
+    document.getElementById("quick-task-show-cal").checked = true; // カレンダーから作ったTaskは自動でON
+  } else if (!start.value) {
+    start.value = defaultEventStart();
+  }
+  syncEventEnd();
+  renderDayChips();
+}
+
+document.querySelectorAll("#add-kind-toggle .add-kind-btn").forEach((btn) => {
+  btn.addEventListener("click", () => setAddKind(btn.dataset.kind));
+});
+
+// 開始時刻の初期値: 今の次のちょうどの時刻(21:10なら22:00)。日付が先の日でも同じにする
+function defaultEventStart() {
+  const now = new Date();
+  return `${pad2(Math.min(now.getHours() + 1, 23))}:00`;
+}
+
+function addMinutesToTime(hhmm, minutes) {
+  const total = Math.min(timeToMinutes(hhmm) + minutes, 23 * 60 + 59);
+  return `${pad2(Math.floor(total / 60))}:${pad2(total % 60)}`;
+}
+
+function syncEventEnd() {
+  const start = document.getElementById("event-start-time").value;
+  const end = document.getElementById("event-end-time");
+  const hint = document.getElementById("event-end-hint");
+  if (addKind === "task" || !start) {
+    hint.textContent = "";
+    return;
+  }
+  if (!eventEndTouched) end.value = addMinutesToTime(start, 60);
+  hint.textContent = eventEndTouched ? `→ ends ${end.value}` : `→ ends ${end.value} (auto, +1h)`;
+}
+
+document.getElementById("event-start-time").addEventListener("input", syncEventEnd);
+document.getElementById("event-end-time").addEventListener("input", () => {
+  eventEndTouched = true;
+  syncEventEnd();
+});
+
+function formatDayChip(dateStr, today) {
+  const d = new Date(dateStr + "T00:00:00");
+  const base = `${CAL_WEEKDAY_EN[d.getDay()]} ${d.getDate()}`;
+  if (dateStr === today) return `${base} (Today)`;
+  const near = dateStr > today && dateStr <= addDaysToDate(today, 2);
+  return near ? base : `${CAL_WEEKDAY_EN[d.getDay()]}, ${CAL_MONTH_SHORT[d.getMonth()]} ${d.getDate()}`;
+}
+
+// 「今日・明日・明後日・Other…」。カレンダーで選んでいた日がその3日以外なら、先頭にその日を足して選んでおく
+function renderDayChips() {
+  const today = todayStr();
+  const dateInput = document.getElementById("event-date");
+  const current = dateInput.value || today;
+  const near = [today, addDaysToDate(today, 1), addDaysToDate(today, 2)];
+  const days = near.includes(current) ? near : [current, ...near];
+  const box = document.getElementById("event-day-chips");
+  box.innerHTML =
+    days
+      .map((d) => `<button type="button" class="day-chip${d === current ? " active" : ""}" data-date="${d}">${formatDayChip(d, today)}</button>`)
+      .join("") + `<button type="button" class="day-chip day-chip-other">${ICONS.calendar || ""}Other…</button>`;
+  box.querySelectorAll(".day-chip[data-date]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      dateInput.value = btn.dataset.date;
+      renderDayChips();
+    });
+  });
+  box.querySelector(".day-chip-other").addEventListener("click", () => {
+    try {
+      dateInput.showPicker();
+    } catch (err) {
+      dateInput.classList.add("visible"); // showPickerの無いブラウザでは日付欄をそのまま出す
+      dateInput.focus();
+    }
+  });
+}
+
+document.getElementById("event-date").addEventListener("change", renderDayChips);
 
 function closeEventAddPanel() {
   eventAddPanel.classList.add("hidden");
   eventAddBackdrop.classList.add("hidden");
+  document.getElementById("event-date").classList.remove("visible");
 }
 
 document.getElementById("event-add-close").addEventListener("click", closeEventAddPanel);
@@ -5742,7 +5943,46 @@ function applyEventLocally(eventId, ev) {
   };
 }
 
+// カレンダーの＋からTaskとして入れたもの。ToDoタブの追加と同じく、保存を待たずに先に画面へ出す
+async function submitQuickTask() {
+  const title = document.getElementById("event-title").value.trim();
+  const due_date = document.getElementById("event-date").value || null;
+  if (!title || !due_date) return;
+  const payload = {
+    title,
+    category: document.getElementById("event-category").value || null,
+    priority: document.getElementById("quick-task-priority").value,
+    due_date,
+    due_time: document.getElementById("event-start-time").value || null,
+    recurrence: null,
+    notify_offset_minutes: null,
+    note: document.getElementById("event-note").value.trim() || null,
+    show_on_calendar: document.getElementById("quick-task-show-cal").checked,
+  };
+  closeEventAddPanel();
+  const tempTodo = { ...payload, id: null, done: 0, skipped: 0, created_at: null, completed_at: null };
+  allTodos = [tempTodo, ...allTodos];
+  calTodosCache = [...calTodosCache, tempTodo];
+  renderTodos();
+  renderCalendarView();
+  try {
+    await api("/api/todos", { method: "POST", body: JSON.stringify(payload) });
+    loadTodos();
+    refreshCalTodos();
+  } catch (err) {
+    allTodos = allTodos.filter((t) => t !== tempTodo);
+    calTodosCache = calTodosCache.filter((t) => t !== tempTodo);
+    renderTodos();
+    renderCalendarView();
+    showToast(`「${title}」の追加に失敗しました。もう一度お試しください`);
+  }
+}
+
 guardedSubmit(document.getElementById("event-form"), async (e) => {
+  if (addKind === "task") {
+    await submitQuickTask();
+    return;
+  }
   const title = document.getElementById("event-title").value.trim();
   const category = document.getElementById("event-category").value || null;
   const evDate = document.getElementById("event-date").value;
@@ -6051,6 +6291,31 @@ function closeEventDetail() {
 
 document.getElementById("event-detail-close").addEventListener("click", closeEventDetail);
 document.getElementById("event-detail-backdrop").addEventListener("click", closeEventDetail);
+
+// 以前はカレンダーの一覧の×から消していた(2026-10-02にここへ移した)。Undoの仕組みはそのまま
+document.getElementById("event-detail-delete").addEventListener("click", () => {
+  const eventId = currentDetailEventId;
+  const ev = [...calMonthData.values()].flatMap((d) => d.events).find((x) => x.id === eventId);
+  if (!ev) return;
+  if (ev.recurrence && !confirm("This is a recurring event. Delete the entire series?")) return;
+  closeEventDetail();
+  undoableDelete(`Deleted "${ev.title}"`, {
+    apply: () => {
+      pendingEventDeleteIds.add(ev.id);
+      renderCalendarView();
+    },
+    revert: () => {
+      pendingEventDeleteIds.delete(ev.id);
+      loadCalendar();
+    },
+    commit: async () => {
+      await api(`/api/events/${ev.id}`, { method: "DELETE" });
+      await loadCalendar().catch((err) => console.error("calendar reload failed:", err)); // 削除自体は成功しているので「失敗」扱いにしない
+      pendingEventDeleteIds.delete(ev.id);
+      renderCalendarView();
+    },
+  });
+});
 
 guardedSubmit(document.getElementById("event-detail-form"), async (e) => {
   if (!currentDetailEventId) return;
@@ -6577,6 +6842,10 @@ function closeTopmostLayer() {
   const panels = visiblePanels();
   if (panels.length) {
     panels[panels.length - 1].querySelector(".panel-close")?.click();
+    return true;
+  }
+  if (isCalSheetOpen()) {
+    closeCalSheet();
     return true;
   }
   if (timerSubject && !overlayMinimized && !document.getElementById("focus-overlay").classList.contains("hidden")) {

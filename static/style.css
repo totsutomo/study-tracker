@@ -1631,28 +1631,67 @@ body.focus-open #tabbar {
 }
 
 /* ---------- calendar (events) ---------- */
+/* 2026-10-02: カードの枠・見出し・余白をやめ、月グリッドを画面の端から端・下のタブバーの上まで広げた。
+   マスの中は予定名の色付きの帯(最大6本)と、Show on calendarがONのToDoの点線の帯。
+   以前の赤・緑・灰の点は意味が画面のどこにも書かれていなかったのでやめ、最低ライン達成の✓だけ残した。
+   グリッドの高さはapp.jsのupdateCalGridHeightが画面に合わせてpxで入れ、行にはgrid-auto-rows:1frで均等に配る */
 
-.cal-day-detail h3:first-child {
-  margin-top: 4px;
+#tab-calendar.active {
+  margin: -16px; /* mainの余白(上下左右16px)を打ち消して端まで使う */
 }
 
-/* 以前はcal-day-detail(選択日の予定+期限タスク)をこのcal-board(月グリッド)より上に
-   置いていたが、件数が増えるとグリッド自体が下に押し出されてしまうため、2026-08-16に
-   HTML側の並び順をグリッド→詳細の順に入れ替えた。グリッドは常に画面上部に固定表示される。 */
-.cal-board {
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-pop);
-  padding: 14px 8px 10px;
-  margin: 0 -8px 18px;
+/* カレンダーを開いている間は、本文の下余白をタブバー+進行中の帯の高さぴったりにする(余計なスクロールを出さない) */
+body:has(#tab-calendar.active) {
+  padding-bottom: calc(var(--tabbar-h, 64px) + var(--dock-h, 0px));
 }
 
-.cal-view-toggle {
+.cal-toolbar {
   display: flex;
-  justify-content: center;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 10px 8px 14px;
+}
+
+.cal-title {
+  font-size: 19px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+}
+
+.cal-toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.cal-today-btn {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 999px;
+  padding: 5px 12px;
+  font-size: 13px;
+  margin-right: 2px;
+}
+
+.cal-toolbar .icon-btn {
+  font-size: 22px;
+  width: 30px;
+  height: 32px;
+  border-radius: var(--radius-sm);
+  transition: background 0.15s ease;
+}
+
+.cal-toolbar .icon-btn:active {
+  background: var(--card-hover);
+}
+
+.cal-view-toggle,
+.add-kind-toggle {
+  display: flex;
   width: fit-content;
-  margin: 0 auto 10px;
   gap: 2px;
   background: var(--card-hover);
   border: 1px solid var(--border);
@@ -1660,44 +1699,39 @@ body.focus-open #tabbar {
   padding: 3px;
 }
 
-.cal-view-btn {
+.cal-view-toggle {
+  margin-left: 4px;
+}
+
+.cal-view-btn,
+.add-kind-btn {
   background: none;
   border: none;
   color: var(--text-muted);
   font-size: 12px;
   font-weight: 600;
-  padding: 4px 14px;
+  padding: 4px 10px;
   border-radius: 999px;
   cursor: pointer;
 }
 
-.cal-view-btn.active {
+.cal-view-btn.active,
+.add-kind-btn.active {
   background: var(--accent);
   color: var(--on-accent);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
 }
 
-.month-nav {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 22px;
-  margin-bottom: 14px;
-  font-size: 16px;
-  font-weight: 700;
-  letter-spacing: 0.01em;
+.cal-view-long {
+  display: none;
 }
 
-.month-nav .icon-btn {
-  font-size: 22px;
-  width: 32px;
-  height: 32px;
-  border-radius: var(--radius-sm);
-  transition: background 0.15s ease;
+.cal-new-btn {
+  display: none; /* PCだけ。スマホは右下の丸い＋ */
 }
 
-.month-nav .icon-btn:active {
-  background: var(--card-hover);
+#cal-copy-week-btn {
+  margin: 0 12px 8px;
 }
 
 .cal-weekday-row {
@@ -1705,11 +1739,10 @@ body.focus-open #tabbar {
   grid-template-columns: repeat(7, 1fr);
   text-align: center;
   font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.03em;
-  text-transform: uppercase;
+  font-weight: 600;
   color: var(--text-muted);
-  margin-bottom: 8px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--cal-line);
 }
 
 .cal-weekday-row .sat {
@@ -1721,9 +1754,15 @@ body.focus-open #tabbar {
 }
 
 .cal-grid {
+  --cal-line: rgba(255, 255, 255, 0.07);
   display: grid;
   grid-template-columns: repeat(7, 1fr);
-  gap: 6px;
+  grid-auto-rows: 1fr;
+  gap: 0;
+}
+
+.cal-board {
+  --cal-line: rgba(255, 255, 255, 0.07);
 }
 
 .cal-weekday-row.hidden,
@@ -1732,22 +1771,30 @@ body.focus-open #tabbar {
 }
 
 .cal-day {
-  aspect-ratio: 0.72; /* 予定名テキスト用の行を確保するため、以前(0.82)より少し縦長に(2026-08-16) */
   min-width: 0; /* 長い予定名がgrid-template-columnsの自動最小サイズを押し広げてグリッドが
                    横にはみ出すのを防ぐ(grid/flexの既定min-width:autoを明示的に無効化) */
-  background: none;
-  border: none;
-  border-radius: var(--radius-md);
-  padding: 4px 2px 0;
+  min-height: 0;
+  overflow: hidden;
+  border-right: 1px solid var(--cal-line);
+  border-bottom: 1px solid var(--cal-line);
+  padding: 0 2px;
   display: flex;
   flex-direction: column;
-  align-items: center;
   cursor: pointer;
   transition: background 0.15s ease;
 }
 
+.cal-day:nth-child(7n) {
+  border-right: none;
+}
+
 .cal-day:not(.other-month):active {
   background: var(--card-hover);
+}
+
+.cal-day.selected {
+  background: var(--accent-dim);
+  box-shadow: inset 0 0 0 1.5px var(--accent);
 }
 
 .cal-day.other-month {
@@ -1755,16 +1802,24 @@ body.focus-open #tabbar {
   cursor: default;
 }
 
-.cal-day-num {
-  font-size: 14px;
-  font-weight: 600;
-  width: 28px;
-  height: 28px;
+.cal-day-head {
+  height: 22px; /* app.jsのcalBandMetrics(head)と合わせる */
+  flex-shrink: 0;
   display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 1px;
+}
+
+.cal-day-num {
+  font-size: 12px;
+  font-weight: 600;
+  min-width: 19px;
+  height: 19px;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
   border-radius: 50%;
-  transition: background 0.15s ease, color 0.15s ease;
 }
 
 .cal-day.sat .cal-day-num {
@@ -1775,102 +1830,339 @@ body.focus-open #tabbar {
   color: var(--danger);
 }
 
-.cal-day.selected .cal-day-num {
-  background: var(--accent-dim);
-  color: var(--accent);
-}
-
 .cal-day.today .cal-day-num {
   background: var(--accent);
   color: var(--on-accent);
   font-weight: 800;
 }
 
-.cal-day-marks {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 3px;
-  justify-content: center;
-  margin-top: 4px;
-}
-
-/* 予定(events)の中身をドットではなく短縮テキストで見せる。1件なら名前をそのまま、
-   2件以上は先頭の1件+「+N件」に丸めて、狭いマスでの潰れを防ぐ(2026-08-16)。
-   セルに余裕があるPC(md+)では複数件そのまま並べられるよう、ラベルは.cal-eventsでまとめて
-   囲む(セル自体はflexでalign-items:centerのため、幅いっぱいに広げるにはwidth指定が要る)。 */
-.cal-events {
-  display: flex;
-  flex-direction: column;
-  width: 100%;
-}
-
-.cal-event-label {
-  display: block;
-  width: 100%;
-  max-width: 100%;
-  min-width: 0;
-  font-size: 8.5px;
-  font-weight: 700;
-  line-height: 1.2;
-  text-align: center;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  padding: 0 1px;
-  margin-top: 2px;
-}
-
-.cal-event-more {
-  display: block;
-  font-size: 7.5px;
-  font-weight: 600;
-  color: var(--text-muted);
-  text-align: center;
-  line-height: 1.2;
-}
-
-.cal-todo-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 2px;
-  background: var(--danger);
-  display: inline-block;
-}
-
-.cal-log-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--success);
-  display: inline-block;
-}
-
-.cal-activation-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--neutral-flag);
-  display: inline-block;
-}
-
 .cal-min-mark {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  background: var(--accent);
-  color: var(--on-accent);
-  font-size: 7px;
-  font-weight: 800;
-  line-height: 1;
   display: inline-flex;
-  align-items: center;
-  justify-content: center;
+  color: var(--success);
 }
 
 .cal-min-mark .inline-icon {
+  width: 11px;
+  height: 11px;
+  color: var(--success);
+}
+
+.cal-bands {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+/* 予定の帯。--cにカテゴリ色が入る。高さ+隙間はapp.jsのcalBandMetrics(band)と合わせる */
+.cal-band {
+  display: block;
+  height: 13px;
+  line-height: 11px;
+  font-size: 9.5px;
+  font-weight: 600;
+  padding: 0 2px;
+  border-radius: 3px;
+  white-space: nowrap;
+  overflow: hidden;
+  color: var(--text);
+  background: color-mix(in srgb, var(--c) 30%, transparent);
+  border: 1px solid color-mix(in srgb, var(--c) 70%, transparent);
+}
+
+.cal-band b {
+  font-weight: 500;
+  opacity: 0.8;
+}
+
+.cal-band-todo {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  color: var(--text-muted);
+  background: none;
+  border: 1px dashed color-mix(in srgb, var(--text-muted) 70%, transparent);
+}
+
+.cal-band-box {
   width: 7px;
   height: 7px;
-  vertical-align: middle;
+  flex-shrink: 0;
+  border: 1px solid currentColor;
+  border-radius: 2px;
+}
+
+.cal-band-todo.done {
+  text-decoration: line-through;
+  opacity: 0.5;
+}
+
+.cal-band-todo.done .cal-band-box {
+  background: currentColor;
+}
+
+.cal-band-more {
+  font-size: 9.5px;
+  font-weight: 600;
+  line-height: 13px;
+  color: var(--text-muted);
+  padding-left: 2px;
+}
+
+/* 選んだ日の中身。スマホは日付をタップすると下から出るパネル(PCは右の列、md+側で上書き) */
+.cal-day-detail {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 27; /* ↓の背景(26)より上、予定・ToDoの詳細パネル(29/30)より下 */
+  max-height: 62vh;
+  overflow-y: auto;
+  background: var(--card);
+  border-top: 1px solid var(--border);
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  box-shadow: var(--shadow-panel);
+  padding: 6px 16px calc(18px + env(safe-area-inset-bottom));
+  transform: translateY(100%);
+  visibility: hidden;
+  transition: transform 0.22s ease, visibility 0.22s;
+}
+
+.cal-day-detail.open {
+  transform: none;
+  visibility: visible;
+}
+
+.cal-sheet-backdrop {
+  z-index: 26;
+}
+
+.cal-sheet-handle {
+  width: 40px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--border);
+  margin: 2px auto 12px;
+}
+
+.cal-detail-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.cal-detail-title {
+  font-size: 19px;
+  font-weight: 800;
+}
+
+.cal-detail-add {
+  padding: 7px 14px;
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+.cal-detail-study {
+  font-size: 13px;
+  color: var(--text-muted);
+  margin: 4px 0 0;
+  min-height: 1em;
+}
+
+.cal-detail-min {
+  color: var(--success);
+  font-weight: 700;
+}
+
+.cal-detail-min .inline-icon {
+  color: var(--success);
+}
+
+.cal-day-detail h3 {
+  margin: 16px 0 8px;
+}
+
+.cal-day-detail .list li.cal-empty {
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+.cal-event-row-time {
+  font-size: 13px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  width: 40px;
+  flex-shrink: 0;
+}
+
+.cal-event-row-bar {
+  width: 3px;
+  align-self: stretch;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
+.cal-event-row-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 15px;
+}
+
+.cal-event-row-chevron {
+  color: var(--text-muted);
+  font-size: 18px;
+}
+
+.cal-todo-title {
+  flex: 1;
+  min-width: 0;
+}
+
+/* スマホ: 右下の丸い＋(カレンダータブを開いている時だけ) */
+.cal-fab {
+  position: fixed;
+  right: 16px;
+  bottom: calc(var(--tabbar-h, 64px) + var(--dock-h, 0px) + 16px);
+  z-index: 24;
+  width: 56px;
+  height: 56px;
+  padding: 0;
+  border-radius: 50%;
+  background: var(--text);
+  color: var(--bg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: var(--shadow-pop);
+}
+
+/* ---------- quick add panel (Event / Task, 2026-10-02) ---------- */
+
+.add-kind-toggle {
+  margin: 4px 0 4px;
+}
+
+.add-kind-btn {
+  font-size: 13px;
+  padding: 5px 16px;
+}
+
+.quick-add-form {
+  flex-direction: column;
+  flex-wrap: nowrap;
+  gap: 0;
+  position: relative;
+}
+
+.field-label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  margin: 10px 0 5px;
+}
+
+.quick-add-form #event-title {
+  font-size: 17px;
+  padding: 12px;
+}
+
+.day-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.day-chip {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 999px;
+  padding: 7px 13px;
+  font-size: 14px;
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.day-chip.active {
+  border-color: var(--accent);
+  background: var(--accent-dim);
+  font-weight: 700;
+}
+
+/* 「Other…」で開く日付欄。普段は見せず、showPicker()でカレンダーだけ出す */
+.quick-add-form .day-chip-date {
+  position: absolute;
+  left: 0;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.quick-add-form .day-chip-date.visible {
+  position: static;
+  width: auto;
+  height: auto;
+  opacity: 1;
+  pointer-events: auto;
+  margin-top: 8px;
+}
+
+.start-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.start-row input[type="time"] {
+  width: 130px;
+  flex-shrink: 0;
+  font-size: 17px;
+}
+
+.more-options {
+  margin-top: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
+}
+
+.more-options summary {
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.more-options-body,
+.more-options-body .event-only,
+.more-options-body .task-only {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.more-options-body {
+  margin-top: 10px;
+}
+
+.more-options-body .field-label {
+  margin: 2px 0 -4px;
+}
+
+.add-panel.is-task .event-only,
+.add-panel:not(.is-task) .task-only {
+  display: none;
+}
+
+#event-submit {
+  margin-top: 14px;
+  width: 100%;
+  padding: 13px;
+  font-size: 16px;
 }
 
 #activation-export-text {
@@ -2302,46 +2594,115 @@ body.focus-open #tabbar {
     overflow-y: auto;
   }
 
-  /* ---- Calendar: グリッドと選択日の詳細(予定・ToDo)を横並びに(以前は縦積みで
-     詳細を見るのに下までスクロールが必要だった) ---- */
+  /* ---- Calendar(2026-10-02に作り直し): カード枠と余白をなくしてグリッドを右下まで広げ、
+     右に選んだ日の一覧(300px)を並べる。予定名は12pxで時刻つき、1マス最大6件 ---- */
   .cal-split {
     display: flex;
-    align-items: flex-start;
-    gap: 20px;
+    align-items: stretch;
   }
 
   .cal-board {
     flex: 1;
     min-width: 0;
-    margin: 0 0 18px;
+    border-right: 1px solid var(--cal-line);
+  }
+
+  .cal-toolbar {
+    padding: 12px 16px 10px 22px;
+  }
+
+  .cal-title {
+    font-size: 26px;
+  }
+
+  .cal-toolbar-actions {
+    gap: 6px;
+  }
+
+  .cal-view-long {
+    display: inline;
+  }
+
+  .cal-view-short {
+    display: none;
+  }
+
+  .cal-view-btn {
+    padding: 4px 14px;
+  }
+
+  .cal-new-btn {
+    display: inline-flex;
+    margin-left: 8px;
+    padding: 7px 14px;
+    font-size: 14px;
+  }
+
+  .cal-weekday-row {
+    text-align: left;
+    padding-left: 8px;
+    font-size: 12px;
+  }
+
+  .cal-day {
+    padding: 0 6px;
+  }
+
+  .cal-day-head {
+    height: 30px; /* app.jsのcalBandMetrics(head)と合わせる */
+  }
+
+  .cal-day-num {
+    font-size: 14px;
+    min-width: 24px;
+    height: 24px;
+  }
+
+  .cal-band {
+    height: 18px;
+    line-height: 16px;
+    font-size: 12px;
+    font-weight: 500;
+    padding: 0 5px;
+    text-overflow: ellipsis;
+  }
+
+  .cal-band-box {
+    width: 9px;
+    height: 9px;
+  }
+
+  .cal-band-todo {
+    gap: 4px;
+  }
+
+  .cal-band-more {
+    font-size: 11px;
+    line-height: 18px;
   }
 
   .cal-day-detail {
-    width: 320px;
+    position: sticky;
+    top: 0;
+    align-self: flex-start;
+    width: 300px;
     flex-shrink: 0;
-    background: var(--card);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-lg);
-    box-shadow: var(--shadow-card);
+    max-height: 100dvh;
+    transform: none;
+    visibility: visible;
+    transition: none;
+    background: none;
+    border: none;
+    border-radius: 0;
+    box-shadow: none;
     padding: 14px 16px;
+    z-index: auto;
   }
 
-  /* 月グリッド(5〜6週分)の高さはapp.js側(updateCalGridHeight)がビューポートに収まるよう
-     .cal-gridに直接pxで設定する。grid-auto-rows:1frで週の行にその高さを均等分配するため、
-     セル側は幅からの逆算(aspect-ratio)をやめて行の高さいっぱいに引き伸ばす(2026-08-29)。
-     これにより週数(5/6週)や画面の縦幅が変わっても、月表示が常にスクロール無しで収まる。 */
-  .cal-grid {
-    grid-auto-rows: 1fr;
-  }
-
-  /* セルが広がる分、イベント名も1件+「+N件」表記から最大3件まで表示できる
-     (実際に何件描画するかはapp.js側でビューポート幅を見て決めている) */
-  .cal-day {
-    aspect-ratio: auto;
-  }
-
-  .cal-event-label {
-    font-size: 10px;
+  .cal-sheet-handle,
+  .cal-sheet-backdrop,
+  .cal-fab {
+    display: none !important;
   }
 }
 
@@ -2517,23 +2878,6 @@ kbd {
 
 .wake-time-row input {
   max-width: 130px;
-}
-
-/* スマホの月カレンダー: 予定が2件以上ある日は件数だけ(2026-09-27) */
-.cal-event-count {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  font-size: 11px;
-  font-weight: 700;
-  color: var(--text);
-}
-
-.cal-event-count i {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  display: inline-block;
 }
 
 /* ---------- ToDo tab: today panel (2026-09-27) ---------- */

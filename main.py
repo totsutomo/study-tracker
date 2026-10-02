@@ -164,6 +164,11 @@ class TodoCreate(BaseModel):
     recurrence: str | None = None  # None, or comma-separated weekday codes e.g. "mon,wed,fri"
     notify_offset_minutes: int | None = None  # None = no notification, 0 = at due time, N = N minutes before
     note: str | None = None
+    show_on_calendar: bool | None = None  # None = 自動(単発ならTrue・繰り返しならFalse)
+
+
+def default_show_on_calendar(recurrence: str | None) -> int:
+    return 0 if recurrence else 1
 
 
 class TodoNoteUpdate(BaseModel):
@@ -184,6 +189,7 @@ class TodoUpdate(BaseModel):
     recurrence: str | None = None
     notify_offset_minutes: int | None = None
     note: str | None = None
+    show_on_calendar: bool | None = None  # None = 今の値のまま(この項目を知らない古い呼び出し元向け)
 
 
 class CategoryCreate(BaseModel):
@@ -519,10 +525,11 @@ def todo_stats():
 def create_todo(todo: TodoCreate):
     conn = get_connection()
     cur = conn.execute(
-        "INSERT INTO todos (title, category, priority, due_date, due_time, recurrence, notify_offset_minutes, note) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO todos (title, category, priority, due_date, due_time, recurrence, notify_offset_minutes, note, "
+        "show_on_calendar) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (todo.title, todo.category, todo.priority, todo.due_date, todo.due_time, todo.recurrence,
-         todo.notify_offset_minutes if todo.due_time else None, todo.note),
+         todo.notify_offset_minutes if todo.due_time else None, todo.note,
+         default_show_on_calendar(todo.recurrence) if todo.show_on_calendar is None else int(todo.show_on_calendar)),
     )
     conn.commit()
     new_id = cur.lastrowid
@@ -568,9 +575,11 @@ def update_todo(todo_id: int, todo: TodoUpdate):
         raise HTTPException(status_code=404, detail="todo not found")
     conn.execute(
         "UPDATE todos SET title = ?, category = ?, priority = ?, due_date = ?, due_time = ?, "
-        "recurrence = ?, notify_offset_minutes = ?, note = ?, notified_at = NULL WHERE id = ?",
+        "recurrence = ?, notify_offset_minutes = ?, note = ?, notified_at = NULL, "
+        "show_on_calendar = COALESCE(?, show_on_calendar) WHERE id = ?",
         (todo.title, todo.category, todo.priority, todo.due_date, todo.due_time, todo.recurrence,
-         todo.notify_offset_minutes if todo.due_time else None, todo.note, todo_id),
+         todo.notify_offset_minutes if todo.due_time else None, todo.note,
+         None if todo.show_on_calendar is None else int(todo.show_on_calendar), todo_id),
     )
     conn.commit()
     conn.close()
@@ -581,14 +590,14 @@ def update_todo(todo_id: int, todo: TodoUpdate):
 def toggle_todo(todo_id: int):
     conn = get_connection()
     row = conn.execute(
-        "SELECT done, title, category, priority, due_date, due_time, recurrence, notify_offset_minutes, note "
-        "FROM todos WHERE id = ?",
+        "SELECT done, title, category, priority, due_date, due_time, recurrence, notify_offset_minutes, note, "
+        "show_on_calendar FROM todos WHERE id = ?",
         (todo_id,),
     ).fetchone()
     if row is None:
         conn.close()
         raise HTTPException(status_code=404, detail="todo not found")
-    done, title, category, priority, due_date, due_time, recurrence, notify_offset_minutes, note = row
+    done, title, category, priority, due_date, due_time, recurrence, notify_offset_minutes, note, show_on_calendar = row
     new_done = 0 if done else 1
     completed_at = "datetime('now')" if new_done else "NULL"
     # done/skippedは同時に立たない状態にする(完了させたら「スキップ扱い」は解除する)
@@ -601,9 +610,10 @@ def toggle_todo(todo_id: int):
         next_due = next_due_after_close(due_date, recurrence)
         if next_due is not None:
             conn.execute(
-                "INSERT INTO todos (title, category, priority, due_date, due_time, recurrence, notify_offset_minutes, note) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                (title, category, priority, next_due.isoformat(), due_time, recurrence, notify_offset_minutes, note),
+                "INSERT INTO todos (title, category, priority, due_date, due_time, recurrence, notify_offset_minutes, note, "
+                "show_on_calendar) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (title, category, priority, next_due.isoformat(), due_time, recurrence, notify_offset_minutes, note,
+                 default_show_on_calendar(recurrence) if show_on_calendar is None else show_on_calendar),
             )
     conn.commit()
     conn.close()
@@ -616,14 +626,14 @@ def skip_todo(todo_id: int, reason: str | None = None):
         raise HTTPException(status_code=422, detail="reason must be 'overdue' or omitted")
     conn = get_connection()
     row = conn.execute(
-        "SELECT skipped, title, category, priority, due_date, due_time, recurrence, notify_offset_minutes, note "
-        "FROM todos WHERE id = ?",
+        "SELECT skipped, title, category, priority, due_date, due_time, recurrence, notify_offset_minutes, note, "
+        "show_on_calendar FROM todos WHERE id = ?",
         (todo_id,),
     ).fetchone()
     if row is None:
         conn.close()
         raise HTTPException(status_code=404, detail="todo not found")
-    skipped, title, category, priority, due_date, due_time, recurrence, notify_offset_minutes, note = row
+    skipped, title, category, priority, due_date, due_time, recurrence, notify_offset_minutes, note, show_on_calendar = row
     new_skipped = 0 if skipped else 1
     skipped_at = "datetime('now')" if new_skipped else "NULL"
     # done/skippedは同時に立たない状態にする(スキップしたら「完了扱い」は解除する)
@@ -638,9 +648,10 @@ def skip_todo(todo_id: int, reason: str | None = None):
         next_due = next_due_after_close(due_date, recurrence)
         if next_due is not None:
             conn.execute(
-                "INSERT INTO todos (title, category, priority, due_date, due_time, recurrence, notify_offset_minutes, note) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                (title, category, priority, next_due.isoformat(), due_time, recurrence, notify_offset_minutes, note),
+                "INSERT INTO todos (title, category, priority, due_date, due_time, recurrence, notify_offset_minutes, note, "
+                "show_on_calendar) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (title, category, priority, next_due.isoformat(), due_time, recurrence, notify_offset_minutes, note,
+                 default_show_on_calendar(recurrence) if show_on_calendar is None else show_on_calendar),
             )
     conn.commit()
     conn.close()
@@ -1267,6 +1278,26 @@ def study_log_minimum_achieved_days(year: int, month: int):
         (str(year), f"{month:02d}", minimum),
     )
     result = [row[0] for row in cur.fetchall()]
+    conn.close()
+    return result
+
+
+@app.get("/api/study-logs/day-totals")
+def study_log_day_totals(year: int, month: int):
+    # カレンダー用に、その月の日ごとの勉強時間と最低ライン達成をまとめて返す(2026-10-02)。
+    # 以前は/days・/minimum-achieved-days・/api/activation-logs/daysの3本を毎月取っていたが、
+    # マス目の点をやめて日付パネルに「Studied N min」を出すことにしたので、これ1本にした
+    conn = get_connection()
+    minimum = _read_settings(conn).get("daily_minimum_minutes")
+    cur = conn.execute(
+        "SELECT date(logged_at) AS d, SUM(minutes) AS total_minutes FROM study_logs "
+        "WHERE strftime('%Y', logged_at) = ? AND strftime('%m', logged_at) = ? GROUP BY d",
+        (str(year), f"{month:02d}"),
+    )
+    result = [
+        {"d": d, "minutes": total, "min_reached": bool(minimum) and total >= minimum}
+        for d, total in cur.fetchall()
+    ]
     conn.close()
     return result
 
