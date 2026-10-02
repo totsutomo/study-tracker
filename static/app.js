@@ -885,7 +885,6 @@ function closeTodoAddPanel() {
   todoAddBackdrop.classList.add("hidden");
 }
 
-document.getElementById("todo-fab").addEventListener("click", openTodoAddPanel);
 document.getElementById("todo-add-close").addEventListener("click", closeTodoAddPanel);
 todoAddBackdrop.addEventListener("click", closeTodoAddPanel);
 
@@ -1010,8 +1009,7 @@ function applyCategories(cats) {
     categoryColorMap[c.name] = CATEGORY_COLOR_PALETTE[i % CATEGORY_COLOR_PALETTE.length];
   });
 
-  renderStudyButtons(cats);
-  renderStudyFabMenu(cats);
+  renderQuickSubjects(cats);
   populateEventCategorySelect(cats);
 
   const list = document.getElementById("category-list");
@@ -1129,7 +1127,6 @@ function closeSettingsPanel() {
   settingsBackdrop.classList.add("hidden");
 }
 
-document.getElementById("settings-btn").addEventListener("click", openSettingsPanel);
 document.getElementById("settings-close").addEventListener("click", closeSettingsPanel);
 settingsBackdrop.addEventListener("click", closeSettingsPanel);
 
@@ -1356,8 +1353,10 @@ function escapeHtml(str) {
 
 // ---------- study logs ----------
 
-function renderStudyButtons(cats) {
-  const container = document.getElementById("study-buttons");
+// ⚡メニューの「Study」に科目を並べる(2026-10-02)。以前はStudyタブ上部の科目ボタンと
+// 右下▶のミニメニューの2か所にあったが、記録の入口を⚡1か所にまとめたため、ここだけにした
+function renderQuickSubjects(cats) {
+  const container = document.getElementById("quick-subjects");
   container.innerHTML = cats
     .map(
       (c) =>
@@ -1365,39 +1364,12 @@ function renderStudyButtons(cats) {
     )
     .join("");
   container.querySelectorAll(".subject-btn").forEach((btn) => {
-    btn.addEventListener("click", () => openStartPanel(btn.dataset.subject, null));
-  });
-}
-
-// 画面上部の科目ボタンまで指を伸ばさなくても記録を開始できるよう、下部(親指が届く位置)にも
-// 同じ科目一覧をFAB経由のミニメニューとして複製表示する。中身は上部のボタンと完全に同じ動作。
-function renderStudyFabMenu(cats) {
-  const menu = document.getElementById("study-fab-menu");
-  menu.innerHTML = cats
-    .map(
-      (c) =>
-        `<button type="button" class="subject-btn" data-subject="${escapeHtml(c.name)}" style="--subject-color:${colorFor(c.name)}">${escapeHtml(c.name)}</button>`
-    )
-    .join("");
-  menu.querySelectorAll(".subject-btn").forEach((btn) => {
     btn.addEventListener("click", () => {
-      menu.classList.add("hidden");
+      closeQuickPanel();
       openStartPanel(btn.dataset.subject, null);
     });
   });
 }
-
-document.getElementById("study-fab").addEventListener("click", () => {
-  document.getElementById("study-fab-menu").classList.toggle("hidden");
-});
-
-document.addEventListener("click", (e) => {
-  const menu = document.getElementById("study-fab-menu");
-  const fab = document.getElementById("study-fab");
-  if (!menu.classList.contains("hidden") && !menu.contains(e.target) && e.target !== fab) {
-    menu.classList.add("hidden");
-  }
-});
 
 function localDatetimeNow() {
   const now = new Date();
@@ -1946,33 +1918,27 @@ function showMiniBar() {
 
 // 下部タブバーはスマホ幅でだけ表示されるので、その高さは表示中にウィンドウ幅が変わると変わる。
 // 以前は表示した瞬間の高さを固定していたため、狭いウィンドウで開始してから広げると、
-// PC表示で消えたタブバーの分(約53px)だけバーの下に隙間が残っていた(2026-09-27)
-function positionMiniBar() {
-  const bar = document.getElementById("mini-timer-bar");
-  if (bar.classList.contains("hidden")) return;
-  bar.style.bottom = `${document.getElementById("tabbar").getBoundingClientRect().height}px`;
-  raiseFabsAboveMiniBar();
+// PC表示で消えたタブバーの分(約53px)だけバーの下に隙間が残っていた(2026-09-27)。
+// 2026-10-02からはミニタイマーバーを睡眠・サボりの帯と一緒にnow-dockへ積み、dockごと動かす。
+// 高さはCSS変数にも入れ、本文の下余白・トースト・⚡メニューの位置がそれを参照する
+function positionNowDock() {
+  const tabbarH = document.getElementById("tabbar").getBoundingClientRect().height;
+  const dock = document.getElementById("now-dock");
+  dock.style.bottom = `${tabbarH}px`;
+  const root = document.documentElement.style;
+  root.setProperty("--tabbar-h", `${tabbarH}px`);
+  root.setProperty("--dock-h", `${dock.getBoundingClientRect().height}px`);
 }
 
-window.addEventListener("resize", positionMiniBar);
+function positionMiniBar() {
+  positionNowDock();
+}
+
+window.addEventListener("resize", positionNowDock);
 
 function hideMiniBar() {
   document.getElementById("mini-timer-bar").classList.add("hidden");
-  resetFabPosition();
-}
-
-// 計測中はミニタイマーバーが画面下に浮くので、+ボタン(各タブに1つずつ、.fab)が
-// それと重ならないよう分だけ底上げする(2026-08-16)。
-// 以前は.fabだけにstyle.bottomを直書きしていたため、学習記録タブの科目ミニメニューが
-// 取り残されて最下段の科目が▶ボタンに隠れていた(2026-09-27)。CSS変数1つで両方を動かす。
-function raiseFabsAboveMiniBar() {
-  const bar = document.getElementById("mini-timer-bar");
-  const barHeight = bar.getBoundingClientRect().height;
-  document.documentElement.style.setProperty("--fab-lift", `${barHeight}px`);
-}
-
-function resetFabPosition() {
-  document.documentElement.style.removeProperty("--fab-lift");
+  positionNowDock();
 }
 
 function updateMiniStatus() {
@@ -2391,19 +2357,15 @@ function notifySessionEnd(subject) {
   alert(`${subject}: time's up\nStill recording until you stop`);
 }
 
-document.getElementById("focus-stop-btn").addEventListener("click", async () => {
+async function stopAndSaveSession() {
   if (!timerSubject) return;
   const totalMs = currentElapsedMs();
   const elapsedMinutes = Math.max(1, Math.round(totalMs / 60000));
   await finishSession(elapsedMinutes);
-});
+}
 
-document.getElementById("mini-stop-btn").addEventListener("click", async () => {
-  if (!timerSubject) return;
-  const totalMs = currentElapsedMs();
-  const elapsedMinutes = Math.max(1, Math.round(totalMs / 60000));
-  await finishSession(elapsedMinutes);
-});
+document.getElementById("focus-stop-btn").addEventListener("click", stopAndSaveSession);
+document.getElementById("mini-stop-btn").addEventListener("click", stopAndSaveSession);
 
 document.getElementById("focus-discard-btn").addEventListener("click", discardSession);
 document.getElementById("mini-discard-btn").addEventListener("click", discardSession);
@@ -3845,44 +3807,38 @@ document.querySelectorAll("#diary-score-toggle .period-btn").forEach((btn) => {
 let activationActiveLog = null;
 let activationTickInterval = null;
 
-function updateActivationBanner() {
-  const banner = document.getElementById("activation-banner");
-  const label = document.getElementById("activation-banner-label");
-  if (!activationActiveLog) {
-    banner.classList.add("hidden");
-    return;
-  }
+// サボり中はタブバーのすぐ上の帯に出し、「Back to work」を1タップで押せるようにする(2026-10-02)。
+// 以前は画面最上部のバナーで、タップすると設定画面に飛び、そこで復帰ボタンを押す必要があった
+function activationElapsedLabel() {
   const triggered = new Date(activationActiveLog.triggered_at.replace(" ", "T"));
   const elapsedMin = Math.max(0, Math.floor((Date.now() - triggered.getTime()) / 60000));
-  label.innerHTML = `${ICONS.alert} Active · elapsed ${formatLogDuration(elapsedMin)}`;
-  banner.classList.remove("hidden");
+  return `Slacking since ${activationActiveLog.triggered_at.slice(11, 16)} · ${formatLogDuration(elapsedMin)}`;
+}
+
+function updateActivationBanner() {
+  const strip = document.getElementById("slack-now");
+  if (!activationActiveLog) {
+    strip.classList.add("hidden");
+  } else {
+    document.getElementById("slack-now-label").innerHTML = `${ICONS.alert} ${activationElapsedLabel()}`;
+    strip.classList.remove("hidden");
+  }
+  positionNowDock();
 }
 
 // activationActiveLogの現在値に合わせて画面を更新する部分だけを切り出したもの(2026-09-05)。
 // サーバーから取得した後(loadActivationActive)だけでなく、楽観的更新(returnActivation)でも
 // activationActiveLogを書き換えた直後にそのまま呼べるようにするため。
 function renderActivationStatus() {
-  const btn = document.getElementById("activation-btn");
   const statusEl = document.getElementById("activation-current-status");
-  const settingsStatusEl = document.getElementById("settings-activation-status");
-  const settingsReturnBtn = document.getElementById("settings-activation-return-btn");
   if (activationActiveLog) {
-    btn.classList.add("active");
-    btn.title = "Tap to log return";
     const noteText = activationActiveLog.note ? ` ${activationActiveLog.note}` : "";
-    const label = `Active: ${formatLoggedAt(activationActiveLog.triggered_at)}〜${noteText}`;
-    statusEl.textContent = label;
-    settingsStatusEl.textContent = label;
-    settingsReturnBtn.classList.remove("hidden");
+    statusEl.textContent = `Active: ${formatLoggedAt(activationActiveLog.triggered_at)}〜${noteText}`;
     if (!activationTickInterval) {
       activationTickInterval = setInterval(updateActivationBanner, 30000);
     }
   } else {
-    btn.classList.remove("active");
-    btn.title = "";
     statusEl.textContent = "";
-    settingsStatusEl.textContent = "Not currently active";
-    settingsReturnBtn.classList.add("hidden");
     if (activationTickInterval) {
       clearInterval(activationTickInterval);
       activationTickInterval = null;
@@ -4087,16 +4043,7 @@ function closeActivationPanel() {
 document.getElementById("activation-close").addEventListener("click", closeActivationPanel);
 activationBackdrop.addEventListener("click", closeActivationPanel);
 
-guardedClick(document.getElementById("activation-btn"), async () => {
-  if (activationActiveLog) {
-    await returnActivation();
-  } else {
-    openActivationPanel();
-  }
-});
-
-guardedClick(document.getElementById("settings-activation-return-btn"), returnActivation);
-document.getElementById("activation-banner").addEventListener("click", openSettingsPanel);
+guardedClick(document.getElementById("slack-now-return-btn"), returnActivation);
 
 guardedSubmit(document.getElementById("activation-form"), async (e) => {
   const note = document.getElementById("activation-note").value.trim() || null;
@@ -4151,17 +4098,23 @@ let wakeMoodScore = null;
 // サボりモード(発動ログ)のバナー・アイコン点滅と同じ「今この状態だとひと目でわかる」表現を、
 // 睡眠モードにも用意する。ただし睡眠は焦らせる状態ではないので、色はdangerではなくaccent、
 // 点滅もゆっくりめ(呼吸のように)にして、サボりモードとトーンを分ける。
-function updateSleepBanner() {
-  const banner = document.getElementById("sleep-banner");
-  const label = document.getElementById("sleep-banner-label");
-  if (!sleepActiveLog) {
-    banner.classList.add("hidden");
-    return;
-  }
+// 2026-10-02: 帯は画面最上部からタブバーのすぐ上へ移し、「I'm up」を帯の中で押せるようにした
+// (以前は帯をタップすると設定画面に飛び、起床ボタンはその中にあった)
+function sleepElapsedLabel() {
   const bedtime = new Date(sleepActiveLog.bedtime_at.replace(" ", "T"));
   const elapsedMin = Math.max(0, Math.floor((Date.now() - bedtime.getTime()) / 60000));
-  label.innerHTML = `${ICONS.moon} Sleeping · elapsed ${formatLogDuration(elapsedMin)}`;
-  banner.classList.remove("hidden");
+  return `Sleeping since ${sleepActiveLog.bedtime_at.slice(11, 16)} · ${formatLogDuration(elapsedMin)}`;
+}
+
+function updateSleepBanner() {
+  const strip = document.getElementById("sleep-now");
+  if (!sleepActiveLog) {
+    strip.classList.add("hidden");
+  } else {
+    document.getElementById("sleep-now-label").innerHTML = `${ICONS.moon} ${sleepElapsedLabel()}`;
+    strip.classList.remove("hidden");
+  }
+  positionNowDock();
 }
 
 function toDatetimeLocalValue(s) {
@@ -4182,22 +4135,11 @@ function sleepDurationMinutes(bedtimeAt, wakeAt) {
 // activation-logsのrenderActivationStatusと同じ理由(2026-09-05): サーバー取得後だけでなく
 // 楽観的更新(wakeUp)からもsleepActiveLog書き換え直後にそのまま呼べるよう切り出した。
 function renderSleepStatus() {
-  const btn = document.getElementById("sleep-btn");
-  const settingsStatusEl = document.getElementById("settings-sleep-status");
-  const settingsWakeBtn = document.getElementById("settings-sleep-wake-btn");
   if (sleepActiveLog) {
-    btn.classList.add("active");
-    btn.title = "Tap to log wake-up";
-    settingsStatusEl.textContent = `Sleeping since: ${formatLoggedAt(sleepActiveLog.bedtime_at)}〜`;
-    settingsWakeBtn.classList.remove("hidden");
     if (!sleepTickInterval) {
       sleepTickInterval = setInterval(updateSleepBanner, 30000);
     }
   } else {
-    btn.classList.remove("active");
-    btn.title = "";
-    settingsStatusEl.textContent = "Not currently sleeping";
-    settingsWakeBtn.classList.add("hidden");
     if (sleepTickInterval) {
       clearInterval(sleepTickInterval);
       sleepTickInterval = null;
@@ -4211,10 +4153,23 @@ async function loadSleepActive() {
   renderSleepStatus();
 }
 
-document.getElementById("sleep-banner").addEventListener("click", openSettingsPanel);
-
 // 朝のパネルで直せるよう、今回記録した睡眠ログ(id・就寝・起床時刻)を覚えておく
 let wakePanelLog = null;
+// "recorded": I'm upで起床を記録した直後(時刻のずれを直すだけ)
+// "pending":  寝ている状態のまま朝にアプリを開いた(Saveで起床を記録する、2026-10-02)
+// "backfill": 昨夜の睡眠記録がない(就寝時刻も聞いて1件まるごと作る、2026-10-02)
+let wakePanelMode = "recorded";
+
+function wakePanelBedtime() {
+  if (wakePanelMode === "backfill") {
+    // 時刻だけの入力なので、昼(12:00)以降なら前日の夜、それより前なら今日の深夜とみなす
+    const hm = document.getElementById("wake-bed-input").value;
+    if (!hm) return null;
+    const today = todayStr();
+    return new Date(`${hm >= "12:00" ? addDaysToDate(today, -1) : today}T${hm}:00`);
+  }
+  return wakePanelLog ? new Date(wakePanelLog.bedtime_at.replace(" ", "T")) : null;
+}
 
 function wakeTimeFromInput() {
   // 入力は時刻だけなので、記録済みの起床時刻と同じ日付を基準にし、就寝より前になるなら翌日扱いにする
@@ -4222,34 +4177,41 @@ function wakeTimeFromInput() {
   if (!wakePanelLog || !hm) return null;
   const base = wakePanelLog.wake_at.slice(0, 10);
   let candidate = new Date(`${base}T${hm}:00`);
-  const bed = new Date(wakePanelLog.bedtime_at.replace(" ", "T"));
-  if (candidate <= bed) candidate = new Date(candidate.getTime() + 24 * 3600 * 1000);
+  const bed = wakePanelBedtime();
+  if (bed && candidate <= bed) candidate = new Date(candidate.getTime() + 24 * 3600 * 1000);
   return candidate;
 }
 
 function updateWakeSleptLabel() {
   const el = document.getElementById("wake-slept-label");
   const wake = wakeTimeFromInput();
-  if (!wake) {
+  const bed = wakePanelBedtime();
+  if (!wake || !bed) {
     el.textContent = "";
     return;
   }
-  const bed = new Date(wakePanelLog.bedtime_at.replace(" ", "T"));
   el.textContent = `Slept ${formatLogDuration(Math.round((wake - bed) / 60000))}`;
 }
 
 document.getElementById("wake-time-input").addEventListener("input", updateWakeSleptLabel);
+document.getElementById("wake-bed-input").addEventListener("input", updateWakeSleptLabel);
 
-function openWakeMoodPanel(log = null) {
+function openWakeMoodPanel(log = null, mode = "recorded") {
   const panel = document.getElementById("wake-mood-panel");
   const backdrop = document.getElementById("wake-mood-backdrop");
   const buttons = document.getElementById("wake-mood-buttons");
   setBedtimeMoodScore(buttons, null);
   wakeMoodScore = null;
-  wakePanelLog = log;
-  document.querySelector("#wake-mood-panel .wake-time-row").classList.toggle("hidden", !log);
-  if (log) {
-    document.getElementById("wake-time-input").value = log.wake_at.slice(11, 16);
+  wakePanelMode = mode;
+  wakePanelLog = mode === "backfill" ? { bedtime_at: null, wake_at: nowLocalTimestamp() } : log;
+  const note = document.getElementById("wake-panel-note");
+  note.classList.toggle("hidden", mode !== "backfill");
+  note.textContent = mode === "backfill" ? "No sleep log for last night. When did you go to bed?" : "";
+  document.getElementById("wake-bed-row").classList.toggle("hidden", mode !== "backfill");
+  if (mode === "backfill") document.getElementById("wake-bed-input").value = "23:00";
+  document.getElementById("wake-time-row").classList.toggle("hidden", !wakePanelLog);
+  if (wakePanelLog) {
+    document.getElementById("wake-time-input").value = wakePanelLog.wake_at.slice(11, 16);
     updateWakeSleptLabel();
   }
   panel.classList.remove("hidden");
@@ -4260,6 +4222,58 @@ function closeWakeMoodPanel() {
   document.getElementById("wake-mood-panel").classList.add("hidden");
   document.getElementById("wake-mood-backdrop").classList.add("hidden");
 }
+
+// ×や背景で閉じた時。「pending」は起床をまだ記録していないので、しばらくは自動で出し直さない
+function dismissWakeMoodPanel() {
+  if (wakePanelMode === "pending") morningPromptSnoozeUntil = Date.now() + 20 * 60 * 1000;
+  closeWakeMoodPanel();
+}
+
+// ---------- morning auto prompt (2026-10-02) ----------
+// 寝ている状態のまま朝アプリを開いたら、I'm upを押さなくてもGood morningパネルを出す。
+// 寝る記録自体を忘れた夜は、朝1回だけ「昨夜は何時に寝た?」と聞いて穴を埋める
+let morningPromptSnoozeUntil = 0;
+const MORNING_START_HOUR = 5;
+const MORNING_END_HOUR = 13;
+const BACKFILL_ASKED_KEY = "sleepBackfillAskedDate";
+
+function isMorningNow() {
+  const h = new Date().getHours();
+  return h >= MORNING_START_HOUR && h < MORNING_END_HOUR;
+}
+
+async function maybeShowMorningPanel() {
+  if (!isMorningNow() || Date.now() < morningPromptSnoozeUntil) return;
+  if (timerSubject || visiblePanels().length) return;
+  if (sleepActiveLog) {
+    if (!sleepActiveLog.id) return; // 就寝の保存中
+    const bed = new Date(sleepActiveLog.bedtime_at.replace(" ", "T"));
+    if (Date.now() - bed.getTime() < 3 * 3600 * 1000) return; // 寝てすぐ・昼寝中は聞かない
+    openWakeMoodPanel({ id: sleepActiveLog.id, bedtime_at: sleepActiveLog.bedtime_at, wake_at: nowLocalTimestamp() }, "pending");
+    return;
+  }
+  const today = todayStr();
+  try {
+    if (localStorage.getItem(BACKFILL_ASKED_KEY) === today) return;
+  } catch {
+    // 保存できない環境では毎回確認になるが、記録済みなら下の判定で出ない
+  }
+  const [latest] = await api("/api/sleep-logs?limit=1");
+  const coveredSince = `${addDaysToDate(today, -1)} 18:00:00`;
+  if (latest && (latest.bedtime_at >= coveredSince || (latest.wake_at && latest.wake_at >= `${today} 00:00:00`))) return;
+  if (timerSubject || visiblePanels().length) return;
+  try {
+    localStorage.setItem(BACKFILL_ASKED_KEY, today);
+  } catch {
+    // 同上
+  }
+  openWakeMoodPanel(null, "backfill");
+}
+
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState !== "visible" || !isMorningNow()) return;
+  loadSleepActive().then(maybeShowMorningPanel).catch(() => {});
+});
 
 async function wakeUp() {
   if (!sleepActiveLog) return;
@@ -4549,27 +4563,24 @@ guardedSubmit(document.getElementById("bedtime-add-form"), async (e) => {
 
 document.getElementById("bedtime-step2-done").addEventListener("click", closeBedtimePanel);
 
-guardedClick(document.getElementById("sleep-btn"), async () => {
-  if (sleepActiveLog) {
-    await wakeUp();
-  } else {
-    const bedtime_at = nowLocalTimestamp();
-    sleepActiveLog = { id: null, bedtime_at }; // idはPOST応答後にloadSleepActive()で正しい値に上書きされる
+async function goToBed() {
+  if (sleepActiveLog) return;
+  const bedtime_at = nowLocalTimestamp();
+  sleepActiveLog = { id: null, bedtime_at }; // idはPOST応答後にloadSleepActive()で正しい値に上書きされる
+  renderSleepStatus();
+  openBedtimePanel();
+  try {
+    await api("/api/sleep-logs", { method: "POST", body: JSON.stringify({ bedtime_at }) });
+    await loadSleepActive();
+    loadSleepPanel();
+  } catch (err) {
+    sleepActiveLog = null;
     renderSleepStatus();
-    openBedtimePanel();
-    try {
-      await api("/api/sleep-logs", { method: "POST", body: JSON.stringify({ bedtime_at }) });
-      await loadSleepActive();
-      loadSleepPanel();
-    } catch (err) {
-      sleepActiveLog = null;
-      renderSleepStatus();
-      showToast("就寝の記録に失敗しました。もう一度お試しください");
-    }
+    showToast("就寝の記録に失敗しました。もう一度お試しください");
   }
-});
+}
 
-guardedClick(document.getElementById("settings-sleep-wake-btn"), wakeUp);
+guardedClick(document.getElementById("sleep-now-wake-btn"), wakeUp);
 
 document.getElementById("wake-mood-buttons").querySelectorAll(".mood-scale-btn").forEach((btn) => {
   btn.addEventListener("click", () => {
@@ -4577,16 +4588,51 @@ document.getElementById("wake-mood-buttons").querySelectorAll(".mood-scale-btn")
   });
 });
 
-document.getElementById("wake-mood-close").addEventListener("click", closeWakeMoodPanel);
-document.getElementById("wake-mood-backdrop").addEventListener("click", closeWakeMoodPanel);
+document.getElementById("wake-mood-close").addEventListener("click", dismissWakeMoodPanel);
+document.getElementById("wake-mood-backdrop").addEventListener("click", dismissWakeMoodPanel);
+
+function toLocalTimestamp(d) {
+  return `${formatLocalDate(d)} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}:00`;
+}
+
+// 寝ている状態のまま開いた朝(pending)と、記録がない夜の穴埋め(backfill)の保存
+async function saveMorningSleep(mode, log, correctedWake, bed) {
+  const wake_at = correctedWake ? toLocalTimestamp(correctedWake) : nowLocalTimestamp();
+  if (mode === "pending") {
+    sleepActiveLog = null;
+    renderSleepStatus();
+    try {
+      await api(`/api/sleep-logs/${log.id}`, { method: "PUT", body: JSON.stringify({ wake_at }) });
+    } catch (err) {
+      showToast("起床の記録に失敗しました。もう一度お試しください");
+    } finally {
+      loadSleepActive();
+      loadSleepPanel();
+    }
+  } else if (mode === "backfill" && bed) {
+    try {
+      const { id } = await api("/api/sleep-logs", { method: "POST", body: JSON.stringify({ bedtime_at: toLocalTimestamp(bed) }) });
+      await api(`/api/sleep-logs/${id}`, { method: "PUT", body: JSON.stringify({ wake_at }) });
+    } catch (err) {
+      showToast("睡眠の記録に失敗しました。Sleepの履歴から追加できます");
+    } finally {
+      loadSleepActive();
+      loadSleepPanel();
+    }
+  }
+}
 
 document.getElementById("wake-mood-save").addEventListener("click", async () => {
   const score = wakeMoodScore;
   const log = wakePanelLog;
+  const mode = wakePanelMode;
   const correctedWake = wakeTimeFromInput();
+  const bed = wakePanelBedtime();
   closeWakeMoodPanel();
-  if (log && correctedWake) {
-    const corrected = `${formatLocalDate(correctedWake)} ${String(correctedWake.getHours()).padStart(2, "0")}:${String(correctedWake.getMinutes()).padStart(2, "0")}:00`;
+  if (mode !== "recorded") {
+    await saveMorningSleep(mode, log, correctedWake, bed);
+  } else if (log && correctedWake) {
+    const corrected = toLocalTimestamp(correctedWake);
     if (corrected.slice(0, 16) !== log.wake_at.slice(0, 16)) {
       try {
         await api(`/api/sleep-logs/${log.id}`, { method: "PUT", body: JSON.stringify({ wake_at: corrected }) });
@@ -5308,7 +5354,6 @@ function closeEventAddPanel() {
   eventAddBackdrop.classList.add("hidden");
 }
 
-document.getElementById("event-fab").addEventListener("click", openEventAddPanel);
 document.getElementById("event-add-close").addEventListener("click", closeEventAddPanel);
 eventAddBackdrop.addEventListener("click", closeEventAddPanel);
 
@@ -5939,6 +5984,7 @@ async function hydrateFromCache() {
     history.replaceState(history.state, "", location.pathname + location.search); // タブの履歴は残す
     openBedtimePanel();
   }
+  maybeShowMorningPanel().catch((err) => console.error("morning prompt failed:", err));
 })();
 
 // ---------- mood tab sub-tabs (2026-09-27) ----------
@@ -5958,12 +6004,241 @@ document.querySelectorAll("#mood-subtabs .period-btn").forEach((b) => {
   b.addEventListener("click", () => switchMoodSubtab(b.dataset.sub));
 });
 
+// Study: Log / Scores(2026-10-02、Scoresタブを統合)。Scoresはたまに見るだけなので覚えずに毎回Logから
+function switchStudySubtab(sub) {
+  document.querySelectorAll("#study-subtabs .period-btn").forEach((b) => b.classList.toggle("active", b.dataset.sub === sub));
+  document.querySelectorAll(".study-subpanel").forEach((p) => p.classList.toggle("hidden", p.dataset.sub !== sub));
+}
+
+document.querySelectorAll("#study-subtabs .period-btn").forEach((b) => {
+  b.addEventListener("click", () => switchStudySubtab(b.dataset.sub));
+});
+
 try {
   const savedSub = localStorage.getItem("moodSubtab");
   if (savedSub && document.querySelector(`.mood-subpanel[data-sub="${savedSub}"]`)) switchMoodSubtab(savedSub);
 } catch {
   // 既定のMoodのまま
 }
+
+// ---------- ⚡ record menu (2026-10-02) ----------
+// 勉強・気分・睡眠・サボり・ToDo・予定の「記録の入口」をここ1か所にまとめた。
+// 以前は右上の🛏/🧭・各タブ右下の▶/＋・Moodタブ内のボタンに散らばっていて、
+// 睡眠は2か月で約半分の夜、気分は65%が理由なし、という取りこぼしが出ていた。
+// 進行中のもの(タイマー・睡眠・サボり)があれば一番上の「Now」から1タップで終われる。
+
+const quickPanel = document.getElementById("quick-panel");
+const quickBackdrop = document.getElementById("quick-backdrop");
+let quickNowTick = null;
+// メニューを開いている間に保存した気分(数字を押し直したら新規ではなく上書きにする)
+let quickMood = null; // { id, score, saving: Promise }
+
+function openQuickPanel() {
+  if (!quickPanel.classList.contains("hidden")) return;
+  quickMood = null;
+  renderQuickPanel();
+  quickPanel.classList.remove("hidden");
+  quickBackdrop.classList.remove("hidden");
+  document.body.classList.add("quick-open");
+  document.querySelectorAll(".quick-btn").forEach((b) => b.classList.add("open"));
+  quickNowTick = setInterval(renderQuickNow, 1000);
+}
+
+function closeQuickPanel() {
+  quickPanel.classList.add("hidden");
+  quickBackdrop.classList.add("hidden");
+  document.body.classList.remove("quick-open");
+  document.querySelectorAll(".quick-btn").forEach((b) => b.classList.remove("open"));
+  clearInterval(quickNowTick);
+  quickNowTick = null;
+  endSubjectPick();
+}
+
+document.querySelectorAll(".quick-btn").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    if (quickPanel.classList.contains("hidden")) openQuickPanel();
+    else closeQuickPanel();
+  });
+});
+quickBackdrop.addEventListener("click", closeQuickPanel);
+
+function renderQuickPanel() {
+  renderQuickNow();
+  const running = !!timerSubject;
+  document.getElementById("quick-subjects").classList.toggle("disabled", running);
+  document.querySelectorAll("#quick-subjects .subject-btn").forEach((b) => { b.disabled = running; });
+  document.getElementById("quick-study-note").classList.toggle("hidden", !running);
+  document.getElementById("quick-bed-btn").classList.toggle("hidden", !!sleepActiveLog);
+  document.getElementById("quick-slack-btn").classList.toggle("hidden", !!activationActiveLog);
+  document.getElementById("quick-life-section").classList.toggle("hidden", !!sleepActiveLog && !!activationActiveLog);
+  renderQuickMood();
+}
+
+// Now: 1秒ごとに描き直す(タイマーの数字が進むため)。ボタンはdata-actで1か所の委譲ハンドラが拾う
+function renderQuickNow() {
+  const items = [];
+  if (timerSubject) {
+    const mode = sessionMode === "countdown" ? "Countdown" : "Timer";
+    items.push(`
+      <div class="quick-now-card" style="--subject-color:${colorFor(timerSubject)}">
+        <div class="quick-now-text">
+          <span class="meta">${escapeHtml(timerSubject)} · ${mode}${isPaused ? " · Paused" : ""}</span>
+          <span class="quick-now-time">${escapeHtml(document.getElementById("mini-timer-time").textContent)}</span>
+        </div>
+        <button type="button" class="secondary quick-now-btn" data-act="pause" aria-label="Pause/Resume">${isPaused ? "▶" : "⏸"}</button>
+        <button type="button" class="quick-now-btn" data-act="stop">■ Stop</button>
+      </div>`);
+  }
+  if (sleepActiveLog) {
+    items.push(`
+      <div class="quick-now-card sleep">
+        <div class="quick-now-text"><span>${ICONS.moon} ${sleepElapsedLabel()}</span></div>
+        <button type="button" class="quick-now-btn" data-act="wake">☀ I'm up</button>
+      </div>`);
+  }
+  if (activationActiveLog) {
+    items.push(`
+      <div class="quick-now-card slack">
+        <div class="quick-now-text"><span>${ICONS.alert} ${activationElapsedLabel()}</span></div>
+        <button type="button" class="quick-now-btn" data-act="return">Back to work</button>
+      </div>`);
+  }
+  const list = document.getElementById("quick-now-list");
+  const html = items.join("");
+  // 押している最中に描き直すとタップが失われるため、中身が変わった時だけ差し替える
+  if (list.dataset.html !== html) {
+    list.innerHTML = html;
+    list.dataset.html = html;
+  }
+  document.getElementById("quick-now-section").classList.toggle("hidden", items.length === 0);
+}
+
+document.getElementById("quick-now-list").addEventListener("click", async (e) => {
+  const act = e.target.closest("[data-act]")?.dataset.act;
+  if (!act) return;
+  if (act === "pause") {
+    if (isPaused) resumeSession();
+    else pauseSession();
+    renderQuickPanel();
+    return;
+  }
+  closeQuickPanel();
+  if (act === "stop") await stopAndSaveSession();
+  else if (act === "wake") await wakeUp();
+  else if (act === "return") await returnActivation();
+});
+
+// ---- Mood: 数字を押した瞬間に保存し、そのあと理由を小さく聞く ----
+
+function renderQuickMood() {
+  const row = document.getElementById("quick-mood-row");
+  if (!row.children.length) {
+    row.innerHTML = Array.from({ length: 10 }, (_, i) => `<button type="button" class="quick-mood-btn" data-score="${i + 1}">${i + 1}</button>`).join("");
+    row.querySelectorAll(".quick-mood-btn").forEach((btn) => {
+      btn.addEventListener("click", () => quickSaveMood(parseInt(btn.dataset.score, 10)));
+    });
+  }
+  row.querySelectorAll(".quick-mood-btn").forEach((b) => {
+    b.classList.toggle("active", !!quickMood && parseInt(b.dataset.score, 10) === quickMood.score);
+  });
+  document.getElementById("quick-mood-reason").classList.toggle("hidden", !quickMood);
+  const status = document.getElementById("quick-mood-status");
+  const todays = (lastMoodPanelData?.rows || []).filter((r) => r.date === todayStr());
+  const last = todays[todays.length - 1];
+  status.textContent = quickMood ? "" : last ? `Last: ${last.score} at ${(last.logged_at || "").slice(11, 16)}` : "Not logged today";
+}
+
+function renderQuickMoodReasons(score) {
+  const tier = moodTierForScore(score);
+  // 理由の候補はMoodタブの選択肢と同じものを使う(ラベルを2か所で持たないため)
+  const reasons = [...document.querySelectorAll("#mood-reason-picker .reason-btn")]
+    .filter((b) => tier === "mid" || b.dataset.tier === tier || b.dataset.tier === "both")
+    .map((b) => ({ reason: b.dataset.reason, label: b.textContent }));
+  const picker = document.getElementById("quick-mood-reason-picker");
+  picker.innerHTML = reasons
+    .map((r) => `<button type="button" class="reason-btn" data-reason="${escapeHtml(r.reason)}">${escapeHtml(r.label)}</button>`)
+    .join("");
+  picker.querySelectorAll(".reason-btn").forEach((btn) => {
+    btn.addEventListener("click", () => quickSetMoodReason(btn.dataset.reason));
+  });
+}
+
+async function quickSaveMood(score) {
+  if (quickMood) {
+    // 押し直しは同じ記録の数字だけ直す(1回の気分が2件に分かれないように)
+    quickMood.score = score;
+    renderQuickMood();
+    renderQuickMoodReasons(score);
+    try {
+      const id = await quickMood.saving;
+      await api(`/api/mood-logs/${id}`, { method: "PUT", body: JSON.stringify({ score }) });
+      loadMoodPanel();
+    } catch (err) {
+      showToast("気分の記録に失敗しました。もう一度お試しください");
+    }
+    return;
+  }
+  const entry = { date: todayStr(), score, logged_at: nowLocalTimestamp() };
+  const before = lastMoodPanelData;
+  if (before) renderMoodPanel({ ...before, rows: [...before.rows, { id: null, note: null, reason: null, ...entry }] });
+  const saving = api("/api/mood-logs", { method: "POST", body: JSON.stringify(entry) }).then((r) => r.id);
+  quickMood = { score, saving };
+  renderQuickMood();
+  renderQuickMoodReasons(score);
+  try {
+    await saving;
+    loadMoodPanel();
+    loadMoodStats();
+  } catch (err) {
+    if (before) renderMoodPanel(before);
+    quickMood = null;
+    renderQuickMood();
+    showToast("気分の記録に失敗しました。もう一度お試しください");
+  }
+}
+
+async function quickSetMoodReason(reason) {
+  const mood = quickMood;
+  if (!mood) return;
+  closeQuickPanel();
+  try {
+    const id = await mood.saving;
+    await api(`/api/mood-logs/${id}`, { method: "PUT", body: JSON.stringify({ reason }) });
+    loadMoodPanel();
+  } catch (err) {
+    showToast("理由の保存に失敗しました。Moodタブから記録できます");
+  }
+}
+
+// ---- Life / Add / Settings ----
+
+document.getElementById("quick-bed-btn").addEventListener("click", () => {
+  closeQuickPanel();
+  goToBed();
+});
+document.getElementById("quick-slack-btn").addEventListener("click", () => {
+  closeQuickPanel();
+  openActivationPanel();
+});
+document.getElementById("quick-todo-btn").addEventListener("click", () => {
+  closeQuickPanel();
+  openTodoAddPanel();
+});
+document.getElementById("quick-event-btn").addEventListener("click", () => {
+  closeQuickPanel();
+  openEventAddPanel();
+});
+document.getElementById("quick-settings-btn").addEventListener("click", () => {
+  closeQuickPanel();
+  openSettingsPanel();
+});
+
+// 帯の文字部分をタップしたら⚡メニューを開く(ボタン部分はそれぞれの操作)
+["sleep-now", "slack-now"].forEach((id) => {
+  document.getElementById(id).addEventListener("click", (e) => {
+    if (!e.target.closest("button")) openQuickPanel();
+  });
+});
 
 // ---------- keyboard shortcuts (2026-09-27) ----------
 // PCで開いている時用。1文字キーは入力欄に文字を打っている間は無効(Escだけは入力中でも効く)。
@@ -6004,15 +6279,11 @@ function activeTabId() {
 // S → 数字: 科目ミニメニューを開いて各ボタンに番号を振り、次に押された数字で開始パネルを開く
 let subjectPickTimer = null;
 
+// 2026-10-02からはSで⚡メニューを開き、その中の科目に番号を振る(タイマー中は番号なしで開く)
 function startSubjectPick() {
-  if (timerSubject) {
-    showToast("A timer is already running");
-    return;
-  }
-  switchTab("tab-study");
-  const menu = document.getElementById("study-fab-menu");
-  menu.classList.remove("hidden");
-  menu.classList.add("numbered");
+  openQuickPanel();
+  if (timerSubject) return;
+  document.getElementById("quick-subjects").classList.add("numbered");
   clearTimeout(subjectPickTimer);
   subjectPickTimer = setTimeout(endSubjectPick, 5000);
 }
@@ -6020,8 +6291,7 @@ function startSubjectPick() {
 function endSubjectPick() {
   clearTimeout(subjectPickTimer);
   subjectPickTimer = null;
-  const menu = document.getElementById("study-fab-menu");
-  menu.classList.remove("numbered");
+  document.getElementById("quick-subjects").classList.remove("numbered");
 }
 
 function closeTopmostLayer() {
@@ -6029,15 +6299,13 @@ function closeTopmostLayer() {
     closeShortcutPanel();
     return true;
   }
+  if (!quickPanel.classList.contains("hidden")) {
+    closeQuickPanel();
+    return true;
+  }
   const panels = visiblePanels();
   if (panels.length) {
     panels[panels.length - 1].querySelector(".panel-close")?.click();
-    return true;
-  }
-  const menu = document.getElementById("study-fab-menu");
-  if (!menu.classList.contains("hidden")) {
-    menu.classList.add("hidden");
-    endSubjectPick();
     return true;
   }
   if (timerSubject && !overlayMinimized && !document.getElementById("focus-overlay").classList.contains("hidden")) {
@@ -6054,8 +6322,8 @@ document.addEventListener("keydown", (e) => {
   }
   if (e.ctrlKey || e.metaKey || e.altKey || isTypingTarget(e.target)) return;
 
-  if (subjectPickTimer && /^[1-9]$/.test(e.key) && !document.getElementById("study-fab-menu").classList.contains("hidden")) {
-    const btn = document.querySelectorAll("#study-fab-menu .subject-btn")[Number(e.key) - 1];
+  if (subjectPickTimer && /^[1-9]$/.test(e.key) && !quickPanel.classList.contains("hidden")) {
+    const btn = document.querySelectorAll("#quick-subjects .subject-btn")[Number(e.key) - 1];
     endSubjectPick();
     if (btn) {
       e.preventDefault();

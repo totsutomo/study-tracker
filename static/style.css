@@ -35,40 +35,14 @@ body {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   background: var(--bg);
   color: var(--text);
-  padding-bottom: 88px; /* タブバーにアイコンを追加した分、高さが増えたぶんの余白を確保 */
+  /* タブバー分 + 進行中の帯(now-dock、JSが--dock-hに高さを入れる)の分 */
+  padding-bottom: calc(88px + var(--dock-h, 0px));
 }
 
-/* ロゴ"Compass"用の書体。使う文字(C/o/m/p/a/s)だけに絞ったサブセットなので約1.3KBしかない
-   (外部CDNには依存しない自前ホスティング、起動時の追加通信なし)。 */
-@font-face {
-  font-family: "Syne";
-  src: url("/static/fonts/syne-compass.woff2") format("woff2");
-  font-weight: 800;
-  font-style: normal;
-  font-display: swap;
-}
-
-header {
-  background: var(--bg);
-  color: var(--text);
-  padding: 16px 16px 12px;
-  border-bottom: 1px solid var(--border);
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-header .icon-btn {
-  padding: 6px;
-}
-
-header h1 {
-  margin: 0;
-  font-family: "Syne", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  font-size: 20px;
-  font-weight: 800;
-  letter-spacing: 0.01em;
-  flex: 1;
+/* 一番上のCOMPASSロゴの行をなくした(2026-10-02)ので、ノッチ付き端末では本文が
+   ステータスバーに潜らないよう、その分だけ下げる */
+.app-main-col {
+  padding-top: env(safe-area-inset-top);
 }
 
 /* ---------- loading indicators ---------- */
@@ -171,83 +145,6 @@ header h1 {
   .boot-loading::before {
     animation: none;
   }
-}
-
-.activation-btn.active {
-  color: var(--danger);
-  animation: activation-pulse 2s ease-in-out infinite;
-}
-
-.sleep-btn.active {
-  color: var(--accent);
-  animation: sleep-pulse 3s ease-in-out infinite;
-}
-
-@keyframes sleep-pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.55; }
-}
-
-.sleep-banner {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 10px 16px;
-  background: var(--accent);
-  border-bottom: 1px solid var(--border);
-  cursor: pointer;
-  animation: sleep-banner-pulse 3s ease-in-out infinite;
-}
-
-.sleep-banner.hidden {
-  display: none;
-}
-
-.sleep-banner span {
-  font-size: 13px;
-  font-weight: 700;
-  color: var(--on-accent);
-  white-space: nowrap;
-}
-
-@keyframes sleep-banner-pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.85; }
-}
-
-#settings-sleep-status {
-  margin-bottom: 8px;
-}
-
-#settings-sleep-wake-btn {
-  margin-bottom: 20px;
-}
-
-.activation-banner {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 10px 16px;
-  background: var(--danger);
-  border-bottom: 1px solid var(--border);
-  cursor: pointer;
-  animation: activation-banner-pulse 2s ease-in-out infinite;
-}
-
-.activation-banner.hidden {
-  display: none;
-}
-
-.activation-banner span {
-  font-size: 13px;
-  font-weight: 700;
-  color: #1a1a1a;
-  white-space: nowrap;
-}
-
-@keyframes activation-banner-pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.8; }
 }
 
 /* ---------- status strip (2026-09-27) ----------
@@ -817,7 +714,7 @@ button.secondary {
 #toast-banner {
   position: fixed;
   left: 50%;
-  bottom: calc(76px + env(safe-area-inset-bottom));
+  bottom: calc(var(--tabbar-h, 64px) + var(--dock-h, 0px) + 12px);
   transform: translate(-50%, 8px);
   background: var(--card);
   color: var(--text);
@@ -861,57 +758,11 @@ button.secondary {
   flex-shrink: 0;
 }
 
-/* --fab-lift: 計測中にミニタイマーバーが出ている間だけJSがバーの高さを入れる。
-   FABと科目ミニメニューの両方がこれを参照するので、片方だけ持ち上がって重なることがない */
-.fab {
-  position: fixed;
-  right: 20px;
-  bottom: calc(92px + var(--fab-lift, 0px));
-  width: 64px;
-  height: 64px;
-  border-radius: 50%;
-  background: var(--accent);
-  color: var(--on-accent);
-  font-size: 32px;
-  line-height: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
-  z-index: 20;
-  padding: 0;
-}
-
-/* 学習記録タブのFABだけ「▶」の見た目が「+」より大きく見えていたため、
-   文字サイズだけ個別に縮める(丸のサイズ・他の.fabへの影響はなし) */
-#study-fab {
-  font-size: 24px;
-}
-
 .backdrop {
   position: fixed;
   inset: 0;
   background: rgba(0, 0, 0, 0.5);
   z-index: 29;
-}
-
-.study-fab-menu {
-  position: fixed;
-  right: 20px;
-  bottom: calc(164px + var(--fab-lift, 0px));
-  z-index: 20;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 8px;
-}
-
-.study-fab-menu.hidden {
-  display: none;
-}
-
-.study-fab-menu .subject-btn {
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
 }
 
 .add-panel {
@@ -1133,14 +984,6 @@ h3.collapsible {
   padding-left: 36px;
 }
 
-/* 科目が増えるとスマホ幅で1行に収まらずページごと横にはみ出していた(kobun追加で発覚、2026-09-27)ので折り返す */
-.study-buttons {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-bottom: 16px;
-}
-
 .subject-btn {
   background: var(--card);
   color: var(--text);
@@ -1360,7 +1203,7 @@ body.focus-open #tabbar {
   position: fixed;
   left: 0;
   right: 0;
-  bottom: 44px; /* JS overrides this to sit flush above the tabbar's actual rendered height */
+  bottom: 44px; /* now-dockの中ではposition:staticになり、dockごとタブバーの上に置かれる */
   z-index: 25; /* must stay below .backdrop(29)/.add-panel(30) so modal panels eclipse it instead of floating on top */
   background: var(--card);
   border-top: 1px solid var(--border);
@@ -2230,7 +2073,7 @@ body.focus-open #tabbar {
 
 @media (min-width: 768px) {
   body {
-    padding-bottom: 0;
+    padding-bottom: var(--dock-h, 0px);
   }
 
   .app-shell {
@@ -2479,12 +2322,12 @@ body.focus-open #tabbar {
 
 /* ---------- keyboard shortcuts (2026-09-27) ---------- */
 
-/* S キーで科目メニューを開いた時だけ、各科目に押す数字を表示する */
-.study-fab-menu.numbered {
+/* S キーで⚡メニューを開いた時だけ、各科目に押す数字を表示する */
+.quick-subjects.numbered {
   counter-reset: subject-num;
 }
 
-.study-fab-menu.numbered .subject-btn::before {
+.quick-subjects.numbered .subject-btn::before {
   counter-increment: subject-num;
   content: counter(subject-num);
   display: inline-block;
@@ -2873,4 +2716,310 @@ kbd {
 
   .overview-share { display: flex; }
   .overview-head .overview-result { display: block; }
+}
+
+/* ---------- ⚡ record menu / now-dock (2026-10-02) ----------
+   記録系の入口(勉強・気分・睡眠・サボり・ToDo・予定)をタブバー中央の⚡1つにまとめた。
+   進行中のもの(タイマー・睡眠・サボり)はタブバーのすぐ上のnow-dockに積む */
+
+#tabbar {
+  z-index: 26;
+  align-items: stretch;
+}
+
+/* ⚡を開いている間もタブバーは背景より上に出し、⚡(×)でそのまま閉じられるようにする */
+body.quick-open #tabbar {
+  z-index: 31;
+}
+
+.quick-btn-slot {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.tabbar-quick-btn {
+  width: 58px;
+  height: 58px;
+  margin-top: -20px;
+  padding: 0;
+  border-radius: 50%;
+  border: 4px solid var(--bg);
+  background: var(--accent);
+  color: #ffc24a;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
+}
+
+.tabbar-quick-btn.open svg {
+  display: none;
+}
+
+.tabbar-quick-btn.open::after {
+  content: "×";
+  color: var(--on-accent);
+  font-size: 32px;
+  font-weight: 400;
+  line-height: 1;
+}
+
+.sidebar-quick-btn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 12px;
+  margin-bottom: 12px;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.sidebar-quick-btn svg {
+  color: #ffc24a;
+}
+
+.sidebar-quick-btn kbd {
+  margin-left: auto;
+  background: transparent;
+  color: var(--on-accent);
+  border-color: rgba(255, 255, 255, 0.45);
+}
+
+.now-dock {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 25; /* .backdrop(29)より下: パネルを開いたら帯は背景の下に隠れる */
+  display: flex;
+  flex-direction: column;
+}
+
+.now-dock .mini-timer-bar {
+  position: static;
+}
+
+.now-strip {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px 7px 14px;
+  background: var(--card);
+  border-top: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  cursor: pointer;
+}
+
+.slack-now {
+  border-left-color: var(--danger);
+}
+
+.now-strip-label {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.now-strip-action {
+  flex-shrink: 0;
+  padding: 7px 12px;
+  font-size: 13px;
+}
+
+.slack-now .now-strip-action {
+  background: var(--danger);
+  color: #1a1a1a;
+}
+
+.quick-grabber {
+  width: 40px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--border);
+  margin: 0 auto 12px;
+}
+
+.quick-section {
+  margin-bottom: 16px;
+}
+
+.quick-section:last-child {
+  margin-bottom: 0;
+}
+
+.quick-section-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.quick-head-note {
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.quick-settings-btn {
+  margin-left: auto;
+  color: var(--text-muted);
+}
+
+.quick-subjects {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* 科目数が変わっても1行3つまでで折り返し、最後の行は横いっぱいに広げる */
+.quick-subjects .subject-btn {
+  flex: 1 1 calc(33.333% - 8px);
+  padding: 13px 6px;
+  font-size: 15px;
+  font-weight: 700;
+  background: var(--card-hover);
+}
+
+.quick-subjects.disabled .subject-btn {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.quick-mood-row {
+  display: grid;
+  grid-template-columns: repeat(10, 1fr);
+  gap: 4px;
+}
+
+.quick-mood-btn {
+  min-height: 42px;
+  padding: 0;
+  background: var(--card-hover);
+  color: var(--text);
+  border: 1px solid var(--border);
+  font-size: 14px;
+}
+
+.quick-mood-btn.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
+}
+
+.quick-mood-reason {
+  margin-top: 10px;
+}
+
+.quick-mood-reason .meta {
+  margin: 0 0 6px;
+}
+
+.quick-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.quick-grid .hidden + .quick-tile,
+.quick-grid .quick-tile:has(+ .hidden) {
+  grid-column: 1 / -1;
+}
+
+.quick-tile {
+  padding: 14px 8px;
+  background: var(--card-hover);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.quick-bed {
+  background: color-mix(in srgb, var(--accent) 24%, var(--card));
+}
+
+.quick-slack {
+  background: color-mix(in srgb, var(--danger) 22%, var(--card));
+}
+
+.quick-now-card {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px;
+  margin-bottom: 8px;
+  background: var(--accent-dim);
+  border: 1px solid var(--accent);
+  border-left: 3px solid var(--subject-color, var(--accent));
+  border-radius: var(--radius-md);
+}
+
+.quick-now-card.slack {
+  background: var(--danger-dim);
+  border-color: var(--danger);
+}
+
+.quick-now-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.quick-now-text .meta {
+  margin: 0;
+}
+
+.quick-now-time {
+  font-size: 26px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.quick-now-btn {
+  flex-shrink: 0;
+  padding: 9px 14px;
+  white-space: nowrap;
+}
+
+.quick-now-card.slack .quick-now-btn {
+  background: var(--danger);
+  color: #1a1a1a;
+}
+
+/* スマホ: 下から出るシートだが、タブバーの上で止める(タブバーの⚡を×として押せるように) */
+@media (max-width: 767px) {
+  .quick-panel {
+    bottom: var(--tabbar-h, 0px);
+    max-height: calc(100dvh - var(--tabbar-h, 0px) - 24px);
+    padding-bottom: 22px;
+  }
+}
+
+@media (min-width: 768px) {
+  .now-dock {
+    left: 216px; /* サイドバーの幅。帯は右側の本文の下にだけ出す */
+  }
+
+  .quick-grabber {
+    display: none;
+  }
 }

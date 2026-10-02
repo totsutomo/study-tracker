@@ -371,6 +371,12 @@ class MoodLogCreate(BaseModel):
     logged_at: str | None = None  # "YYYY-MM-DD HH:MM:SS", client local time
 
 
+class MoodLogUpdate(BaseModel):
+    score: int | None = None
+    reason: str | None = None
+    note: str | None = None
+
+
 class SleepLogCreate(BaseModel):
     bedtime_at: str  # "YYYY-MM-DD HH:MM:SS", client local time
 
@@ -1382,16 +1388,34 @@ def mood_log_low_mood_achievement(days: int = 30):
 def create_mood_log(payload: MoodLogCreate):
     conn = get_connection()
     if payload.logged_at:
-        conn.execute(
+        cur = conn.execute(
             "INSERT INTO mood_logs (date, score, note, reason, logged_at) VALUES (?, ?, ?, ?, ?)",
             (payload.date, payload.score, payload.note, payload.reason, payload.logged_at),
         )
     else:
-        conn.execute(
+        cur = conn.execute(
             "INSERT INTO mood_logs (date, score, note, reason) VALUES (?, ?, ?, ?)",
             (payload.date, payload.score, payload.note, payload.reason),
         )
     conn.commit()
+    new_id = cur.lastrowid
+    conn.close()
+    # idは⚡メニューで「数字を押した瞬間に保存→あとから理由を足す」ために返す(2026-10-02)
+    return {"ok": True, "id": new_id}
+
+
+@app.put("/api/mood-logs/{log_id}")
+def update_mood_log(log_id: int, payload: MoodLogUpdate):
+    conn = get_connection()
+    cur = conn.execute("SELECT id FROM mood_logs WHERE id = ?", (log_id,))
+    if cur.fetchone() is None:
+        conn.close()
+        raise HTTPException(status_code=404, detail="mood log not found")
+    fields = {k: v for k, v in (("score", payload.score), ("reason", payload.reason), ("note", payload.note)) if v is not None}
+    if fields:
+        sets = ", ".join(f"{k} = ?" for k in fields)
+        conn.execute(f"UPDATE mood_logs SET {sets} WHERE id = ?", (*fields.values(), log_id))
+        conn.commit()
     conn.close()
     return {"ok": True}
 
