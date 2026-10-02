@@ -4353,9 +4353,36 @@ function renderActivationStatus() {
   updateActivationBanner();
 }
 
-async function loadActivationActive() {
-  activationActiveLog = await api("/api/activation-logs/active");
+// 進行中のサボりは端末にもキャッシュし、スマホを閉じてアプリが作り直されても起動直後に
+// 帯と「Back to work」を出す(2026-10-03)。以前はサーバーの返事(約10秒)まで帯が消えていた。
+// 開始/終了を押したら、その前に出していた読み込みの返事は古いので画面にもキャッシュにも反映しない
+const ACTIVATION_ACTIVE_PATH = "/api/activation-logs/active";
+let activationLocalGen = 0;
+
+// idが確定していない記録(POSTの返事待ち)はBack to workで送れないのでキャッシュしない
+function cacheActivationActive() {
+  const log = activationActiveLog;
+  if (log && !log.id) return;
+  cacheSet(ACTIVATION_ACTIVE_PATH, log && { id: log.id, triggered_at: log.triggered_at, note: log.note ?? null });
+}
+
+function setActivationActive(log) {
+  activationLocalGen++;
+  activationActiveLog = log;
   renderActivationStatus();
+  cacheActivationActive();
+}
+
+async function loadActivationActive() {
+  const gen = activationLocalGen;
+  await apiCached(ACTIVATION_ACTIVE_PATH, (log) => {
+    if (gen !== activationLocalGen) {
+      cacheActivationActive(); // api()が古い返事で上書きしたキャッシュを今の状態に戻す
+      return;
+    }
+    activationActiveLog = log;
+    renderActivationStatus();
+  });
 }
 
 // Slackingは押した瞬間に始める(2026-10-03)。ホーム画面ショートカット・⚡のどちらからも質問なし。
@@ -4368,13 +4395,12 @@ async function startSlacking() {
   const payload = { triggered_at: nowLocalTimestamp() };
   const saving = api("/api/activation-logs", { method: "POST", body: JSON.stringify(payload) }).then((r) => r.id);
   const log = { id: null, ...payload, saving }; // idはPOST応答で入る
-  activationActiveLog = log;
-  renderActivationStatus();
+  setActivationActive(log);
   try {
     log.id = await saving;
+    if (activationActiveLog === log) cacheActivationActive();
   } catch (err) {
-    if (activationActiveLog === log) activationActiveLog = null;
-    renderActivationStatus();
+    if (activationActiveLog === log) setActivationActive(null);
     showToast("記録の開始に失敗しました。もう一度お試しください");
     return;
   }
@@ -4383,8 +4409,7 @@ async function startSlacking() {
     {
       label: "Undo",
       onClick: async () => {
-        if (activationActiveLog === log) activationActiveLog = null;
-        renderActivationStatus();
+        if (activationActiveLog === log) setActivationActive(null);
         try {
           await api(`/api/activation-logs/${log.id}`, { method: "DELETE" });
         } finally {
@@ -4400,8 +4425,7 @@ async function startSlacking() {
 async function returnActivation() {
   if (!activationActiveLog) return;
   const activeLog = activationActiveLog;
-  activationActiveLog = null;
-  renderActivationStatus(); // 楽観的に即座に「未Active」表示へ切り替える
+  setActivationActive(null); // 楽観的に即座に「未Active」表示へ切り替える
   const returnedAt = nowLocalTimestamp();
   // 気分はここで聞く(開始時に聞くと押す手間が増えるため)。保存を待たずに出す
   const idPromise = activeLog.id ? Promise.resolve(activeLog.id) : activeLog.saving;
@@ -4661,9 +4685,34 @@ function renderSleepStatus() {
   updateSleepBanner();
 }
 
-async function loadSleepActive() {
-  sleepActiveLog = await api("/api/sleep-logs/active");
+// サボり(ACTIVATION_ACTIVE_PATH)と同じ仕組み(2026-10-03): 寝ている間にアプリが作り直されても、
+// 起動直後にキャッシュから帯と「I'm up」を出す。押した後に届いた古い返事は反映しない
+const SLEEP_ACTIVE_PATH = "/api/sleep-logs/active";
+let sleepLocalGen = 0;
+
+function cacheSleepActive() {
+  const log = sleepActiveLog;
+  if (log && !log.id) return; // 就寝のPOST返事待ち。idなしでは起床を送れない
+  cacheSet(SLEEP_ACTIVE_PATH, log && { id: log.id, bedtime_at: log.bedtime_at, wake_at: null });
+}
+
+function setSleepActive(log) {
+  sleepLocalGen++;
+  sleepActiveLog = log;
   renderSleepStatus();
+  cacheSleepActive();
+}
+
+async function loadSleepActive() {
+  const gen = sleepLocalGen;
+  await apiCached(SLEEP_ACTIVE_PATH, (log) => {
+    if (gen !== sleepLocalGen) {
+      cacheSleepActive();
+      return;
+    }
+    sleepActiveLog = log;
+    renderSleepStatus();
+  });
 }
 
 // 朝のパネルで直せるよう、今回記録した睡眠ログ(id・就寝・起床時刻)を覚えておく
@@ -4789,8 +4838,7 @@ document.addEventListener("visibilitychange", () => {
 async function wakeUp() {
   if (!sleepActiveLog) return;
   const activeLog = sleepActiveLog;
-  sleepActiveLog = null;
-  renderSleepStatus(); // 楽観的に即座に「起床済み」表示へ
+  setSleepActive(null); // 楽観的に即座に「起床済み」表示へ
   try {
     const wake_at = nowLocalTimestamp();
     await api(`/api/sleep-logs/${activeLog.id}`, {
@@ -5171,16 +5219,17 @@ document.getElementById("bedtime-sabori-next").addEventListener("click", closeBe
 async function goToBed() {
   if (sleepActiveLog) return;
   const bedtime_at = nowLocalTimestamp();
-  sleepActiveLog = { id: null, bedtime_at }; // idはPOST応答後にloadSleepActive()で正しい値に上書きされる
-  renderSleepStatus();
+  const log = { id: null, bedtime_at }; // idはPOST応答で入る
+  setSleepActive(log);
   openBedtimePanel();
   try {
-    await api("/api/sleep-logs", { method: "POST", body: JSON.stringify({ bedtime_at }) });
-    await loadSleepActive();
+    const { id } = await api("/api/sleep-logs", { method: "POST", body: JSON.stringify({ bedtime_at }) });
+    log.id = id;
+    if (sleepActiveLog === log) cacheSleepActive(); // ここで閉じても次に開いた時に帯が出るよう、すぐ保存
+    loadSleepActive().catch(() => {});
     loadSleepPanel();
   } catch (err) {
-    sleepActiveLog = null;
-    renderSleepStatus();
+    if (sleepActiveLog === log) setSleepActive(null);
     showToast("就寝の記録に失敗しました。もう一度お試しください");
   }
 }
@@ -5206,8 +5255,7 @@ function toLocalTimestamp(d) {
 async function saveMorningSleep(mode, log, correctedWake, bed) {
   const wake_at = correctedWake ? toLocalTimestamp(correctedWake) : nowLocalTimestamp();
   if (mode === "pending") {
-    sleepActiveLog = null;
-    renderSleepStatus();
+    setSleepActive(null);
     try {
       await api(`/api/sleep-logs/${log.id}`, { method: "PUT", body: JSON.stringify({ wake_at }) });
     } catch (err) {
