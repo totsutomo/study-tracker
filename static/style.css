@@ -2654,6 +2654,12 @@ body:has(#tab-calendar.active) {
   padding-right: 16px;
 }
 
+/* ToDoをキーボード(↑↓/J K)で選んでいるカード(2026-10-03) */
+#todo-groups li.kb-selected {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 .shortcut-table th {
   padding: 14px 4px 4px;
   text-align: left;

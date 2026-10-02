@@ -33,14 +33,14 @@ window.addEventListener("popstate", (e) => {
 document.getElementById("daily-min-banner").addEventListener("click", () => switchTab("tab-study"));
 document.getElementById("screen-budget-banner").addEventListener("click", () => switchTab("tab-study"));
 
-// Ctrl+数字でタブバーの並び順通りに切り替える(重複表示されているデスクトップ/モバイル navから
-// タブIDの並びだけ重複排除して使う)。PWAとしてインストールした場合はブラウザのタブ切替
-// ショートカットと衝突しないが、通常のブラウザタブ内で開いている場合はブラウザ側が
-// 先取りすることがある。
+// Alt+数字でタブバーの並び順通りに切り替える(重複表示されているデスクトップ/モバイル navから
+// タブIDの並びだけ重複排除して使う)。2026-10-03にCtrl+数字から変更し、Drill・Stack・vocab-appと
+// そろえた(Ctrl+数字は普通のブラウザタブで開くとブラウザのタブ切替に先取りされる)。
+// Alt+数字はe.keyが配列によって変わりうるためe.codeで見る
 document.addEventListener("keydown", (e) => {
-  if (!(e.ctrlKey || e.metaKey) || !/^[1-9]$/.test(e.key)) return;
+  if (!e.altKey || e.ctrlKey || e.metaKey || !/^Digit[1-9]$/.test(e.code)) return;
   const orderedTabIds = [...new Set([...tabButtons].map((b) => b.dataset.tab))];
-  const targetTabId = orderedTabIds[Number(e.key) - 1];
+  const targetTabId = orderedTabIds[Number(e.code.slice(5)) - 1];
   if (!targetTabId) return;
   e.preventDefault();
   switchTab(targetTabId);
@@ -557,6 +557,8 @@ function renderTodoItem(t, list) {
     li.classList.add("todo-pending");
     li.inert = true;
   }
+  if (t.id != null) li.dataset.todoId = t.id;
+  if (t.id != null && t.id === kbSelectedTodoId) li.classList.add("kb-selected");
   if (t.done) li.classList.add("done");
   if (t.skipped) li.classList.add("skipped");
   const overdue = isOverdue(t);
@@ -656,6 +658,7 @@ function todoGroupOf(t) {
 }
 
 let allTodos = [];
+let kbSelectedTodoId = null; // ToDoタブでキーボード選択中のtodo(handleTodoKey参照)
 let doneExpanded = false;
 let skippedExpanded = false;
 
@@ -7167,6 +7170,50 @@ function closeTopmostLayer() {
   return false;
 }
 
+// ToDoタブ: ↑↓(J/K)でカードを選び、Xで完了、Enterで編集(Stackの一覧と同じ割り当て、2026-10-03)。
+// 描き直しでカードのDOMが入れ替わるため、選択はtodoのidで覚えておく(変数kbSelectedTodoIdはallTodosの隣)
+
+function visibleTodoCards() {
+  return [...document.querySelectorAll("#todo-groups li[data-todo-id]")].filter((li) => li.offsetParent !== null);
+}
+
+function setKbSelectedTodo(li) {
+  document.querySelectorAll("#todo-groups li.kb-selected").forEach((el) => el.classList.remove("kb-selected"));
+  kbSelectedTodoId = li ? Number(li.dataset.todoId) : null;
+  if (li) {
+    li.classList.add("kb-selected");
+    li.scrollIntoView({ block: "nearest" });
+  }
+}
+
+function handleTodoKey(e) {
+  const key = e.key.toLowerCase();
+  const cards = visibleTodoCards();
+  const idx = cards.findIndex((li) => Number(li.dataset.todoId) === kbSelectedTodoId);
+  if (e.key === "ArrowDown" || key === "j" || e.key === "ArrowUp" || key === "k") {
+    if (!cards.length) return false;
+    const step = e.key === "ArrowDown" || key === "j" ? 1 : -1;
+    const next = idx === -1 ? (step === 1 ? 0 : cards.length - 1) : Math.min(cards.length - 1, Math.max(0, idx + step));
+    setKbSelectedTodo(cards[next]);
+    return true;
+  }
+  if (idx === -1) return false;
+  const li = cards[idx];
+  if (key === "x") {
+    // 完了したカードは下の「Done」に移って見えなくなるので、選択は次のカードへ送る
+    const after = cards[idx + 1] || cards[idx - 1] || null;
+    li.querySelector("input[type=checkbox]").click();
+    setKbSelectedTodo(after);
+    return true;
+  }
+  if (e.key === "Enter" && !e.target.closest?.("button, a")) {
+    const t = allTodos.find((x) => x.id === kbSelectedTodoId);
+    if (t) openTodoDetail(t);
+    return !!t;
+  }
+  return false;
+}
+
 // Calendarタブ専用のキー(2026-10-03)。J/KはGoogleカレンダーと同じ割り当て。
 // 処理したらtrueを返す(呼ぶ側でpreventDefaultする)。
 function handleCalendarKey(e) {
@@ -7215,6 +7262,16 @@ document.addEventListener("keydown", (e) => {
     if (closeTopmostLayer()) e.preventDefault();
     return;
   }
+  // Ctrl+Enter: 開いているパネルのフォームを保存(メモ欄など、Enterが改行になる欄からでも)。
+  // vocab-app・Stackと同じキー(2026-10-03)
+  if ((e.ctrlKey || e.metaKey) && e.key === "Enter" && !e.isComposing) {
+    const form = e.target.closest?.(".add-panel form") || visiblePanels().at(-1)?.querySelector("form");
+    if (form) {
+      e.preventDefault();
+      form.requestSubmit();
+    }
+    return;
+  }
   if (e.ctrlKey || e.metaKey || e.altKey || isTypingTarget(e.target)) return;
 
   if (subjectPickTimer && /^[1-9]$/.test(e.key) && !quickPanel.classList.contains("hidden")) {
@@ -7234,8 +7291,37 @@ document.addEventListener("keydown", (e) => {
     return;
   }
 
+  // ⚡メニューの中: B=Go to bed、L=Slacking(2026-10-03)
+  if (!quickPanel.classList.contains("hidden")) {
+    const btnId = { b: "quick-bed-btn", l: "quick-slack-btn" }[e.key.toLowerCase()];
+    if (btnId) {
+      e.preventDefault();
+      endSubjectPick();
+      document.getElementById(btnId).click();
+      return;
+    }
+  }
+
   // パネルが開いている間はEsc以外の1文字キーで別のパネルを重ねない
   if (visiblePanels().length) return;
+
+  // / で検索、, で設定(4アプリ共通の割り当て、2026-10-03)
+  if (e.key === "/") {
+    e.preventDefault();
+    if (activeTabId() !== "tab-todo") switchTab("tab-todo");
+    document.getElementById("todo-search").focus();
+    return;
+  }
+  if (e.key === ",") {
+    e.preventDefault();
+    openSettingsPanel();
+    return;
+  }
+
+  if (activeTabId() === "tab-todo" && handleTodoKey(e)) {
+    e.preventDefault();
+    return;
+  }
 
   if (activeTabId() === "tab-calendar" && handleCalendarKey(e)) {
     e.preventDefault();
