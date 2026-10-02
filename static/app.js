@@ -3653,51 +3653,72 @@ function renderDiaryScoreStats(rows) {
   latestEl.textContent = Math.round(rows[rows.length - 1].overall);
 }
 
+// スコア系の折れ線グラフ(日記・Stack・Vocab・一橋)共通の座標系と縦軸(2026-10-02)。
+// 以前は横長のviewBoxをpreserveAspectRatio="none"で引き伸ばしていて文字が潰れ、縦軸も無かったので、
+// 勉強時間・気分グラフと同じく縦横比を保つ描き方にそろえ、左に目盛りを付けた
+function scoreChartFrame(count, ticks, maxV, suffix = "") {
+  const chartW = 320, chartH = 130, padLeft = 28, padRight = 8, padTop = 9, padBottom = 14;
+  const plotW = chartW - padLeft - padRight;
+  const plotH = chartH - padTop - padBottom;
+  // 1点しかない時は線が引けないので、点を真ん中に置く
+  const xOf = (i) => (count > 1 ? padLeft + (i * plotW) / (count - 1) : padLeft + plotW / 2);
+  const yOf = (v) => padTop + plotH - (v / maxV) * plotH;
+  const grid = ticks.map((v) =>
+    `<line x1="${padLeft}" x2="${chartW - padRight}" y1="${yOf(v)}" y2="${yOf(v)}" stroke="var(--border)" stroke-width="0.6"></line>` +
+    `<text x="${padLeft - 4}" y="${yOf(v) + 3}" font-size="8" fill="var(--text-muted)" text-anchor="end">${v}${suffix}</text>`).join("");
+  // 横軸の日付は5個程度に間引き、最後の点には必ず付ける
+  const labelEvery = Math.max(1, Math.ceil(count / 5));
+  const xLabels = (labelOf) => Array.from({ length: count }, (_, i) =>
+    (i % labelEvery !== 0 && i !== count - 1) ? "" :
+      `<text x="${xOf(i).toFixed(1)}" y="${chartH - 2}" font-size="8" fill="var(--text-muted)" text-anchor="middle">${labelOf(i)}</text>`).join("");
+  const svg = (inner) => `<svg viewBox="0 0 ${chartW} ${chartH}" class="study-svg-chart">${grid}${inner}</svg>`;
+  return { xOf, yOf, xLabels, svg };
+}
+
+// 上限が決まっていない値(習得数など)用: 0〜maxをおよそ4分割するキリのいい目盛り
+function niceTicks(max) {
+  const raw = Math.max(1, max) / 4;
+  const mag = 10 ** Math.floor(Math.log10(raw));
+  // 枚数・語数は整数なので、目盛りの間隔も1未満にはしない
+  const step = Math.max(1, [1, 2, 5, 10].map((m) => m * mag).find((s) => s >= raw));
+  const top = Math.ceil(Math.max(1, max) / step) * step;
+  const ticks = [];
+  for (let v = 0; v <= top; v += step) ticks.push(v);
+  return { ticks, top };
+}
+
 function renderDiaryScoreChart(rows) {
   const container = document.getElementById("diary-score-chart");
   if (!rows.length) {
     container.innerHTML = `<p class="meta">No diary scores yet</p>`;
     return;
   }
-  const chartW = 700, chartH = 180, padTop = 10, padBottom = 20, padX = 12;
-  const plotH = chartH - padTop - padBottom;
-  const plotW = chartW - padX * 2;
-  const stepX = rows.length > 1 ? plotW / (rows.length - 1) : 0;
-  const xs = rows.map((_, i) => padX + i * stepX);
+  const overall = diaryScoreView === "overall";
+  const max = overall ? 100 : 25;
+  const { xOf, yOf, xLabels, svg } = scoreChartFrame(
+    rows.length, overall ? [0, 25, 50, 75, 100] : [0, 5, 10, 15, 20, 25], max);
 
-  const seriesDefs = diaryScoreView === "overall"
-    ? [{ key: "overall", color: "#4f7cdb", max: 100, width: 2, dots: true }]
+  const seriesDefs = overall
+    ? [{ key: "overall", color: "#4f7cdb", width: 1.5, dots: true }]
     : [
-        { key: "task", color: "#4f7cdb", max: 25, width: 1.5 },
-        { key: "coherence", color: "#4a9c72", max: 25, width: 1.5 },
-        { key: "lexical", color: "#e0a030", max: 25, width: 1.5 },
-        { key: "grammar", color: "#e5555c", max: 25, width: 1.5 },
+        { key: "task", color: "#4f7cdb", width: 1.2 },
+        { key: "coherence", color: "#4a9c72", width: 1.2 },
+        { key: "lexical", color: "#e0a030", width: 1.2 },
+        { key: "grammar", color: "#e5555c", width: 1.2 },
       ];
 
   const paths = seriesDefs.map((s) => {
-    let d = "";
-    rows.forEach((r, i) => {
-      const y = padTop + plotH - (r[s.key] / s.max) * plotH;
-      d += `${i === 0 ? "M" : "L"}${xs[i].toFixed(1)},${y.toFixed(1)} `;
-    });
-    return `<path d="${d.trim()}" fill="none" stroke="${s.color}" stroke-width="${s.width}" stroke-linecap="round" stroke-linejoin="round"></path>`;
+    const d = rows.map((r, i) => `${i === 0 ? "M" : "L"}${xOf(i).toFixed(1)},${yOf(r[s.key]).toFixed(1)}`).join(" ");
+    return `<path d="${d}" fill="none" stroke="${s.color}" stroke-width="${s.width}" stroke-linecap="round" stroke-linejoin="round"></path>`;
   }).join("");
 
   const dots = seriesDefs
     .filter((s) => s.dots)
-    .map((s) => rows.map((r, i) => {
-      const y = padTop + plotH - (r[s.key] / s.max) * plotH;
-      return `<circle cx="${xs[i].toFixed(1)}" cy="${y.toFixed(1)}" r="3" fill="${s.color}"></circle>`;
-    }).join(""))
+    .map((s) => rows.map((r, i) =>
+      `<circle cx="${xOf(i).toFixed(1)}" cy="${yOf(r[s.key]).toFixed(1)}" r="2" fill="${s.color}"></circle>`).join(""))
     .join("");
 
-  const labelEvery = Math.max(1, Math.ceil(rows.length / 5));
-  const labels = rows.map((r, i) => {
-    if (i % labelEvery !== 0 && i !== rows.length - 1) return "";
-    return `<text x="${xs[i].toFixed(1)}" y="${chartH - 4}" font-size="10" fill="var(--text-muted)" text-anchor="middle">${formatMonthDay(r.date)}</text>`;
-  }).join("");
-
-  container.innerHTML = `<svg viewBox="0 0 ${chartW} ${chartH}" width="100%" height="150" preserveAspectRatio="none">${paths}${dots}${labels}</svg>`;
+  container.innerHTML = svg(`${paths}${dots}${xLabels((i) => formatMonthDay(rows[i].date))}`);
 }
 
 // ---------- Stack(カードアプリ)の成績: 科目ごとの正答率(Good・Easyの割合)と習得数(間隔21日以上) ----------
@@ -3739,25 +3760,19 @@ function renderStackScores(rows) {
       `<span class="stat-value">${acc}</span><span class="stat-label">${latest.mastered}/${latest.total} mastered</span></div>`;
   }).join("");
 
-  const chartW = 700, chartH = 180, padTop = 10, padBottom = 20, padX = 12;
-  const plotH = chartH - padTop - padBottom;
-  const plotW = chartW - padX * 2;
-  const stepX = dates.length > 1 ? plotW / (dates.length - 1) : 0;
-  const xOf = (d) => padX + dates.indexOf(d) * stepX;
-  const valueOf = (r) => (stackScoreView === "accuracy" ? (r.reviews ? (r.correct / r.reviews) * 100 : null) : r.mastered);
-  const maxV = stackScoreView === "accuracy" ? 100 : Math.max(1, ...rows.map((r) => r.mastered));
-  const yOf = (v) => padTop + plotH - (v / maxV) * plotH;
+  const accuracy = stackScoreView === "accuracy";
+  const valueOf = (r) => (accuracy ? (r.reviews ? (r.correct / r.reviews) * 100 : null) : r.mastered);
+  const scale = accuracy ? { ticks: [0, 25, 50, 75, 100], top: 100 } : niceTicks(Math.max(...rows.map((r) => r.mastered)));
+  const { xOf: xAt, yOf, xLabels, svg } = scoreChartFrame(dates.length, scale.ticks, scale.top, accuracy ? "%" : "");
+  const xOf = (d) => xAt(dates.indexOf(d));
 
   const paths = subjects.map((s) => {
     const pts = rows.filter((r) => r.subject === s).map((r) => [xOf(r.date), valueOf(r)]).filter(([, v]) => v !== null);
     const d = pts.map(([x, v], i) => `${i === 0 ? "M" : "L"}${x.toFixed(1)},${yOf(v).toFixed(1)}`).join(" ");
-    const dots = pts.map(([x, v]) => `<circle cx="${x.toFixed(1)}" cy="${yOf(v).toFixed(1)}" r="3" fill="${color(s)}"></circle>`).join("");
-    return `<path d="${d}" fill="none" stroke="${color(s)}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>${dots}`;
+    const dots = pts.map(([x, v]) => `<circle cx="${x.toFixed(1)}" cy="${yOf(v).toFixed(1)}" r="2.5" fill="${color(s)}"></circle>`).join("");
+    return `<path d="${d}" fill="none" stroke="${color(s)}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"></path>${dots}`;
   }).join("");
-  const labelEvery = Math.max(1, Math.ceil(dates.length / 5));
-  const labels = dates.map((d, i) => (i % labelEvery !== 0 && i !== dates.length - 1) ? "" :
-    `<text x="${xOf(d).toFixed(1)}" y="${chartH - 4}" font-size="10" fill="var(--text-muted)" text-anchor="middle">${formatMonthDay(d)}</text>`).join("");
-  container.innerHTML = `<svg viewBox="0 0 ${chartW} ${chartH}" width="100%" height="150" preserveAspectRatio="none">${paths}${labels}</svg>`;
+  container.innerHTML = svg(`${paths}${xLabels((i) => formatMonthDay(dates[i]))}`);
   legend.innerHTML = subjects.map((s) => `<span class="legend-item"><span class="legend-dot" style="background:${color(s)};"></span>${stackEscape(s)}</span>`).join("");
 }
 
@@ -3817,28 +3832,15 @@ function renderVocabStats(data) {
     container.innerHTML = `<p class="meta">まだ評価の記録なし(vocab-appで復習すると入ります)</p>`;
     return;
   }
-  const chartW = 700, chartH = 180, padTop = 10, padBottom = 20, padX = 12;
-  const plotH = chartH - padTop - padBottom;
-  const plotW = chartW - padX * 2;
-  const stepX = ratings.length > 1 ? plotW / (ratings.length - 1) : 0;
-  // 1日分しかない時は線が引けないので、点を真ん中に置く
-  const xOf = (i) => (ratings.length > 1 ? padX + i * stepX : chartW / 2);
-  const yOf = (r) => padTop + plotH - ((r.good + r.easy) / r.total) * plotH;
+  const { xOf, yOf: yAt, xLabels, svg } = scoreChartFrame(ratings.length, [0, 25, 50, 75, 100], 100, "%");
+  const yOf = (r) => yAt(((r.good + r.easy) / r.total) * 100);
   const color = "#10b981";
   const d = ratings.map((r, i) => `${i === 0 ? "M" : "L"}${xOf(i).toFixed(1)},${yOf(r).toFixed(1)}`).join(" ");
   const dots = ratings.map((r, i) =>
-    `<circle cx="${xOf(i).toFixed(1)}" cy="${yOf(r).toFixed(1)}" r="3" fill="${color}"><title>${r.date}: ${pct(r.good + r.easy, r.total)} (${r.total})</title></circle>`).join("");
-  const labelEvery = Math.max(1, Math.ceil(ratings.length / 5));
-  const labels = ratings.map((r, i) => (i % labelEvery !== 0 && i !== ratings.length - 1) ? "" :
-    `<text x="${xOf(i).toFixed(1)}" y="${chartH - 4}" font-size="10" fill="var(--text-muted)" text-anchor="middle">${formatMonthDay(r.date)}</text>`).join("");
-  // 線1本だけだと高さが何%か読めないので、50%・100%の目盛り線を薄く引く
-  const grid = [50, 100].map((v) => {
-    const y = padTop + plotH - (v / 100) * plotH;
-    return `<line x1="${padX}" x2="${chartW - padX}" y1="${y}" y2="${y}" stroke="var(--border)" stroke-dasharray="3 3"></line>` +
-      `<text x="${padX}" y="${y - 3}" font-size="10" fill="var(--text-muted)">${v}%</text>`;
-  }).join("");
-  container.innerHTML = `<svg viewBox="0 0 ${chartW} ${chartH}" width="100%" height="150" preserveAspectRatio="none">${grid}` +
-    `<path d="${d}" fill="none" stroke="${color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>${dots}${labels}</svg>`;
+    `<circle cx="${xOf(i).toFixed(1)}" cy="${yOf(r).toFixed(1)}" r="2.5" fill="${color}"><title>${r.date}: ${pct(r.good + r.easy, r.total)} (${r.total})</title></circle>`).join("");
+  container.innerHTML = svg(
+    `<path d="${d}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"></path>${dots}` +
+    xLabels((i) => formatMonthDay(ratings[i].date)));
 }
 
 function renderHitotsubashiScoreStats(rows) {
@@ -3858,37 +3860,26 @@ function renderHitotsubashiScoreChart(rows) {
     legend.innerHTML = "";
     return;
   }
-  const chartW = 700, chartH = 180, padTop = 10, padBottom = 20, padX = 12;
-  const plotH = chartH - padTop - padBottom;
-  const plotW = chartW - padX * 2;
-  const stepX = rows.length > 1 ? plotW / (rows.length - 1) : 0;
-  const xs = rows.map((_, i) => padX + i * stepX);
-  const yOf = (v) => padTop + plotH - (v / 100) * plotH;
+  const { xOf, yOf, xLabels, svg } = scoreChartFrame(rows.length, [0, 25, 50, 75, 100], 100);
 
   const seriesDefs = hitotsubashiScoreView === "overall"
-    ? [{ key: "overall", color: "#4f7cdb", width: 2, label: "Overall" }]
+    ? [{ key: "overall", color: "#4f7cdb", width: 1.5, label: "Overall" }]
     : [
-        { key: "content", color: "#4f7cdb", width: 1.5, label: "Content" },
-        { key: "organization", color: "#4a9c72", width: 1.5, label: "Organization" },
-        { key: "language", color: "#e5555c", width: 1.5, label: "Language" },
+        { key: "content", color: "#4f7cdb", width: 1.2, label: "Content" },
+        { key: "organization", color: "#4a9c72", width: 1.2, label: "Organization" },
+        { key: "language", color: "#e5555c", width: 1.2, label: "Language" },
       ];
 
   const paths = seriesDefs.map((s) => {
-    const d = rows.map((r, i) => `${i === 0 ? "M" : "L"}${xs[i].toFixed(1)},${yOf(r[s.key]).toFixed(1)}`).join(" ");
+    const d = rows.map((r, i) => `${i === 0 ? "M" : "L"}${xOf(i).toFixed(1)},${yOf(r[s.key]).toFixed(1)}`).join(" ");
     return `<path d="${d}" fill="none" stroke="${s.color}" stroke-width="${s.width}" stroke-linecap="round" stroke-linejoin="round"></path>`;
   }).join("");
 
   const dots = hitotsubashiScoreView === "overall"
-    ? rows.map((r, i) => `<circle cx="${xs[i].toFixed(1)}" cy="${yOf(r.overall).toFixed(1)}" r="3.5" fill="${HITOTSUBASHI_FORMAT_COLORS[r.format] ?? "#4f7cdb"}"></circle>`).join("")
+    ? rows.map((r, i) => `<circle cx="${xOf(i).toFixed(1)}" cy="${yOf(r.overall).toFixed(1)}" r="3" fill="${HITOTSUBASHI_FORMAT_COLORS[r.format] ?? "#4f7cdb"}"></circle>`).join("")
     : "";
 
-  const labelEvery = Math.max(1, Math.ceil(rows.length / 5));
-  const labels = rows.map((r, i) => {
-    if (i % labelEvery !== 0 && i !== rows.length - 1) return "";
-    return `<text x="${xs[i].toFixed(1)}" y="${chartH - 4}" font-size="10" fill="var(--text-muted)" text-anchor="middle">${formatWritingSessionLabel(r)}</text>`;
-  }).join("");
-
-  container.innerHTML = `<svg viewBox="0 0 ${chartW} ${chartH}" width="100%" height="150" preserveAspectRatio="none">${paths}${dots}${labels}</svg>`;
+  container.innerHTML = svg(`${paths}${dots}${xLabels((i) => formatWritingSessionLabel(rows[i]))}`);
   legend.innerHTML = hitotsubashiScoreView === "overall"
     ? [["picture", "Picture"], ["message", "Message"], ["choice", "Choice"], ["opinion", "Opinion"]]
         .map(([f, label]) => legendItem(HITOTSUBASHI_FORMAT_COLORS[f], label)).join("")
