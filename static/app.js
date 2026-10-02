@@ -5145,10 +5145,12 @@ function updateCalMonthLabel() {
     const weekEnd = addDaysToDate(calWeekStart, 6);
     const startD = new Date(calWeekStart + "T00:00:00");
     const endD = new Date(weekEnd + "T00:00:00");
+    // スマホ幅でもボタンを押し出さない長さにする(月は略称、今年なら年は省く)
+    const year = endD.getFullYear() === new Date().getFullYear() ? "" : `, ${endD.getFullYear()}`;
     document.getElementById("cal-month-label").textContent =
       startD.getMonth() === endD.getMonth()
-        ? `${CAL_MONTH_EN[startD.getMonth()]} ${startD.getDate()}〜${endD.getDate()}, ${startD.getFullYear()}`
-        : `${CAL_MONTH_EN[startD.getMonth()]} ${startD.getDate()} 〜 ${CAL_MONTH_EN[endD.getMonth()]} ${endD.getDate()}, ${startD.getFullYear()}`;
+        ? `${CAL_MONTH_SHORT[startD.getMonth()]} ${startD.getDate()}–${endD.getDate()}${year}`
+        : `${CAL_MONTH_SHORT[startD.getMonth()]} ${startD.getDate()} – ${CAL_MONTH_SHORT[endD.getMonth()]} ${endD.getDate()}${year}`;
   } else {
     document.getElementById("cal-month-label").textContent = `${CAL_MONTH_EN[calMonth - 1]} ${calYear}`;
   }
@@ -5236,24 +5238,41 @@ const CAL_BAND_MAX = 6;
 // 月グリッドを、上の操作行の下から画面の下端(スマホは下のタブバー・進行中の帯の上)までぴったり広げる。
 // header/バナー等の高さは可変で固定値を引き算できないため、実際にグリッドが始まる位置を都度測る
 // (CSS側はgrid-auto-rows:1frで行に均等分配)。2026-08-29はPCだけだったが、2026-10-02にスマホにも広げた。
-function updateCalGridHeight() {
-  const grid = document.getElementById("cal-grid");
-  if (!grid) return 0;
-  const top = grid.getBoundingClientRect().top;
+// 要素の上端から画面下(タブバー・今やってるバーの上)までの高さ
+function calAvailableHeight(el) {
+  const top = el.getBoundingClientRect().top;
   if (top <= 0) return 0; // タブが非表示(display:none)でまだ測れない場合はスキップ
   const tabbarH = document.getElementById("tabbar").getBoundingClientRect().height;
   const dockH = document.getElementById("now-dock").getBoundingClientRect().height;
-  const available = window.innerHeight - top - tabbarH - dockH;
-  const height = Math.max(Math.floor(available), CAL_EVENT_MEDIA_QUERY.matches ? 420 : 320);
+  return Math.floor(window.innerHeight - top - tabbarH - dockH);
+}
+
+function updateCalGridHeight() {
+  const grid = document.getElementById("cal-grid");
+  if (!grid) return 0;
+  const available = calAvailableHeight(grid);
+  if (!available) return 0;
+  const height = Math.max(available, CAL_EVENT_MEDIA_QUERY.matches ? 420 : 320);
   grid.style.height = `${height}px`;
   return height;
+}
+
+// 週表示の時間グリッドも画面の下まで伸ばす(以前は高さ60%で固定だった)
+function updateCalWeekHeight() {
+  const box = document.getElementById("cal-week-scroll");
+  if (!box) return;
+  const available = calAvailableHeight(box);
+  if (!available) return;
+  box.style.height = `${Math.max(available, 320)}px`;
 }
 
 let calResizeTimer = null;
 window.addEventListener("resize", () => {
   clearTimeout(calResizeTimer);
   calResizeTimer = setTimeout(() => {
-    if (document.getElementById("tab-calendar").classList.contains("active") && calViewMode === "month") renderCalGrid();
+    if (!document.getElementById("tab-calendar").classList.contains("active")) return;
+    if (calViewMode === "month") renderCalGrid();
+    else updateCalWeekHeight();
   }, 100);
 });
 
@@ -5335,6 +5354,7 @@ function renderCalGrid() {
 function onCalendarTabShown() {
   try {
     if (calViewMode === "month") renderCalGrid();
+    else updateCalWeekHeight();
   } catch (err) {
     // 起動処理の途中(カレンダーの状態を作る前)に呼ばれた場合。後のloadCalendarで描かれる
   }
@@ -5482,6 +5502,7 @@ function renderWeekTimeGrid() {
   }
 
   const scrollBox = document.getElementById("cal-week-scroll");
+  updateCalWeekHeight();
   let scrollToMinutes;
   if (days.includes(today)) {
     scrollToMinutes = new Date().getHours() * 60;

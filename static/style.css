@@ -1658,12 +1658,16 @@ body:has(#tab-calendar.active) {
   font-weight: 800;
   letter-spacing: -0.01em;
   white-space: nowrap;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis; /* 万一長くてもボタンを画面外に押し出さない */
 }
 
 .cal-toolbar-actions {
   display: flex;
   align-items: center;
   gap: 2px;
+  flex-shrink: 0;
 }
 
 .cal-today-btn {
@@ -1731,6 +1735,7 @@ body:has(#tab-calendar.active) {
 }
 
 #cal-copy-week-btn {
+  width: calc(100% - 24px); /* width:100%+左右の余白で画面からはみ出していた */
   margin: 0 12px 8px;
 }
 
@@ -2245,7 +2250,7 @@ body:has(#tab-calendar.active) {
 }
 
 .cal-week-scroll {
-  max-height: 60vh;
+  height: 60vh; /* JS(updateCalWeekHeight)が画面の下までの高さに上書きする */
   overflow-y: auto;
   border-top: 1px solid var(--border);
 }
