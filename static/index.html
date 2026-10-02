@@ -251,6 +251,7 @@
     <div class="period-toggle mood-subtabs" id="study-subtabs">
       <button type="button" class="period-btn active" data-sub="log">Log</button>
       <button type="button" class="period-btn" data-sub="scores">Scores</button>
+      <button type="button" class="period-btn" data-sub="insights">Insights</button>
     </div>
 
     <div class="study-subpanel" data-sub="log">
@@ -341,6 +342,25 @@
         <h3 id="study-log-header">History</h3>
         <ul id="study-log-list" class="list"></ul>
       </div>
+    </div>
+
+    <div class="goal-progress-card drivers-card">
+      <h3 class="drivers-heading">What moves my study <span class="drivers-period">· last 30 days</span></h3>
+      <div id="study-drivers" class="drivers-list"></div>
+      <p class="meta">Days split in half by each measure, study time compared. Shows a link, not a cause.</p>
+    </div>
+    </div>
+
+    <div class="study-subpanel hidden" data-sub="insights">
+    <div class="goal-progress-card insights-card">
+      <h3 class="drivers-heading">How things move together <span class="drivers-period">· last 30 days</span></h3>
+      <div id="insights-matrix"></div>
+      <ul class="insights-key">
+        <li><b>Strong / Some / Weak</b>: how closely the two move together. ↑ = rise together, ↓ = one rises as the other falls</li>
+        <li>Faded with “chance?”: too few days to rule out luck</li>
+        <li>Gray: under 10 days to compare (slacking: under 3 slacking days)</li>
+      </ul>
+      <p class="meta" id="insights-detail">Tap a cell for the numbers</p>
     </div>
     </div>
 
@@ -467,9 +487,6 @@
       <div class="stat-cell"><span class="stat-label">Month avg</span><span class="stat-value" id="mood-stat-month"></span></div>
       <div class="stat-cell"><span class="stat-label">Hit minimum on low days</span><span class="stat-value" id="mood-stat-low-mood-rate"></span></div>
     </div>
-    <div class="stats-header">
-      <div class="stat-cell"><span class="stat-label">Mood avg by screen time</span><span class="stat-value" id="mood-stat-screen-time-correlation"></span></div>
-    </div>
 
     <div class="mood-chart-row">
       <div class="goal-progress-card mood-chart-main">
@@ -477,13 +494,18 @@
           <span>Mood trend (last 14 days)</span>
         </div>
         <div id="mood-chart"></div>
-        <p class="meta">Background bars are study time for that day; the dashed line is screen time (JpBlocker) for reference</p>
         <p class="meta" id="mood-chart-detail">Tap a point for details</p>
       </div>
       <div class="mood-chart-side">
         <h3 class="mood-chart-side-heading">Reason breakdown (30d)</h3>
         <ul id="mood-reason-stats" class="mood-reason-list hidden"></ul>
       </div>
+    </div>
+
+    <div class="goal-progress-card drivers-card">
+      <h3 class="drivers-heading">What moves my mood <span class="drivers-period">· last 30 days</span></h3>
+      <div id="mood-drivers" class="drivers-list"></div>
+      <p class="meta">Days split in half by each measure, mood avg compared. Shows a link, not a cause.</p>
     </div>
 
     <div class="mood-log-card">
@@ -516,9 +538,23 @@
     </div>
 
     <div class="mood-subpanel hidden" data-sub="sleep">
-    <div class="stats-header">
+    <div class="stats-header sleep-stats">
       <div class="stat-cell"><span class="stat-label">Last night</span><span class="stat-value" id="sleep-stat-last-night"></span></div>
-      <div class="stat-cell"><span class="stat-label">Last 30 days avg</span><span class="stat-value" id="sleep-stat-avg"></span></div>
+      <div class="stat-cell"><span class="stat-label">Avg sleep</span><span class="stat-value" id="sleep-stat-avg"></span></div>
+      <div class="stat-cell"><span class="stat-label">Avg bedtime</span><span class="stat-value" id="sleep-stat-bedtime"></span></div>
+      <div class="stat-cell"><span class="stat-label">Logged</span><span class="stat-value" id="sleep-stat-logged"></span></div>
+    </div>
+    <div class="goal-progress-card sleep-chart-card">
+      <h3 class="drivers-heading">Sleep <span class="drivers-period">· last 30 nights</span></h3>
+      <div id="sleep-chart"></div>
+      <div class="sleep-legend">
+        <span class="sleep-legend-main">Sleep</span>
+        <span class="sleep-legend-nap">Nap</span>
+        <span class="sleep-legend-flag">Forgot to tap? (14h+)</span>
+        <span class="sleep-legend-none">No record</span>
+      </div>
+      <p class="meta">Naps and 14h+ records are left out of the averages. Dashed lines: avg bedtime / wake-up</p>
+      <p class="meta" id="sleep-chart-detail">Tap a night for details</p>
     </div>
     <h3 id="sleep-log-header">History</h3>
     <ul id="sleep-log-list" class="list"></ul>

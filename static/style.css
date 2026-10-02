@@ -19,6 +19,8 @@
   --success: #33b06f;
   --neutral-flag: #7b869c;
   --neutral-flag-dim: rgba(123, 134, 156, 0.18);
+  --nap: #d9a441;        /* 睡眠グラフの昼寝(2026-10-02) */
+  --sleep-none: #20252f; /* 睡眠グラフの記録なしの夜 */
 
   /* UI全体の「ぐちゃぐちゃ」対策(2026-08-15リニューアル): 角丸・影をこの3段階に統一する。
      旧実装は8/9/10/12/14/16/20pxが無秩序に混在していたため、意図的にここへ集約する。 */
@@ -3021,5 +3023,224 @@ body.quick-open #tabbar {
 
   .quick-grabber {
     display: none;
+  }
+}
+
+/* ---------- What moves my mood / study, sleep chart, Insights (2026-10-02) ---------- */
+.drivers-card,
+.sleep-chart-card,
+.insights-card {
+  margin-top: 4px;
+  margin-bottom: 12px;
+}
+
+.drivers-heading {
+  margin: 0 0 6px;
+}
+
+/* 説明文はchart-cardと同じ大きさにそろえる */
+.drivers-card > p.meta,
+.sleep-chart-card > p.meta,
+.insights-card > p.meta {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin: 6px 0 0;
+}
+
+.drivers-period {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--text-muted);
+}
+
+.driver {
+  margin-top: 10px;
+}
+
+.driver-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: 13px;
+  margin-bottom: 4px;
+}
+
+.driver-n {
+  margin-left: 6px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.driver-diff {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.driver-diff.up {
+  color: var(--success);
+}
+
+.driver-diff.down {
+  color: var(--danger);
+}
+
+.driver-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--text-muted);
+  margin: 3px 0;
+}
+
+.driver-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.driver-bar {
+  display: block;
+  height: 8px;
+  border-radius: 4px;
+  background: var(--accent-dim);
+  overflow: hidden;
+}
+
+.driver-bar > span {
+  display: block;
+  height: 100%;
+  border-radius: 4px;
+  background: var(--accent);
+}
+
+.driver-val {
+  min-width: 38px;
+  text-align: right;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.driver-na {
+  margin: 0;
+  font-size: 11px;
+  font-style: italic;
+  color: var(--text-muted);
+}
+
+.sleep-stats .stat-value {
+  font-size: 15px;
+}
+
+.sleep-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.sleep-legend span::before {
+  content: "";
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  margin-right: 4px;
+  border-radius: 2px;
+  vertical-align: -1px;
+}
+
+.sleep-legend-main::before { background: var(--accent); }
+.sleep-legend-nap::before { background: var(--nap); border-radius: 50% !important; }
+.sleep-legend-flag::before { background: var(--neutral-flag); }
+.sleep-legend-none::before { background: var(--sleep-none); outline: 1px solid var(--border); }
+
+.sleep-svg-chart .sleep-hit {
+  cursor: pointer;
+}
+
+.insights-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 3px;
+  table-layout: fixed;
+}
+
+.insights-table th {
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
+.insights-table th.insights-row-head {
+  width: 42px;
+  text-align: right;
+  padding-right: 3px;
+}
+
+.insight-cell {
+  width: 100%;
+  min-height: 42px;
+  padding: 3px 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.insight-cell b {
+  font-size: 10.5px;
+  white-space: nowrap;
+}
+
+.insight-cell i {
+  font-style: normal;
+  font-size: 9px;
+  opacity: 0.75;
+}
+
+.insight-cell.none {
+  background: var(--card-hover);
+  color: var(--text-muted);
+}
+
+.insight-cell.weak {
+  background: var(--card-hover);
+}
+
+.insight-cell.pos {
+  background: rgba(79, 124, 219, calc(0.25 + var(--strength) * 0.6));
+}
+
+.insight-cell.neg {
+  background: rgba(229, 85, 92, calc(0.25 + var(--strength) * 0.6));
+}
+
+/* 日数のわりに弱い関係(偶然でも出る範囲)は薄くして、信じすぎないようにする */
+.insight-cell.chance {
+  opacity: 0.5;
+}
+
+.insights-key {
+  margin: 10px 0 0;
+  padding-left: 16px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+@media (min-width: 768px) {
+  .drivers-card,
+  .sleep-chart-card,
+  .insights-card {
+    max-width: 560px;
   }
 }

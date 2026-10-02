@@ -2919,7 +2919,7 @@ function renderMoodLogList(rows) {
     });
 }
 
-function renderMoodPanel({ rows, dailyStudy, dailyScreenTime }) {
+function renderMoodPanel({ rows }) {
   const today = todayStr();
   const todayEntries = rows.filter((r) => r.date === today).slice().reverse();
 
@@ -2949,22 +2949,10 @@ function renderMoodPanel({ rows, dailyStudy, dailyScreenTime }) {
     avgByDate[d] = Math.round((scores.reduce((a, b) => a + b, 0) / scores.length) * 10) / 10;
   });
 
-  const minutesByDate = {};
-  dailyStudy.forEach((row) => {
-    minutesByDate[row.d] = (minutesByDate[row.d] || 0) + row.total_minutes;
-  });
-
-  const screenMinutesByDate = {};
-  dailyScreenTime.forEach((row) => {
-    screenMinutesByDate[row.date] = row.total_minutes;
-  });
-
   renderMoodChart(
     dates,
     dates.map((d) => (d in avgByDate ? avgByDate[d] : null)),
-    entriesByDate,
-    minutesByDate,
-    screenMinutesByDate
+    entriesByDate
   );
 }
 
@@ -2972,20 +2960,15 @@ function renderMoodPanel({ rows, dailyStudy, dailyScreenTime }) {
 let lastMoodPanelData = null;
 
 async function loadMoodPanel() {
-  // 3本を順番に待つと東京Tursoまでの往復が積み上がるため、最初に全部投げておく(2026-09-29)。
-  // dailyは同時に走っているグラフ更新の通信と共有される(api()の重複まとめ)
-  const dailyStudyPromise = api("/api/study-logs/daily");
-  const dailyScreenTimePromise = api("/api/screen-time/daily?days=14");
-  dailyStudyPromise.catch(() => {});
-  dailyScreenTimePromise.catch(() => {});
+  // 14日グラフは気分の線だけにした(2026-10-02)ので、勉強時間・スクリーンタイムは取りに行かない。
+  // それらと気分の関係は「What moves my mood」カード(loadMoodDrivers)が受け持つ
   const rows = await api("/api/mood-logs?days=14");
-  const [dailyStudy, dailyScreenTime] = await Promise.all([dailyStudyPromise, dailyScreenTimePromise]);
-  lastMoodPanelData = { rows, dailyStudy, dailyScreenTime };
+  lastMoodPanelData = { rows };
   renderMoodPanel(lastMoodPanelData);
   loadMoodStats();
   loadMoodReasonStats();
   loadLowMoodAchievement();
-  loadScreenTimeMoodCorrelation();
+  loadMoodDrivers();
   loadStudyTriggerStats();
   loadSleepPanel();
 }
@@ -3004,15 +2987,170 @@ async function loadLowMoodAchievement() {
   else el.textContent = `${s.rate}% (${s.achieved_days}/${s.low_mood_days} days)`;
 }
 
-async function loadScreenTimeMoodCorrelation() {
-  const el = document.getElementById("mood-stat-screen-time-correlation");
-  if (!el) return;
-  const s = await api("/api/screen-time/mood-correlation?days=30");
-  if (s.status === "insufficient_data") {
-    el.textContent = "Not enough data";
-  } else {
-    el.textContent = `Low screen time days: ${s.low_screen_time_avg_minutes} min, mood ${s.low_screen_time_avg_mood} / High screen time days: ${s.high_screen_time_avg_minutes} min, mood ${s.high_screen_time_avg_mood}`;
+// ---------- What moves my mood / study, Insights (2026-10-02) ----------
+// 材料は/api/insights/daily(1日1行: mood・study・sleep・screen・slacking・diary)。
+// カード2枚は、ある項目で日を半分に分け(多い半分/少ない半分)、気分や勉強時間の平均を比べる。
+// 以前の/api/screen-time/mood-correlationと同じ考え方で、相関係数より直感的に読める。
+// サボりだけは記録のない日が大半なので「サボった日/サボらなかった日」の2つに分ける。
+
+const DRIVER_MIN_DAYS = 6;
+const SLACKING_MIN_DAYS = 3;
+
+function loadInsightsDaily() {
+  return api("/api/insights/daily?days=30");
+}
+
+function compareHalves(rows, xKey, yKey) {
+  const pairs = rows.filter((r) => r[xKey] != null && r[yKey] != null).map((r) => [r[xKey], r[yKey]]);
+  const n = pairs.length;
+  const avg = (xs, i) => xs.reduce((a, p) => a + p[i], 0) / xs.length;
+  if (xKey === "slacking") {
+    const hi = pairs.filter((p) => p[0] > 0);
+    const lo = pairs.filter((p) => p[0] === 0);
+    if (hi.length < SLACKING_MIN_DAYS || lo.length < SLACKING_MIN_DAYS) return { n, enough: false, hiDays: hi.length };
+    return { n, enough: true, hiX: hi.length, loX: lo.length, hiY: avg(hi, 1), loY: avg(lo, 1) };
   }
+  if (n < DRIVER_MIN_DAYS || new Set(pairs.map((p) => p[0])).size < 2) return { n, enough: false };
+  pairs.sort((a, b) => a[0] - b[0]);
+  const k = Math.floor(n / 2);
+  const lo = pairs.slice(0, k);
+  const hi = pairs.slice(n - k);
+  return { n, enough: true, hiX: avg(hi, 0), loX: avg(lo, 0), hiY: avg(hi, 1), loY: avg(lo, 1) };
+}
+
+const DRIVER_DEFS = {
+  sleep: { icon: "😴", name: "Sleep", hi: "More sleep", lo: "Less sleep", fmt: (v) => formatShortDuration(v) },
+  study: { icon: "📚", name: "Study", hi: "More study", lo: "Less study", fmt: (v) => formatShortDuration(v) },
+  screen: { icon: "📱", name: "Screen time", hi: "More screen", lo: "Less screen", fmt: (v) => formatShortDuration(v) },
+  mood: { icon: "🙂", name: "Mood", hi: "Better mood", lo: "Worse mood", fmt: (v) => v.toFixed(1) },
+  slacking: { icon: "🧭", name: "Slacking", hi: "Slacked", lo: "No slacking", fmt: (v) => `${v} days` },
+};
+
+function renderDrivers(containerId, rows, target, keys) {
+  const el = document.getElementById(containerId);
+  if (!el) return;
+  const fmtY = target === "mood" ? (v) => v.toFixed(1) : (v) => formatShortDuration(v);
+  const results = keys.map((k) => [k, compareHalves(rows, k, target)]);
+  const maxY = target === "mood" ? 10 : Math.max(60, ...results.filter(([, r]) => r.enough).flatMap(([, r]) => [r.hiY, r.loY]));
+  el.innerHTML = results
+    .map(([k, r]) => {
+      const def = DRIVER_DEFS[k];
+      const suffix = k === "sleep" && target === "study" ? " (night before)" : "";
+      const title = `<span>${def.icon} ${def.name}${suffix}<span class="driver-n">${r.n} days</span></span>`;
+      if (!r.enough) {
+        const why =
+          k === "slacking"
+            ? `Not enough slacking logs (${r.hiDays ?? 0} days, need ${SLACKING_MIN_DAYS}+)`
+            : `Not enough data (need ${DRIVER_MIN_DAYS}+ days)`;
+        return `<div class="driver"><div class="driver-head">${title}</div><p class="driver-na">${why}</p></div>`;
+      }
+      const diff = r.hiY - r.loY;
+      const sign = diff >= 0 ? "+" : "−";
+      const diffText = target === "mood" ? `${sign}${Math.abs(diff).toFixed(1)}` : `${sign}${formatShortDuration(Math.abs(diff))} study`;
+      const bar = (v) => `<span class="driver-bar"><span style="width:${Math.max(2, (v / maxY) * 100)}%"></span></span>`;
+      const xText = (v) => (k === "slacking" ? def.fmt(v) : `avg ${def.fmt(v)}`);
+      return `<div class="driver">
+        <div class="driver-head">${title}<span class="driver-diff ${diff >= 0 ? "up" : "down"}">${diffText}</span></div>
+        <div class="driver-row"><span class="driver-label">${def.hi} (${xText(r.hiX)})</span>${bar(r.hiY)}<span class="driver-val">${fmtY(r.hiY)}</span></div>
+        <div class="driver-row"><span class="driver-label">${def.lo} (${xText(r.loX)})</span>${bar(r.loY)}<span class="driver-val">${fmtY(r.loY)}</span></div>
+      </div>`;
+    })
+    .join("");
+}
+
+async function loadMoodDrivers() {
+  const rows = await loadInsightsDaily();
+  renderDrivers("mood-drivers", rows, "mood", ["sleep", "study", "screen"]);
+}
+
+async function loadStudyDrivers() {
+  const rows = await loadInsightsDaily();
+  renderDrivers("study-drivers", rows, "study", ["sleep", "mood", "screen", "slacking"]);
+}
+
+// Insights: 6項目の総当たり。偶然の数字を信じないよう、日数が少ないマスは灰色、
+// 日数のわりに弱い関係は薄くして「chance?」を付ける(2026-10-02、とっつーとA+B(安全策つき)で決定)
+const INSIGHT_KEYS = ["mood", "study", "sleep", "screen", "slacking", "diary"];
+const INSIGHT_LABELS = { mood: "Mood", study: "Study", sleep: "Sleep", screen: "Screen", slacking: "Slack", diary: "Diary" };
+const INSIGHT_MIN_DAYS = 10;
+
+function pearson(xs, ys) {
+  const n = xs.length;
+  const mx = xs.reduce((a, b) => a + b, 0) / n;
+  const my = ys.reduce((a, b) => a + b, 0) / n;
+  let sxy = 0;
+  let sxx = 0;
+  let syy = 0;
+  for (let i = 0; i < n; i++) {
+    sxy += (xs[i] - mx) * (ys[i] - my);
+    sxx += (xs[i] - mx) ** 2;
+    syy += (ys[i] - my) ** 2;
+  }
+  return sxx && syy ? sxy / Math.sqrt(sxx * syy) : null;
+}
+
+// 両側5%のt分布の境目(自由度df)の近似。df=8で2.30、df=20で2.09と表の値とほぼ一致する
+function couldBeChance(r, n) {
+  const df = n - 2;
+  const t = Math.abs(r) * Math.sqrt(df / Math.max(1e-9, 1 - r * r));
+  return t < 1.96 + 2.37 / df + 2.8 / (df * df);
+}
+
+function insightCell(rows, a, b) {
+  const pairs = rows.filter((r) => r[a] != null && r[b] != null);
+  const n = pairs.length;
+  const slackDays = a === "slacking" || b === "slacking" ? pairs.filter((r) => r.slacking > 0).length : null;
+  if (n < INSIGHT_MIN_DAYS || (slackDays != null && slackDays < SLACKING_MIN_DAYS)) return { n, slackDays, r: null };
+  const r = pearson(pairs.map((p) => p[a]), pairs.map((p) => p[b]));
+  return { n, slackDays, r };
+}
+
+async function loadInsightsMatrix() {
+  const rows = await loadInsightsDaily();
+  const el = document.getElementById("insights-matrix");
+  const cols = INSIGHT_KEYS.slice(1);
+  let html = `<table class="insights-table"><tr><th></th>${cols.map((k) => `<th>${INSIGHT_LABELS[k]}</th>`).join("")}</tr>`;
+  INSIGHT_KEYS.slice(0, -1).forEach((a, i) => {
+    html += `<tr><th class="insights-row-head">${INSIGHT_LABELS[a]}</th>`;
+    cols.forEach((b, j) => {
+      if (j < i) {
+        html += "<td></td>";
+        return;
+      }
+      const c = insightCell(rows, a, b);
+      const data = `data-a="${a}" data-b="${b}" data-n="${c.n}" data-r="${c.r ?? ""}" data-slack="${c.slackDays ?? ""}"`;
+      if (c.r == null) {
+        html += `<td><button type="button" class="insight-cell none" ${data}><b>–</b><i>${c.n}d</i></button></td>`;
+        return;
+      }
+      const abs = Math.abs(c.r);
+      const word = abs >= 0.5 ? "Strong" : abs >= 0.3 ? "Some" : "Weak";
+      const chance = couldBeChance(c.r, c.n);
+      const cls = word === "Weak" ? "weak" : `${c.r >= 0 ? "pos" : "neg"}${chance ? " chance" : ""}`;
+      const arrow = word === "Weak" ? "" : c.r >= 0 ? " ↑" : " ↓";
+      const sub = chance && word !== "Weak" ? "chance?" : `${c.n}d`;
+      html += `<td><button type="button" class="insight-cell ${cls}" style="--strength:${abs.toFixed(2)}" ${data}><b>${word}${arrow}</b><i>${sub}</i></button></td>`;
+    });
+    html += "</tr>";
+  });
+  el.innerHTML = `${html}</table>`;
+  el.querySelectorAll(".insight-cell").forEach((cell) => {
+    cell.addEventListener("click", () => {
+      const { a, b, n, r, slack } = cell.dataset;
+      const pair = `${INSIGHT_LABELS[a]} × ${INSIGHT_LABELS[b]}`;
+      const detail = document.getElementById("insights-detail");
+      if (r === "") {
+        detail.textContent =
+          slack !== "" && parseInt(n, 10) >= INSIGHT_MIN_DAYS
+            ? `${pair}: only ${slack} slacking days logged (need ${SLACKING_MIN_DAYS}+)`
+            : `${pair}: ${n} days to compare (need ${INSIGHT_MIN_DAYS}+)`;
+        return;
+      }
+      const v = parseFloat(r);
+      const verdict = couldBeChance(v, parseInt(n, 10)) ? "could be chance" : "unlikely to be chance alone";
+      detail.textContent = `${pair}: r = ${v >= 0 ? "+" : ""}${v.toFixed(2)} over ${n} days (${verdict})`;
+    });
+  });
 }
 
 async function loadMoodReasonStats() {
@@ -3031,60 +3169,33 @@ async function loadMoodReasonStats() {
   });
 }
 
-function renderMoodChart(dates, scores, entriesByDate, minutesByDate, screenMinutesByDate) {
+function renderMoodChart(dates, scores, entriesByDate) {
   const container = document.getElementById("mood-chart");
+  // 以前は勉強時間の棒・スクリーンタイムの点線も重ねていたが、3つが重なって読めなかったので
+  // 気分の線だけにした(2026-10-02)。関係は「What moves my mood」カードで2グループ比較する
   const chartW = 320;
-  const chartH = 70;
-  // スコア10(最高値)の点がviewBox上端ぴったりに来て半分クリップされていたため、上にも余白を確保する。
-  const padTop = 5;
-  const padBottom = 12;
-  const padX = 8;
+  const chartH = 110;
+  const padTop = 6;
+  const padBottom = 13;
+  const padLeft = 18;
+  const padRight = 8;
   const plotH = chartH - padTop - padBottom;
-  const plotW = chartW - padX * 2;
+  const plotW = chartW - padLeft - padRight;
   const stepX = dates.length > 1 ? plotW / (dates.length - 1) : 0;
-  const xs = dates.map((_, i) => padX + i * stepX);
+  const xs = dates.map((_, i) => padLeft + i * stepX);
+  const yOf = (score) => padTop + plotH - ((score - 1) / 9) * plotH;
 
-  const minutesValues = dates.map((d) => (minutesByDate && minutesByDate[d]) || 0);
-  const maxMinutes = Math.max(60, ...minutesValues);
-  const barW = Math.max(stepX * 0.5, 2);
-  const bars = dates
-    .map((d, i) => {
-      const minutes = minutesValues[i];
-      if (minutes <= 0) return "";
-      const h = (minutes / maxMinutes) * plotH;
-      return `<rect x="${xs[i] - barW / 2}" y="${padTop + plotH - h}" width="${barW}" height="${h}" fill="var(--accent-dim)" rx="1"></rect>`;
-    })
+  const grid = [1, 5, 10]
+    .map(
+      (v) =>
+        `<line x1="${padLeft}" x2="${chartW - padRight}" y1="${yOf(v)}" y2="${yOf(v)}" stroke="var(--border)" stroke-width="0.6"></line>` +
+        `<text x="${padLeft - 5}" y="${yOf(v) + 2.5}" font-size="7" fill="var(--text-muted)" text-anchor="end">${v}</text>`
+    )
     .join("");
 
   const axisLabels = dates
-    .map((d, i) => `<text x="${xs[i]}" y="${chartH - 1}" font-size="7" fill="var(--text-muted)" text-anchor="middle">${d.slice(8, 10)}</text>`)
+    .map((d, i) => `<text x="${xs[i]}" y="${chartH - 2}" font-size="7" fill="var(--text-muted)" text-anchor="middle">${d.slice(8, 10)}</text>`)
     .join("");
-
-  // スクリーンタイム(JpBlocker連携、Part B)。棒(勉強時間)とは別軸で独立にスケーリングし、
-  // 点線で重ねて描画する(棒と同じ軸だと勉強時間より一桁大きくなりがちで潰れるため)。
-  let screenTimePath = "";
-  if (screenMinutesByDate) {
-    const screenValues = dates.map((d) => screenMinutesByDate[d]);
-    const hasScreenData = screenValues.some((v) => v != null);
-    if (hasScreenData) {
-      const maxScreenMinutes = Math.max(60, ...screenValues.filter((v) => v != null));
-      let d2 = "";
-      let drawing2 = false;
-      dates.forEach((d, i) => {
-        const minutes = screenValues[i];
-        if (minutes == null) {
-          drawing2 = false;
-          return;
-        }
-        const y = padTop + plotH - (minutes / maxScreenMinutes) * plotH;
-        d2 += `${drawing2 ? "L" : "M"}${xs[i]},${y} `;
-        drawing2 = true;
-      });
-      screenTimePath = d2
-        ? `<path d="${d2.trim()}" fill="none" stroke="var(--danger)" stroke-width="1.5" stroke-dasharray="3,2" stroke-linecap="round" stroke-linejoin="round"></path>`
-        : "";
-    }
-  }
 
   let pathD = "";
   let drawing = false;
@@ -3095,7 +3206,7 @@ function renderMoodChart(dates, scores, entriesByDate, minutesByDate, screenMinu
       drawing = false;
       return;
     }
-    const y = padTop + plotH - ((score - 1) / 9) * plotH;
+    const y = yOf(score);
     pathD += `${drawing ? "L" : "M"}${xs[i]},${y} `;
     drawing = true;
     dots.push(`<circle cx="${xs[i]}" cy="${y}" r="4" fill="var(--accent)" data-date="${d}" data-score="${score}"></circle>`);
@@ -3105,21 +3216,19 @@ function renderMoodChart(dates, scores, entriesByDate, minutesByDate, screenMinu
     ? `<path d="${pathD.trim()}" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path>`
     : "";
 
-  container.innerHTML = `<svg viewBox="0 0 ${chartW} ${chartH}" class="study-svg-chart">${bars}${screenTimePath}${path}${dots.join("")}${axisLabels}</svg>`;
+  container.innerHTML = `<svg viewBox="0 0 ${chartW} ${chartH}" class="study-svg-chart">${grid}${path}${dots.join("")}${axisLabels}</svg>`;
 
   container.querySelectorAll("circle[data-date]").forEach((circle) => {
     circle.addEventListener("click", () => {
       const { date: d, score } = circle.dataset;
       const entries = (entriesByDate[d] || []).slice().reverse();
       const detail = document.getElementById("mood-chart-detail");
-      const screenMinutes = screenMinutesByDate ? screenMinutesByDate[d] : null;
-      const screenText = screenMinutes != null ? ` / Screen time ${screenMinutes} min` : "";
       if (entries.length === 0) {
-        detail.textContent = `${d} Mood avg: ${score}/10${screenText}`;
+        detail.textContent = `${d} Mood avg: ${score}/10`;
         return;
       }
       const lines = entries.map((e) => formatMoodEntryLine(e));
-      detail.textContent = `${d} Mood avg: ${score}/10 / ${lines.join(" / ")}${screenText}`;
+      detail.textContent = `${d} Mood avg: ${score}/10 / ${lines.join(" / ")}`;
     });
   });
 }
@@ -4296,22 +4405,162 @@ async function wakeUp() {
 }
 
 async function loadSleepPanel() {
-  const [logs, stats] = await Promise.all([
-    api("/api/sleep-logs?limit=30"),
-    api("/api/sleep-logs/stats?days=30"),
-  ]);
-  renderSleepStats(logs, stats);
-  renderSleepLogList(logs);
+  // 30晩ぶんのグラフを描くため、昼寝などで1晩に2件ある分も見込んで多めに取る。
+  // 数字(平均など)は昼寝・押し忘れを外す必要があり、記録の種類(kind)を見ながら手元で計算する
+  const logs = await api("/api/sleep-logs?limit=60");
+  const nights = sleepNightsInRange(logs);
+  renderSleepStats(logs, nights);
+  renderSleepChart(nights);
+  renderSleepLogList(logs.slice(0, 30));
 }
 
-function renderSleepStats(logs, stats) {
-  const lastNightEl = document.getElementById("sleep-stat-last-night");
-  const avgEl = document.getElementById("sleep-stat-avg");
-  const lastCompleted = logs.find((l) => l.wake_at);
-  lastNightEl.textContent = lastCompleted
-    ? formatLogDuration(sleepDurationMinutes(lastCompleted.bedtime_at, lastCompleted.wake_at))
+// ---------- sleep chart (2026-10-02) ----------
+// 1晩を1本の縦棒にし、寝た時刻〜起きた時刻を塗る(縦軸は21時〜翌12時)。
+// 記録の種類はサーバーのsleep_kind()が決める: main(夜の睡眠) / nap(昼寝、3時間未満で9〜21時に寝た) /
+// flag(14時間超、起きたの押し忘れ?)。napとflagは平均から外す。
+// 時刻はタイムゾーンを持たない文字列なので、Dateに通さず日付と時刻の数字だけで計算する。
+
+const SLEEP_AXIS_START_MIN = 21 * 60; // 縦軸の一番上 = 21:00
+const SLEEP_AXIS_SPAN_MIN = 15 * 60; // 21:00〜翌12:00
+
+function daysBetweenDates(a, b) {
+  const [ay, am, ad] = a.split("-").map(Number);
+  const [by, bm, bd] = b.split("-").map(Number);
+  return Math.round((Date.UTC(by, bm - 1, bd) - Date.UTC(ay, am - 1, ad)) / 86400000);
+}
+
+// 寝た時刻が正午より前なら前日の夜として数える(02:56に寝た → 前日の夜)
+function sleepNightOf(bedtimeAt) {
+  const date = bedtimeAt.slice(0, 10);
+  return parseInt(bedtimeAt.slice(11, 13), 10) < 12 ? addDaysToDate(date, -1) : date;
+}
+
+// その夜の21:00から何分後か(21:00より前なら負の数)
+function minutesFromNightStart(ts, night) {
+  const clock = parseInt(ts.slice(11, 13), 10) * 60 + parseInt(ts.slice(14, 16), 10);
+  return daysBetweenDates(night, ts.slice(0, 10)) * 1440 + clock - SLEEP_AXIS_START_MIN;
+}
+
+function formatClockMinutes(m) {
+  const v = ((Math.round(m) % 1440) + 1440) % 1440;
+  return `${String(Math.floor(v / 60)).padStart(2, "0")}:${String(v % 60).padStart(2, "0")}`;
+}
+
+function formatShortDuration(minutes) {
+  const m = Math.round(minutes);
+  return `${Math.floor(m / 60)}h${String(m % 60).padStart(2, "0")}`;
+}
+
+// 直近30晩(昨夜まで)について、夜ごとの記録をまとめる
+function sleepNightsInRange(logs) {
+  const today = todayStr();
+  const nights = [];
+  for (let i = 30; i >= 1; i--) nights.push({ night: addDaysToDate(today, -i), records: [] });
+  const byNight = Object.fromEntries(nights.map((n) => [n.night, n]));
+  logs.forEach((l) => {
+    if (!l.wake_at || !l.kind) return;
+    const night = sleepNightOf(l.bedtime_at);
+    if (!byNight[night]) return;
+    const start = minutesFromNightStart(l.bedtime_at, night);
+    const end = minutesFromNightStart(l.wake_at, night);
+    byNight[night].records.push({ ...l, start, end, minutes: end - start });
+  });
+  return nights;
+}
+
+function renderSleepStats(logs, nights) {
+  const lastMain = logs.find((l) => l.kind === "main");
+  document.getElementById("sleep-stat-last-night").textContent = lastMain
+    ? formatShortDuration(sleepDurationMinutes(lastMain.bedtime_at, lastMain.wake_at))
     : "-";
-  avgEl.textContent = stats.count > 0 ? `${formatLogDuration(Math.round(stats.avg_minutes))} (${stats.count})` : "No data";
+  const mains = nights.flatMap((n) => n.records.filter((r) => r.kind === "main"));
+  const avg = (xs) => xs.reduce((a, b) => a + b, 0) / xs.length;
+  document.getElementById("sleep-stat-avg").textContent = mains.length ? formatShortDuration(avg(mains.map((r) => r.minutes))) : "-";
+  document.getElementById("sleep-stat-bedtime").textContent = mains.length
+    ? formatClockMinutes(avg(mains.map((r) => r.start)) + SLEEP_AXIS_START_MIN)
+    : "-";
+  // 押し忘れ(flag)も「寝る記録はつけた夜」なので記録率には数える
+  const logged = nights.filter((n) => n.records.some((r) => r.kind !== "nap")).length;
+  document.getElementById("sleep-stat-logged").textContent = `${logged}/${nights.length}`;
+}
+
+function renderSleepChart(nights) {
+  const container = document.getElementById("sleep-chart");
+  const W = 320;
+  const H = 210;
+  const L = 30;
+  const R = 4;
+  const T = 8;
+  const B = 30;
+  const plotH = H - T - B;
+  const col = (W - L - R) / nights.length;
+  const barW = col * 0.62;
+  const yOf = (m) => T + (Math.max(0, Math.min(SLEEP_AXIS_SPAN_MIN, m)) / SLEEP_AXIS_SPAN_MIN) * plotH;
+
+  let svg = "";
+  [21, 0, 3, 6, 9, 12].forEach((h, i) => {
+    const y = yOf(i * 180);
+    svg += `<line x1="${L}" x2="${W - R}" y1="${y}" y2="${y}" stroke="var(--border)" stroke-width="0.6"></line>`;
+    svg += `<text x="${L - 4}" y="${y + 2.5}" font-size="7.5" fill="var(--text-muted)" text-anchor="end">${String(h).padStart(2, "0")}:00</text>`;
+  });
+
+  nights.forEach((n, i) => {
+    const cx = L + col * i + col / 2;
+    const hasNight = n.records.some((r) => r.kind !== "nap");
+    if (!hasNight) {
+      svg += `<rect x="${cx - barW / 2}" y="${T}" width="${barW}" height="${plotH}" rx="2" fill="var(--sleep-none)"></rect>`;
+    }
+    n.records.forEach((r) => {
+      if (r.kind === "nap") {
+        svg += `<circle cx="${cx}" cy="${T + plotH + 8}" r="2.8" fill="var(--nap)"></circle>`;
+        return;
+      }
+      const y1 = yOf(r.start);
+      const y2 = yOf(r.end);
+      const fill = r.kind === "flag" ? "var(--neutral-flag)" : "var(--accent)";
+      svg += `<rect x="${cx - barW / 2}" y="${y1}" width="${barW}" height="${Math.max(2, y2 - y1)}" rx="2" fill="${fill}"></rect>`;
+      // 21時より前に寝た分は上で切れているので▲で知らせる
+      if (r.start < 0) svg += `<path d="M${cx - 2.5},${T + 4} L${cx},${T + 0.5} L${cx + 2.5},${T + 4}" fill="var(--text)"></path>`;
+      if (r.kind === "flag") {
+        svg += `<text x="${cx}" y="${Math.min(y2 + 9, T + plotH - 1)}" font-size="8" font-weight="700" fill="var(--text)" text-anchor="middle">?</text>`;
+      }
+    });
+    if (i % 5 === 4) {
+      const [, m, d] = n.night.split("-").map(Number);
+      svg += `<text x="${cx}" y="${H - 3}" font-size="7.5" fill="var(--text-muted)" text-anchor="middle">${m}/${d}</text>`;
+    }
+  });
+
+  const mains = nights.flatMap((n) => n.records.filter((r) => r.kind === "main"));
+  if (mains.length) {
+    const avg = (xs) => xs.reduce((a, b) => a + b, 0) / xs.length;
+    [avg(mains.map((r) => r.start)), avg(mains.map((r) => r.end))].forEach((m) => {
+      svg += `<line x1="${L}" x2="${W - R}" y1="${yOf(m)}" y2="${yOf(m)}" stroke="var(--text)" stroke-opacity="0.5" stroke-width="0.8" stroke-dasharray="3,3"></line>`;
+    });
+  }
+  svg += `<text x="${L - 4}" y="${T + plotH + 10.5}" font-size="7" fill="var(--nap)" text-anchor="end">nap</text>`;
+  // タップ判定用の透明な列は最後に重ねる(点線などの下に隠れないように)
+  nights.forEach((n, i) => {
+    svg += `<rect class="sleep-hit" data-i="${i}" x="${L + col * i}" y="${T}" width="${col}" height="${plotH + 14}" fill="transparent"></rect>`;
+  });
+
+  container.innerHTML = `<svg viewBox="0 0 ${W} ${H}" class="study-svg-chart sleep-svg-chart">${svg}</svg>`;
+  container.querySelectorAll(".sleep-hit").forEach((hit) => {
+    hit.addEventListener("click", () => {
+      const n = nights[parseInt(hit.dataset.i, 10)];
+      const [, m, d] = n.night.split("-").map(Number);
+      const detail = document.getElementById("sleep-chart-detail");
+      if (n.records.length === 0) {
+        detail.textContent = `Night of ${m}/${d}: no record`;
+        return;
+      }
+      const label = { main: "", nap: " · nap", flag: " · forgot to tap?" };
+      const parts = n.records.map(
+        (r) => `${r.bedtime_at.slice(11, 16)} → ${r.wake_at.slice(11, 16)} (${formatShortDuration(r.minutes)})${label[r.kind]}`
+      );
+      detail.textContent = `Night of ${m}/${d}: ${parts.join(" / ")}`;
+    });
+  });
 }
 
 function renderSleepLogList(logs) {
@@ -5957,6 +6206,7 @@ async function hydrateFromCache() {
     loadGoalProgress(),
     loadScreenBudget(),
     loadScoresTab(),
+    loadStudyDrivers(),
     loadActivationActive(),
     loadActivationList(),
     loadActivationStats(),
@@ -6008,6 +6258,8 @@ document.querySelectorAll("#mood-subtabs .period-btn").forEach((b) => {
 function switchStudySubtab(sub) {
   document.querySelectorAll("#study-subtabs .period-btn").forEach((b) => b.classList.toggle("active", b.dataset.sub === sub));
   document.querySelectorAll(".study-subpanel").forEach((p) => p.classList.toggle("hidden", p.dataset.sub !== sub));
+  // Insightsはたまに見るだけなので、開いた時に読み込む(起動時の通信を増やさない)
+  if (sub === "insights") loadInsightsMatrix().catch((err) => console.error("insights load failed:", err));
 }
 
 document.querySelectorAll("#study-subtabs .period-btn").forEach((b) => {

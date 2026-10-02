@@ -1697,6 +1697,25 @@ def delete_activation_log(log_id: int):
 
 # ---------- sleep logs ----------
 
+SLEEP_NAP_MAX_MINUTES = 180     # これ未満で、寝た時刻が9〜21時なら昼寝
+SLEEP_FLAG_MIN_MINUTES = 14 * 60  # これを超えたら「起きたの押し忘れ?」
+
+
+def sleep_kind(bedtime_at: str, wake_at: str | None) -> str | None:
+    """睡眠記録を main(夜の睡眠) / nap(昼寝) / flag(14時間超、押し忘れ?) に分ける(2026-10-02)。
+    昼寝と押し忘れは平均睡眠時間を歪めるので、グラフでは色を分けて平均からは外す。
+    寝ている途中(wake_at なし)は None。"""
+    if not wake_at:
+        return None
+    bed = datetime.fromisoformat(bedtime_at)
+    minutes = (datetime.fromisoformat(wake_at) - bed).total_seconds() / 60
+    if minutes > SLEEP_FLAG_MIN_MINUTES:
+        return "flag"
+    if minutes < SLEEP_NAP_MAX_MINUTES and 9 <= bed.hour < 21:
+        return "nap"
+    return "main"
+
+
 @app.get("/api/sleep-logs")
 def list_sleep_logs(limit: int = 30):
     conn = get_connection()
@@ -1705,6 +1724,8 @@ def list_sleep_logs(limit: int = 30):
     )
     result = rows_to_dicts(cur)
     conn.close()
+    for row in result:
+        row["kind"] = sleep_kind(row["bedtime_at"], row["wake_at"])
     return result
 
 
@@ -1724,11 +1745,12 @@ def active_sleep_log():
 def sleep_log_stats(days: int = 30):
     conn = get_connection()
     cur = conn.execute(
-        "SELECT (julianday(wake_at) - julianday(bedtime_at)) * 24 * 60 AS minutes FROM sleep_logs "
-        "WHERE wake_at IS NOT NULL AND bedtime_at >= ?",
+        "SELECT bedtime_at, wake_at, (julianday(wake_at) - julianday(bedtime_at)) * 24 * 60 AS minutes "
+        "FROM sleep_logs WHERE wake_at IS NOT NULL AND bedtime_at >= ?",
         (nz_day_bound(offset_days=-days),),
     )
-    minutes_list = [row[0] for row in cur.fetchall()]
+    # 昼寝・押し忘れ(14時間超)は平均から外す(2026-10-02)
+    minutes_list = [m for b, w, m in cur.fetchall() if sleep_kind(b, w) == "main"]
     conn.close()
     count = len(minutes_list)
     avg_minutes = round(sum(minutes_list) / count, 1) if count else 0
@@ -1775,6 +1797,58 @@ def delete_sleep_log(log_id: int):
     conn.commit()
     conn.close()
     return {"ok": True}
+
+
+# ---------- insights (2026-10-02) ----------
+# 「What moves my mood / study」カードとStudy › Insightsの表の材料。
+# 1日1行に、気分平均・勉強分・睡眠分(その日の朝に起きた夜の睡眠)・スクリーンタイム・サボり回数・
+# 日記スコアを並べて返す。比べ方(2グループ比較・関係の強さ)はクライアント側で計算する。
+# Tursoは東京にあり1クエリごとに往復が積み上がるので、UNION ALLで1回にまとめる。
+
+@app.get("/api/insights/daily")
+def insights_daily(days: int = 30):
+    days = max(7, min(days, 120))
+    today = nz_today()
+    since = (today - timedelta(days=days)).isoformat()
+    since_ts = nz_day_bound(offset_days=-days)
+    conn = get_connection()
+    rows = conn.execute(
+        "SELECT 'mood', date, AVG(score), NULL FROM mood_logs WHERE date >= ? GROUP BY date "
+        "UNION ALL SELECT 'study', date(logged_at), SUM(minutes), NULL FROM study_logs "
+        "WHERE logged_at >= ? GROUP BY date(logged_at) "
+        "UNION ALL SELECT 'screen', date, SUM(total_minutes), NULL FROM screen_time_logs "
+        "WHERE date >= ? GROUP BY date "
+        "UNION ALL SELECT 'slacking', date(triggered_at), COUNT(*), NULL FROM activation_logs "
+        "WHERE triggered_at >= ? GROUP BY date(triggered_at) "
+        "UNION ALL SELECT 'diary', date, overall, NULL FROM diary_scores WHERE date >= ? "
+        "UNION ALL SELECT 'sleep', bedtime_at, NULL, wake_at FROM sleep_logs "
+        "WHERE wake_at IS NOT NULL AND wake_at >= ?",
+        (since, since_ts, since, since_ts, since, since_ts),
+    ).fetchall()
+    conn.close()
+
+    # 今日は勉強・スクリーンタイムが途中なので入れない
+    dates = [(today - timedelta(days=i)).isoformat() for i in range(days, 0, -1)]
+    by_date = {d: {"date": d, "mood": None, "study": 0, "sleep": None, "screen": None,
+                   "slacking": 0, "diary": None} for d in dates}
+    for kind, key, value, extra in rows:
+        if kind == "sleep":
+            if sleep_kind(key, extra) != "main":
+                continue
+            d = extra[:10]
+            if d in by_date:
+                minutes = (datetime.fromisoformat(extra) - datetime.fromisoformat(key)).total_seconds() / 60
+                by_date[d]["sleep"] = round((by_date[d]["sleep"] or 0) + minutes)
+            continue
+        if key not in by_date:
+            continue
+        if kind == "mood":
+            by_date[key]["mood"] = round(value, 2)
+        elif kind == "diary":
+            by_date[key]["diary"] = value
+        else:
+            by_date[key][kind] = int(value or 0)
+    return [by_date[d] for d in dates]
 
 
 # ---------- screen time (JpBlocker連携、Part B) ----------
