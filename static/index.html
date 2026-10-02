@@ -561,14 +561,14 @@
         <div class="cal-toolbar">
           <span id="cal-month-label" class="cal-title"></span>
           <div class="cal-toolbar-actions">
-            <button type="button" id="cal-today-btn" class="cal-today-btn">Today</button>
-            <button type="button" id="cal-prev" class="icon-btn" aria-label="Previous">‹</button>
-            <button type="button" id="cal-next" class="icon-btn" aria-label="Next">›</button>
+            <button type="button" id="cal-today-btn" class="cal-today-btn" title="Today (T)">Today</button>
+            <button type="button" id="cal-prev" class="icon-btn" aria-label="Previous" title="Previous (←)">‹</button>
+            <button type="button" id="cal-next" class="icon-btn" aria-label="Next" title="Next (→)">›</button>
             <div class="cal-view-toggle" id="cal-view-toggle">
-              <button type="button" class="cal-view-btn active" data-view="month" aria-label="Month"><span class="cal-view-long">Month</span><span class="cal-view-short">M</span></button>
-              <button type="button" class="cal-view-btn" data-view="week" aria-label="Week"><span class="cal-view-long">Week</span><span class="cal-view-short">W</span></button>
+              <button type="button" class="cal-view-btn active" data-view="month" aria-label="Month" title="Month (M)"><span class="cal-view-long">Month</span><span class="cal-view-short">M</span></button>
+              <button type="button" class="cal-view-btn" data-view="week" aria-label="Week" title="Week (W)"><span class="cal-view-long">Week</span><span class="cal-view-short">W</span></button>
             </div>
-            <button type="button" id="cal-new-btn" class="cal-new-btn">+ New event</button>
+            <button type="button" id="cal-new-btn" class="cal-new-btn" title="New event (N)">+ New event</button>
           </div>
         </div>
         <button type="button" id="cal-copy-week-btn" class="secondary copyweek-trigger-btn hidden">Copy last week's schedule</button>
@@ -1031,6 +1031,13 @@
     <tr><td><kbd>N</kbd></td><td>New task (ToDo) / new event (Calendar)</td></tr>
     <tr><td><kbd>S</kbd></td><td>Open the ⚡ record menu</td></tr>
     <tr><td><kbd>S</kbd> then <kbd>1</kbd>–<kbd>9</kbd></td><td>Pick a subject to study, then <kbd>Enter</kbd> to start</td></tr>
+    <tr><th colspan="2">Calendar</th></tr>
+    <tr><td><kbd>←</kbd> / <kbd>→</kbd> (or <kbd>K</kbd> / <kbd>J</kbd>)</td><td>Previous / next month (week in Week view)</td></tr>
+    <tr><td><kbd>T</kbd></td><td>Jump to today</td></tr>
+    <tr><td><kbd>M</kbd> / <kbd>W</kbd></td><td>Month view / Week view</td></tr>
+    <tr><td><kbd>Shift</kbd>+<kbd>←</kbd><kbd>→</kbd><kbd>↑</kbd><kbd>↓</kbd></td><td>Move the selected day (±1 day / ±1 week)</td></tr>
+    <tr><td><kbd>N</kbd> / <kbd>Shift</kbd>+<kbd>N</kbd></td><td>New event / new task on the selected day</td></tr>
+    <tr><th colspan="2">Anywhere</th></tr>
     <tr><td><kbd>Space</kbd></td><td>Pause / resume the running timer</td></tr>
     <tr><td><kbd>Ctrl</kbd>+<kbd>1</kbd>–<kbd>4</kbd></td><td>Switch tabs</td></tr>
     <tr><td><kbd>Alt</kbd>+<kbd>←</kbd> / <kbd>→</kbd></td><td>Back / forward to the previous tab</td></tr>

@@ -7167,6 +7167,49 @@ function closeTopmostLayer() {
   return false;
 }
 
+// Calendarタブ専用のキー(2026-10-03)。J/KはGoogleカレンダーと同じ割り当て。
+// 処理したらtrueを返す(呼ぶ側でpreventDefaultする)。
+function handleCalendarKey(e) {
+  const key = e.key.toLowerCase();
+  if (e.shiftKey) {
+    const delta = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -7, ArrowDown: 7 }[e.key];
+    if (delta) {
+      moveCalSelection(delta);
+      return true;
+    }
+    if (key === "n") {
+      openEventAddPanel({ kind: "task" });
+      return true;
+    }
+    return false;
+  }
+  if (e.key === "ArrowLeft" || key === "k") calGoPrev();
+  else if (e.key === "ArrowRight" || key === "j") calGoNext();
+  else if (key === "t") document.getElementById("cal-today-btn").click();
+  else if (key === "m" || key === "w") {
+    document.querySelector(`#cal-view-toggle .cal-view-btn[data-view="${key === "m" ? "month" : "week"}"]`).click();
+  } else return false;
+  return true;
+}
+
+// 選択日をdelta日ずらす。表示中の月/週からはみ出したら表示もそこへ移す
+function moveCalSelection(delta) {
+  const next = addDaysToDate(selectedCalDate || todayStr(), delta);
+  const d = new Date(next + "T00:00:00");
+  const outOfView = calViewMode === "week"
+    ? mondayOf(next) !== calWeekStart
+    : d.getFullYear() !== calYear || d.getMonth() + 1 !== calMonth;
+  if (!outOfView) {
+    selectCalDate(next);
+    return;
+  }
+  calYear = d.getFullYear();
+  calMonth = d.getMonth() + 1;
+  calWeekStart = mondayOf(next);
+  selectedCalDate = next;
+  loadCalendar({ refreshTodayPanel: false });
+}
+
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") {
     if (closeTopmostLayer()) e.preventDefault();
@@ -7193,6 +7236,11 @@ document.addEventListener("keydown", (e) => {
 
   // パネルが開いている間はEsc以外の1文字キーで別のパネルを重ねない
   if (visiblePanels().length) return;
+
+  if (activeTabId() === "tab-calendar" && handleCalendarKey(e)) {
+    e.preventDefault();
+    return;
+  }
 
   const key = e.key.toLowerCase();
   if (e.key === "?") {

@@ -2654,6 +2654,16 @@ body:has(#tab-calendar.active) {
   padding-right: 16px;
 }
 
+.shortcut-table th {
+  padding: 14px 4px 4px;
+  text-align: left;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
 kbd {
   display: inline-block;
   padding: 1px 6px;
