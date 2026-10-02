@@ -540,6 +540,13 @@
       <p class="meta">Naps and 14h+ records are left out of the averages. Dashed lines: avg bedtime / wake-up</p>
       <p class="meta" id="sleep-chart-detail">Tap a night for details</p>
     </div>
+    <!-- 睡眠ロック(2026-10-03): 寝ている間はJpBlockerがスマホをロックし続け、この時刻に自動で外れる -->
+    <form id="sleep-lock-form" class="add-form goal-form">
+      <label class="goal-field"><span>Phone locked until</span>
+        <input type="time" id="sleep-lock-until-input" required></label>
+      <button type="submit">Save</button>
+    </form>
+    <p class="meta">While you're asleep, your phone stays locked until this time.</p>
     <h3 id="sleep-log-header">History</h3>
     <ul id="sleep-log-list" class="list"></ul>
     </div>

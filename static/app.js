@@ -4809,12 +4809,23 @@ async function wakeUp() {
 async function loadSleepPanel() {
   // 30晩ぶんのグラフを描くため、昼寝などで1晩に2件ある分も見込んで多めに取る。
   // 数字(平均など)は昼寝・押し忘れを外す必要があり、記録の種類(kind)を見ながら手元で計算する
-  const logs = await api("/api/sleep-logs?limit=60");
+  const [logs, settings] = await Promise.all([api("/api/sleep-logs?limit=60"), api("/api/settings")]);
   const nights = sleepNightsInRange(logs);
   renderSleepStats(logs, nights);
   renderSleepChart(nights);
   renderSleepLogList(logs.slice(0, 30));
+  document.getElementById("sleep-lock-until-input").value = settings.sleep_lock_until;
 }
+
+guardedSubmit(document.getElementById("sleep-lock-form"), async () => {
+  const value = document.getElementById("sleep-lock-until-input").value;
+  try {
+    await api("/api/settings", { method: "PUT", body: JSON.stringify({ sleep_lock_until: value }) });
+    showToast(`Phone lock ends at ${value}`);
+  } catch (err) {
+    showToast("解除時刻の保存に失敗しました。もう一度お試しください");
+  }
+});
 
 // ---------- sleep chart (2026-10-02) ----------
 // 1晩を1本の縦棒にし、寝た時刻〜起きた時刻を塗る(縦軸は21時〜翌12時)。

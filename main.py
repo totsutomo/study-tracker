@@ -5,6 +5,7 @@ import html
 import io
 import json
 import os
+import re
 import secrets
 import time
 import urllib.error
@@ -207,6 +208,7 @@ class SettingsUpdate(BaseModel):
     weekly_goal_minutes: int | None = None
     monthly_goal_minutes: int | None = None
     daily_minimum_minutes: int | None = None
+    sleep_lock_until: str | None = None  # "HH:MM"。睡眠ロック(JpBlocker)が自動で外れる時刻
 
 
 class FocusSessionSync(BaseModel):
@@ -1812,6 +1814,7 @@ def _read_settings(conn):
         "weekly_goal_minutes": int(d["weekly_goal_minutes"]) if "weekly_goal_minutes" in d else None,
         "monthly_goal_minutes": int(d["monthly_goal_minutes"]) if "monthly_goal_minutes" in d else None,
         "daily_minimum_minutes": int(d["daily_minimum_minutes"]) if "daily_minimum_minutes" in d else None,
+        "sleep_lock_until": d.get("sleep_lock_until", SLEEP_LOCK_UNTIL_DEFAULT),
     }
 
 
@@ -1853,8 +1856,18 @@ def study_log_progress():
     }
 
 
+@app.get("/api/settings")
+def get_settings():
+    conn = get_connection()
+    result = _read_settings(conn)
+    conn.close()
+    return result
+
+
 @app.put("/api/settings")
 def update_settings(payload: SettingsUpdate):
+    if payload.sleep_lock_until is not None and not _parse_hhmm(payload.sleep_lock_until):
+        raise HTTPException(status_code=400, detail="sleep_lock_until must be HH:MM")
     conn = get_connection()
     if payload.weekly_goal_minutes is not None:
         conn.execute(
@@ -1873,6 +1886,12 @@ def update_settings(payload: SettingsUpdate):
             "INSERT INTO settings (key, value) VALUES ('daily_minimum_minutes', ?) "
             "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
             (str(payload.daily_minimum_minutes),),
+        )
+    if payload.sleep_lock_until is not None:
+        conn.execute(
+            "INSERT INTO settings (key, value) VALUES ('sleep_lock_until', ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (payload.sleep_lock_until,),
         )
     conn.commit()
     result = _read_settings(conn)
@@ -2072,6 +2091,41 @@ def delete_activation_log(log_id: int):
 
 
 # ---------- sleep logs ----------
+
+# 睡眠ロック(2026-10-03): 寝ている記録がある間、JpBlockerがスマホのロック解除を即ロックし直す。
+# 夜中にスマホのCompassで「起きた」を押して抜けられないよう、指定時刻(sleep_lock_until)までは
+# 外れない。朝はその時刻で自動で外れるので、「起きた」の押し忘れでスマホが使えなくなることもない。
+# 寝た時刻から解除時刻まで12時間を超える記録(夕方より前の昼寝)はロックしない。
+SLEEP_LOCK_UNTIL_DEFAULT = "06:00"
+SLEEP_LOCK_MAX_HOURS = 12
+
+
+def _parse_hhmm(value: str):
+    m = re.fullmatch(r"([01]\d|2[0-3]):([0-5]\d)", value or "")
+    return (int(m.group(1)), int(m.group(2))) if m else None
+
+
+def _sleep_lock_remaining_sec(conn) -> int:
+    """睡眠ロックがあと何秒続くか(0 = ロックなし)。JpBlockerはこの秒数を手元に控えて、
+    機内モード等で問い合わせが失敗してもその時刻まではロックを続ける。"""
+    row = conn.execute(
+        "SELECT bedtime_at FROM sleep_logs WHERE wake_at IS NULL ORDER BY bedtime_at DESC LIMIT 1"
+    ).fetchone()
+    if not row:
+        return 0
+    until_row = conn.execute("SELECT value FROM settings WHERE key = 'sleep_lock_until'").fetchone()
+    hm = _parse_hhmm(until_row[0] if until_row else "") or _parse_hhmm(SLEEP_LOCK_UNTIL_DEFAULT)
+    bedtime = datetime.fromisoformat(row[0][:19].replace(" ", "T"))
+    unlock = bedtime.replace(hour=hm[0], minute=hm[1], second=0, microsecond=0)
+    if unlock <= bedtime:
+        unlock += timedelta(days=1)
+    if unlock - bedtime > timedelta(hours=SLEEP_LOCK_MAX_HOURS):
+        return 0
+    now = nz_now_naive()
+    if not (bedtime <= now < unlock):
+        return 0
+    return int((unlock - now).total_seconds())
+
 
 SLEEP_NAP_MAX_MINUTES = 180     # これ未満で、寝た時刻が9〜21時なら昼寝
 SLEEP_FLAG_MIN_MINUTES = 14 * 60  # これを超えたら「起きたの押し忘れ?」
@@ -3340,6 +3394,8 @@ def focus_session_status(token: str | None = None):
         raise HTTPException(status_code=403, detail="invalid token")
     conn = get_connection()
     result = _focus_session_status(conn)
+    # JpBlockerは15秒ごとにここを見ているので、睡眠ロックも同じ問い合わせに相乗りさせる
+    result["sleep_lock_remaining_sec"] = _sleep_lock_remaining_sec(conn)
     conn.close()
     return result
 
