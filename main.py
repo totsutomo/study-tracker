@@ -7,6 +7,7 @@ import json
 import os
 import re
 import secrets
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -221,11 +222,25 @@ class SessionActiveSync(BaseModel):
     subject: str | None = None
     # 開始した端末の種別("pc" | "phone" | "tablet")。他端末のバナーに「どこで計測中か」を出すため(2026-10-03)
     device: str | None = None
+    # ほかの端末から止める機能(2026-10-03)用。session_idは開始端末が作るランダムな文字列で、
+    # 二重記録の防止と「どのセッションを止めるか」の照合に使う。todo_id/note/start_triggerは、
+    # ほかの端末が代わりに記録する時に開始端末と同じ内容の学習記録を作るため。
+    # active:falseの時のsession_idは「自分のセッションの時だけ旗を下ろす」照合に使う
+    session_id: str | None = None
+    todo_id: int | None = None
+    note: str | None = None
+    start_trigger: str | None = None
 
 
 class SessionPauseSync(BaseModel):
     paused: bool
     elapsed_ms: int  # currentElapsedMs() at the moment of the pause/resume click
+
+
+class SessionRemoteEnd(BaseModel):
+    session_id: str
+    action: str  # "save" | "discard"
+    device: str | None = None  # 止めた側の端末種別。開始端末のトースト「Stopped on PC」に使う
 
 
 class StudyLogCreate(BaseModel):
@@ -237,6 +252,8 @@ class StudyLogCreate(BaseModel):
     # Compassタイマーの記録は端末側で未送信キューに控えて再送するため、同じ行が既にあれば
     # 二重登録せず既存行を返す(app.jsのsendPendingStudyLog参照)
     dedupe: bool = False
+    # Compassタイマーの記録なら、そのセッション番号。ほかの端末で既に記録済みなら記録しない
+    session_id: str | None = None
 
 
 class VocabAppStudyLogCreate(BaseModel):
@@ -831,7 +848,26 @@ def study_log_trigger_stats(days: int = 30):
 
 @app.post("/api/study-logs")
 def create_study_log(log: StudyLogCreate):
+    if log.session_id:
+        with _session_end_lock:
+            return _create_study_log(log)
+    return _create_study_log(log)
+
+
+def _create_study_log(log: StudyLogCreate):
     conn = get_connection()
+    if log.session_id:
+        # ほかの端末が先に止めて記録済み(remote-end)なら、開始端末からの記録は捨てる
+        ended = _read_remote_ended(conn)
+        if ended and ended.get("session_id") == log.session_id:
+            conn.close()
+            return {"already_ended": True, "action": ended.get("action")}
+        # 開始端末が自分で止めた。旗を下ろすactive:falseより先にこの記録が届いた場合でも、
+        # この直後にほかの端末のremote-endが通って二重に記録されないよう、ここで旗も下ろす
+        current = conn.execute("SELECT value FROM settings WHERE key = 'session_id'").fetchone()
+        if current and current[0] == log.session_id:
+            _clear_session_flags(conn)
+            conn.commit()
     if log.dedupe and log.logged_at:
         existing = conn.execute(
             "SELECT id FROM study_logs WHERE subject = ? AND minutes = ? AND logged_at = ?",
@@ -3244,32 +3280,70 @@ def focus_session_sync(payload: FocusSessionSync):
 # JpBlocker(Android)側で「今study-trackerのセッションが動いているか」を判定するための状態。
 # 上のfocus_session_sync()とは別管理(あちらはカウントダウンのみ・push通知の保険用途)。
 # こちらはカウントアップ/カウントダウン問わず、セッション開始〜終了(一時停止中は維持)を反映する。
+# ほかの端末から止める機能(2026-10-03)で増えた旗も含めた、Compassセッションの旗の一覧。
+# 終了・破棄・ほかの端末からの終了の時はこれを全部消す
+SESSION_FLAG_KEYS = (
+    "session_active", "session_subject", "session_started_at", "session_paused", "session_device",
+    "session_id", "session_todo_id", "session_note", "session_start_trigger", "session_paused_elapsed_ms",
+)
+
+# remote-endと開始端末の記録(/api/study-logs + session_id)がほぼ同時に届いた時に、両方が
+# 「まだ誰も記録していない」と判断して二重に記録しないよう、この2つの処理だけ順番に通す
+# (Renderは1プロセスなのでプロセス内のロックで足りる)
+_session_end_lock = threading.Lock()
+
+
+def _upsert_settings(conn, pairs) -> None:
+    for key, value in pairs:
+        conn.execute(
+            "INSERT INTO settings (key, value) VALUES (?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (key, value),
+        )
+
+
+def _clear_session_flags(conn) -> None:
+    placeholders = ", ".join("?" for _ in SESSION_FLAG_KEYS)
+    conn.execute(f"DELETE FROM settings WHERE key IN ({placeholders})", SESSION_FLAG_KEYS)
+
+
+def _read_remote_ended(conn) -> dict | None:
+    row = conn.execute("SELECT value FROM settings WHERE key = 'session_remote_ended'").fetchone()
+    if not row or not row[0]:
+        return None
+    try:
+        return json.loads(row[0])
+    except ValueError:
+        return None
+
+
 @app.post("/api/focus-session/active")
 def focus_session_active(payload: SessionActiveSync):
     conn = get_connection()
     if payload.active:
         started_at = utc_now_naive().isoformat(sep=" ", timespec="seconds")
-        for key, value in (
+        # a fresh session always starts unpaused; clear any leftover flags from a previous
+        # session that ended without going through the else-branch below (e.g. the
+        # FOCUS_SESSION_MAX_AGE_HOURS staleness auto-heal in _read_session_flag(), which only
+        # ever clears the three active/subject/started_at keys, not the rest).
+        _clear_session_flags(conn)
+        _upsert_settings(conn, [
             ("session_active", "1"),
             ("session_subject", payload.subject or ""),
             ("session_started_at", started_at),
             ("session_device", payload.device or ""),
-        ):
-            conn.execute(
-                "INSERT INTO settings (key, value) VALUES (?, ?) "
-                "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-                (key, value),
-            )
-        # a fresh session always starts unpaused; clear any leftover flag from a previous
-        # session that ended without going through the else-branch below (e.g. the
-        # FOCUS_SESSION_MAX_AGE_HOURS staleness auto-heal in _read_session_flag(), which only
-        # ever clears the three active/subject/started_at keys, not this one).
-        conn.execute("DELETE FROM settings WHERE key = 'session_paused'")
+            ("session_id", payload.session_id or ""),
+            ("session_todo_id", str(payload.todo_id) if payload.todo_id is not None else ""),
+            ("session_note", payload.note or ""),
+            ("session_start_trigger", payload.start_trigger or ""),
+        ])
     else:
-        conn.execute(
-            "DELETE FROM settings WHERE key IN "
-            "('session_active', 'session_subject', 'session_started_at', 'session_paused', 'session_device')"
-        )
+        current = conn.execute("SELECT value FROM settings WHERE key = 'session_id'").fetchone()
+        current_id = current[0] if current else ""
+        # 別のセッションに変わっていたら(ほかの端末で止められた後、その端末で新しく始めた等)、
+        # 古いセッションの「終わった」でそちらの旗を下ろさない。番号を送らない旧版は従来どおり下ろす
+        if not payload.session_id or not current_id or current_id == payload.session_id:
+            _clear_session_flags(conn)
     conn.commit()
     conn.close()
     return {"ok": True}
@@ -3284,10 +3358,12 @@ def focus_session_active(payload: SessionActiveSync):
 def focus_session_pause(payload: SessionPauseSync):
     conn = get_connection()
     if payload.paused:
-        conn.execute(
-            "INSERT INTO settings (key, value) VALUES ('session_paused', '1') "
-            "ON CONFLICT(key) DO UPDATE SET value = excluded.value"
-        )
+        # 一時停止中の経過時間も残す。ほかの端末から止めた時の分数と、そのパネルの表示に使う
+        # (started_atは再開時にしかずらさないので、一時停止中は「今−開始時刻」が実際より伸びていく)
+        _upsert_settings(conn, [
+            ("session_paused", "1"),
+            ("session_paused_elapsed_ms", str(max(0, payload.elapsed_ms))),
+        ])
     else:
         new_started_at = (utc_now_naive() - timedelta(milliseconds=payload.elapsed_ms)).isoformat(
             sep=" ", timespec="seconds"
@@ -3297,7 +3373,7 @@ def focus_session_pause(payload: SessionPauseSync):
             "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
             (new_started_at,),
         )
-        conn.execute("DELETE FROM settings WHERE key = 'session_paused'")
+        conn.execute("DELETE FROM settings WHERE key IN ('session_paused', 'session_paused_elapsed_ms')")
     conn.commit()
     conn.close()
     return {"ok": True}
@@ -3374,10 +3450,21 @@ def _focus_session_status(conn) -> dict:
         ).fetchone()
         # source/deviceは表示用の追加フィールド(どのアプリ・どの端末で計測中か、2026-10-03)。
         # JpBlockerはactiveしか読まないので影響なし
-        return _with_elapsed({
+        extra = dict(conn.execute(
+            "SELECT key, value FROM settings WHERE key IN "
+            "('session_id', 'session_todo_id', 'session_note', 'session_paused_elapsed_ms')"
+        ).fetchall())
+        result = _with_elapsed({
             "active": True, "subject": subject, "started_at": started_at, "paused": paused,
             "source": "compass", "device": (device_row[0] if device_row else None) or None,
+            # ほかの端末から止めるパネル用(2026-10-03)。session_idが無いのは旧版のCompassで始めたもの
+            "session_id": extra.get("session_id") or None,
+            "todo_id": int(extra["session_todo_id"]) if extra.get("session_todo_id") else None,
+            "note": extra.get("session_note") or None,
         })
+        if paused and extra.get("session_paused_elapsed_ms"):
+            result["paused_elapsed_seconds"] = int(extra["session_paused_elapsed_ms"]) // 1000
+        return result
 
     # vocab-appのreview/reading/newsモード(2026-09-02〜)。Compass本体のsession_activeとは
     # 別フラグ(vocab_session_*, POST /api/vocab-session/active参照)なので、ここでOR条件と
@@ -3419,8 +3506,75 @@ def focus_session_status(token: str | None = None):
 def focus_session_current():
     conn = get_connection()
     result = _focus_session_status(conn)
+    # 開始端末が「ほかの端末で止められた」と気づくための情報(2026-10-03)
+    result["remote_ended"] = _read_remote_ended(conn)
     conn.close()
     return result
+
+
+# ほかの端末からCompassのセッションを止める(2026-10-03)。止める側がその場で記録まで済ませる
+# (開始端末が閉じていたり裏に回っていたりしても止まるように)。開始端末は後で
+# /api/focus-session/current のremote_endedを見て、自分のタイマーを記録せずに片付ける。
+@app.post("/api/focus-session/remote-end")
+def focus_session_remote_end(payload: SessionRemoteEnd):
+    if payload.action not in ("save", "discard"):
+        raise HTTPException(status_code=400, detail="action must be save or discard")
+    with _session_end_lock:
+        conn = get_connection()
+        # 4時間の自動切れもここで効かせる(_read_session_flag参照)
+        active, subject, started_at = _read_session_flag(
+            conn, "session_active", "session_subject", "session_started_at"
+        )
+        values = dict(conn.execute(
+            "SELECT key, value FROM settings WHERE key IN "
+            "('session_id', 'session_paused', 'session_paused_elapsed_ms', "
+            "'session_todo_id', 'session_note', 'session_start_trigger')"
+        ).fetchall())
+        if not active or not payload.session_id or values.get("session_id") != payload.session_id:
+            conn.close()
+            return JSONResponse(status_code=409, content={"detail": "session already ended"})
+
+        if values.get("session_paused") == "1" and values.get("session_paused_elapsed_ms"):
+            elapsed_seconds = int(values["session_paused_elapsed_ms"]) / 1000
+        else:
+            try:
+                elapsed_seconds = (utc_now_naive() - datetime.fromisoformat(started_at)).total_seconds()
+            except (TypeError, ValueError):
+                elapsed_seconds = 0
+        # 開始端末のstopAndSaveSession()と同じ式: Math.max(1, Math.round(ms / 60000))。
+        # カウントダウンも時間切れ後の超過分を含めた全経過時間(開始端末と同じ、2026-10-03とっつー確認)
+        minutes = max(1, int(elapsed_seconds / 60 + 0.5))
+        todo_id = int(values["session_todo_id"]) if values.get("session_todo_id") else None
+
+        if payload.action == "save":
+            # logged_atは開始端末が送るのと同じNZのwall-clock(nz_now_naive参照)
+            conn.execute(
+                "INSERT INTO study_logs (subject, minutes, note, logged_at, start_trigger) VALUES (?, ?, ?, ?, ?)",
+                (
+                    subject or "",
+                    minutes,
+                    values.get("session_note") or None,
+                    nz_now_naive().isoformat(sep=" ", timespec="seconds"),
+                    values.get("session_start_trigger") or None,
+                ),
+            )
+        _clear_session_flags(conn)
+        # 止めた後にカウントダウンの「time's up」push通知が来ないよう、その追跡も消す
+        conn.execute(
+            "DELETE FROM settings WHERE key IN "
+            "('focus_target_end_at', 'focus_target_notified', 'focus_target_subject')"
+        )
+        _upsert_settings(conn, [("session_remote_ended", json.dumps({
+            "session_id": payload.session_id,
+            "action": payload.action,
+            "minutes": minutes if payload.action == "save" else 0,
+            "subject": subject,
+            "device": payload.device,
+            "at": utc_now_naive().isoformat(sep=" ", timespec="seconds"),
+        }))])
+        conn.commit()
+        conn.close()
+    return {"ok": True, "action": payload.action, "minutes": minutes, "subject": subject, "todo_id": todo_id}
 
 
 def _send_push_to_all(conn, payload: dict) -> int:

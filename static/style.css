@@ -261,6 +261,53 @@ body {
   50% { opacity: 0.85; }
 }
 
+/* Compassのタイマーの帯だけ押せる(押すと下の止めるパネル、2026-10-03) */
+.peer-session-banner.clickable {
+  cursor: pointer;
+}
+
+.peer-session-banner.clickable:hover,
+.peer-session-banner.clickable:focus-visible {
+  filter: brightness(1.08);
+}
+
+/* ほかの端末のタイマーを止めるパネル。経過時間を大きく出す */
+.peer-stop-panel .panel-header p {
+  margin: 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.peer-stop-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.peer-stop-time {
+  font-size: 28px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  margin: 2px 0 8px;
+  overflow-wrap: anywhere;
+}
+
+.peer-stop-form p {
+  margin: 0 0 4px;
+}
+
+.peer-stop-form button {
+  width: 100%;
+  padding: 12px;
+}
+
+.peer-stop-form button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 #settings-activation-status {
   margin-bottom: 8px;
 }

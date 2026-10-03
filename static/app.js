@@ -1580,6 +1580,13 @@ let lastResetOnReopenAt = 0; // debounce: avoid a double reset+toast if both tri
 let sessionCompleted = false;
 let overlayMinimized = false;
 let sessionStartTrigger = null;
+// このセッションの番号。ほかの端末から止めた時(remote-end)の照合と二重記録の防止に使う(2026-10-03)
+let sessionId = null;
+
+function newSessionId() {
+  if (window.crypto?.randomUUID) return crypto.randomUUID();
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
 
 const RING_CIRCUMFERENCE = 2 * Math.PI * 54;
 const RING_PERIOD_MS = 25 * 60 * 1000; // countup ring completes one lap every 25 min, purely decorative
@@ -1625,10 +1632,12 @@ function detectDeviceKind() {
 }
 const THIS_DEVICE_KIND = detectDeviceKind();
 
-function syncSessionActiveFlag(active, subject) {
+// extraはsession_id(開始・終了とも)と、開始時のtodo_id/note/start_trigger。ほかの端末が
+// 代わりに記録する時に同じ内容の記録を作れるよう、開始時にサーバーへ預けておく(2026-10-03)
+function syncSessionActiveFlag(active, subject, extra = {}) {
   api("/api/focus-session/active", {
     method: "POST",
-    body: JSON.stringify({ active, subject: subject || null, device: active ? THIS_DEVICE_KIND : null }),
+    body: JSON.stringify({ active, subject: subject || null, device: active ? THIS_DEVICE_KIND : null, ...extra }),
     keepalive: true,
   }).catch(() => {});
 }
@@ -1663,6 +1672,7 @@ let peerSessionSubject = null;
 let peerSessionStartedAt = null; // Date | null
 let peerSessionPaused = false;
 let peerSessionSourceText = ""; // " · Stack" / " · phone"など。この端末のCompassで始めたものは空
+let peerSessionStatus = null; // /api/focus-session/currentの最新の返事(計測中の時だけ)。止めるパネルが使う
 
 const PEER_SESSION_SOURCE_LABEL = { stack: "Stack", "vocab-app": "vocab-app" };
 const PEER_SESSION_DEVICE_LABEL = { phone: "phone", pc: "PC", tablet: "tablet" };
@@ -1685,6 +1695,12 @@ function updatePeerSessionBanner() {
     banner.classList.add("hidden");
     return;
   }
+  // Compassのタイマーだけ押して止められる。Stack・vocab-appの旗は画面を開いている間の印で、
+  // タイマーではないので押しても何もしない(2026-10-03)
+  const clickable = peerSessionStatus?.source === "compass";
+  banner.classList.toggle("clickable", clickable);
+  banner.setAttribute("role", clickable ? "button" : "status");
+  banner.tabIndex = clickable ? 0 : -1;
   const subjectText = peerSessionSubject ? ` · ${peerSessionSubject}` : "";
   // paused中はstarted_atからの単純経過計算が実時間とズレていく(pause中も時計が動き続ける
   // ため)ので、経過分数を出さず止まっていることが分かる表示に切り替える。resumeされると
@@ -1705,11 +1721,15 @@ async function checkPeerSession() {
   if (timerSubject) {
     // this device already has its own timer showing; don't also poll/display the peer banner
     peerSessionStartedAt = null;
+    peerSessionStatus = null;
     if (peerSessionTickInterval) {
       clearInterval(peerSessionTickInterval);
       peerSessionTickInterval = null;
     }
     updatePeerSessionBanner();
+    closePeerStopPanel();
+    // ただし、この端末のセッションがほかの端末で止められていないかは見る(2026-10-03)
+    if (sessionId) checkRemoteEnded();
     return;
   }
   let status;
@@ -1718,6 +1738,8 @@ async function checkPeerSession() {
   } catch {
     return; // best-effort; leave the banner as it was on a network hiccup
   }
+  if (timerSubject) return; // 返事を待つ間にこの端末でタイマーを始めた
+  peerSessionStatus = status && status.active ? status : null;
   if (status && status.active) {
     peerSessionSubject = status.subject || null;
     peerSessionPaused = !!status.paused;
@@ -1747,6 +1769,7 @@ async function checkPeerSession() {
     }
   }
   updatePeerSessionBanner();
+  refreshPeerStopPanel();
 }
 
 function startPeerSessionPolling() {
@@ -1755,6 +1778,177 @@ function startPeerSessionPolling() {
     peerSessionPollInterval = setInterval(checkPeerSession, 30000);
   }
 }
+
+// ---------- ほかの端末からCompassのタイマーを止める(2026-10-03) ----------
+// 止める側がサーバー(/api/focus-session/remote-end)でその場で記録して終了する。始めた端末は
+// 後でremote_endedを見て、記録はせずに自分のタイマーを片付ける(下のcheckRemoteEnded)。
+
+// 始めた端末側: 自分のセッションがほかの端末で止められていたら片付けて知らせる
+async function checkRemoteEnded() {
+  const mySessionId = sessionId;
+  let status;
+  try {
+    status = await api("/api/focus-session/current");
+  } catch {
+    return;
+  }
+  if (!timerSubject || sessionId !== mySessionId) return; // 返事を待つ間に自分で止めた/始め直した
+  if (status.active && status.session_id === mySessionId) return;
+  const ended = status.remote_ended;
+  // 一致しない(サーバーの4時間自動切れ等)時は今までどおり何もしない
+  if (!ended || ended.session_id !== mySessionId) return;
+  const hadTodo = !!activeTodoId;
+  resetSessionState({ syncServer: false });
+  const where = PEER_SESSION_DEVICE_LABEL[ended.device] || "another device";
+  if (ended.action === "save") {
+    showToast(`Stopped on ${where} · ${formatLogDuration(ended.minutes)} saved`, null, 6000);
+    reloadStudyViews();
+    if (hadTodo) loadTodos(); // 止めた端末で「完了」にしていれば、こちらの一覧にも反映する
+  } else {
+    showToast(`Discarded on ${where}`, null, 6000);
+  }
+  checkPeerSession(); // 自分のタイマーが無くなったので、ほかの端末の帯の表示に戻す
+}
+
+const peerStopPanel = document.getElementById("peer-stop-panel");
+const peerStopBackdrop = document.getElementById("peer-stop-backdrop");
+let peerStopTick = null;
+let peerStopBusy = false;
+
+function formatClock(totalSeconds) {
+  const s = Math.max(0, Math.floor(totalSeconds));
+  const h = Math.floor(s / 3600);
+  const mm = String(Math.floor((s % 3600) / 60)).padStart(h ? 2 : 1, "0");
+  const ss = String(s % 60).padStart(2, "0");
+  return h ? `${h}:${mm}:${ss}` : `${mm}:${ss}`;
+}
+
+function peerStopElapsedSeconds() {
+  const st = peerSessionStatus;
+  if (!st) return 0;
+  if (st.paused) return st.paused_elapsed_seconds ?? 0;
+  return peerSessionStartedAt ? (Date.now() - peerSessionStartedAt.getTime()) / 1000 : 0;
+}
+
+function renderPeerStopPanel() {
+  const st = peerSessionStatus;
+  if (!st) return;
+  const where = PEER_SESSION_DEVICE_LABEL[st.device] || "another device";
+  const from = st.note ? ` · from ToDo「${st.note}」` : "";
+  document.getElementById("peer-stop-source").textContent = `${st.paused ? "Paused" : "Running"} on ${where}${from}`;
+  document.getElementById("peer-stop-subject").textContent = st.subject || "Studying";
+  // 一時停止中でも旧版のサーバー・クライアント(経過を残していない)の時は時間を出さない
+  const unknown = st.paused && st.paused_elapsed_seconds == null;
+  document.getElementById("peer-stop-elapsed").textContent = unknown ? "Paused" : formatClock(peerStopElapsedSeconds());
+  // session_idが無い = 旧版のCompassで始めたセッション。旧版の端末は後から自分でも記録するので、
+  // ここで止めると二重になる。止めるボタンは押せなくする
+  const legacy = !st.session_id;
+  document.getElementById("peer-stop-legacy").textContent = `Open Compass on ${where} once to update`;
+  document.getElementById("peer-stop-legacy").classList.toggle("hidden", !legacy);
+  document.getElementById("peer-stop-save").disabled = legacy || peerStopBusy;
+  document.getElementById("peer-stop-discard").disabled = legacy || peerStopBusy;
+}
+
+function openPeerStopPanel() {
+  if (peerSessionStatus?.source !== "compass" || timerSubject) return;
+  peerStopBusy = false;
+  renderPeerStopPanel();
+  peerStopPanel.classList.remove("hidden");
+  peerStopBackdrop.classList.remove("hidden");
+  clearInterval(peerStopTick);
+  peerStopTick = setInterval(renderPeerStopPanel, 1000);
+  document.getElementById("peer-stop-save").focus({ preventScroll: true });
+  checkPeerSession(); // 帯の情報は最大30秒前のものなので、開いた時に取り直す
+}
+
+function closePeerStopPanel() {
+  if (peerStopPanel.classList.contains("hidden")) return;
+  peerStopPanel.classList.add("hidden");
+  peerStopBackdrop.classList.add("hidden");
+  clearInterval(peerStopTick);
+  peerStopTick = null;
+}
+
+// ポーリングの結果をパネルに反映する。開いている間にセッションが終わったら閉じる
+function refreshPeerStopPanel() {
+  if (peerStopPanel.classList.contains("hidden") || peerStopBusy) return;
+  if (peerSessionStatus?.source !== "compass") {
+    closePeerStopPanel();
+    return;
+  }
+  renderPeerStopPanel();
+}
+
+async function peerStopSession(action) {
+  const st = peerSessionStatus;
+  if (!st?.session_id || peerStopBusy) return;
+  if (action === "discard" && !confirm("Discard this session without saving it?")) return;
+  peerStopBusy = true;
+  renderPeerStopPanel();
+  let result;
+  try {
+    result = await api("/api/focus-session/remote-end", {
+      method: "POST",
+      body: JSON.stringify({ session_id: st.session_id, action, device: THIS_DEVICE_KIND }),
+    }, 0);
+  } catch {
+    // 409(もう終わっている)か通信の失敗。返事だけ失われて実は止まっている場合もあるので確かめる
+    let cur = null;
+    try {
+      cur = await api("/api/focus-session/current");
+    } catch {}
+    if (cur?.remote_ended?.session_id === st.session_id && cur.remote_ended.action === action) {
+      result = { ...cur.remote_ended, todo_id: st.todo_id };
+    } else if (cur && !(cur.active && cur.session_id === st.session_id)) {
+      peerStopBusy = false;
+      closePeerStopPanel();
+      showToast("This session already ended");
+      checkPeerSession();
+      return;
+    } else {
+      peerStopBusy = false;
+      renderPeerStopPanel();
+      showToast("Couldn't stop the session. Try again");
+      return;
+    }
+  }
+  peerStopBusy = false;
+  closePeerStopPanel();
+  peerSessionStatus = null;
+  peerSessionStartedAt = null;
+  updatePeerSessionBanner();
+  if (action === "save") {
+    showToast(`${st.subject || "Session"} · ${formatLogDuration(result.minutes)} saved`);
+    if (result.todo_id && confirm("Mark this task complete?")) {
+      const t = allTodos.find((x) => x.id === result.todo_id);
+      if (t) {
+        if (!t.done) toggleTodoDone(t);
+      } else {
+        api(`/api/todos/${result.todo_id}/toggle`, { method: "POST" }).then(() => { loadTodos(); loadTodoStats(); });
+      }
+    }
+    reloadStudyViews();
+  } else {
+    showToast("Session discarded");
+  }
+  checkPeerSession();
+}
+
+document.getElementById("peer-session-banner").addEventListener("click", openPeerStopPanel);
+document.getElementById("peer-session-banner").addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && e.currentTarget.classList.contains("clickable")) {
+    e.preventDefault();
+    openPeerStopPanel();
+  }
+});
+document.getElementById("peer-stop-close").addEventListener("click", closePeerStopPanel);
+peerStopBackdrop.addEventListener("click", closePeerStopPanel);
+// Stop & saveはformの送信にしてある: 既存のCtrl+Enter(開いているパネルのformを送信)がそのまま効く
+document.getElementById("peer-stop-form").addEventListener("submit", (e) => {
+  e.preventDefault();
+  peerStopSession("save");
+});
+document.getElementById("peer-stop-discard").addEventListener("click", () => peerStopSession("discard"));
 
 // timer state lives in plain JS vars, which a page reload (manual refresh, PWA relaunch,
 // server cold-start forcing a reconnect) wipes out; persist it so restoreSession() can rebuild
@@ -1780,6 +1974,7 @@ function persistSession() {
       sessionCompleted,
       overlayMinimized,
       sessionStartTrigger,
+      sessionId,
     })
   );
 }
@@ -1797,6 +1992,8 @@ function applyResetOnReopenIfNeeded() {
   segmentStart = isPaused ? null : now;
   sessionCompleted = false;
   persistSession();
+  // サーバー側の経過時間も0に戻す(ほかの端末の帯・止めた時の分数がこの端末の表示とずれないように)
+  syncFocusSessionPause(isPaused, 0);
   if (sessionMode === "countdown") {
     syncFocusSessionServer(isPaused ? null : Math.round(sessionTargetMs / 1000), timerSubject);
   }
@@ -1833,6 +2030,7 @@ function restoreSession() {
   sessionCompleted = !!saved.sessionCompleted;
   overlayMinimized = saved.overlayMinimized;
   sessionStartTrigger = saved.sessionStartTrigger || null;
+  sessionId = saved.sessionId || null; // 機能追加前に始めたセッションには無い
 
   applyResetOnReopenIfNeeded();
 
@@ -1863,6 +2061,7 @@ function beginSession(subject, todoId, mode, targetMs, clockOnly, trigger, keepA
   sessionCompleted = false;
   overlayMinimized = false;
   sessionStartTrigger = trigger || null;
+  sessionId = newSessionId();
   openFocusOverlay();
   startTimerTick();
   persistSession();
@@ -1872,7 +2071,13 @@ function beginSession(subject, todoId, mode, targetMs, clockOnly, trigger, keepA
   if (mode === "countdown") {
     syncFocusSessionServer(Math.round(targetMs / 1000), subject);
   }
-  syncSessionActiveFlag(true, subject);
+  const linkedTodo = todoId ? allTodos.find((x) => x.id === todoId) : null;
+  syncSessionActiveFlag(true, subject, {
+    session_id: sessionId,
+    todo_id: todoId || null,
+    note: linkedTodo ? linkedTodo.title : null,
+    start_trigger: sessionStartTrigger,
+  });
   checkPeerSession(); // this device now has its own timer showing; hide the peer banner immediately
 }
 
@@ -2132,10 +2337,14 @@ document.addEventListener("visibilitychange", () => {
   }
 });
 
-function resetSessionState() {
+// syncServer:false = ほかの端末で既に止められた後の片付け。サーバーの旗はその端末が下ろし済みで、
+// ここで送ると(その間にほかの端末で始めた)新しいセッションの旗まで下ろしかねないため送らない
+function resetSessionState({ syncServer = true } = {}) {
   stopTimerTick();
   releaseWakeLock();
   const wasCountdown = sessionMode === "countdown";
+  const endedSessionId = sessionId;
+  sessionId = null;
   timerSubject = null;
   activeTodoId = null;
   accumulatedMs = 0;
@@ -2151,10 +2360,11 @@ function resetSessionState() {
   closeFocusOverlay();
   hideMiniBar();
   localStorage.removeItem(FOCUS_SESSION_KEY);
+  if (!syncServer) return;
   if (wasCountdown) {
     syncFocusSessionServer(null, null);
   }
-  syncSessionActiveFlag(false, null);
+  syncSessionActiveFlag(false, null, { session_id: endedSessionId });
 }
 
 // ---------- 未送信の学習記録(finishSessionの保険) ----------
@@ -2365,13 +2575,21 @@ async function finishSession(elapsedMinutes) {
     note: linkedTodo ? linkedTodo.title : null,
     logged_at: `${localDatetimeNow().replace("T", " ")}:00`,
     start_trigger: startTrigger,
+    // ほかの端末で既に止めて記録済みなら、サーバーがこの記録を捨てる(二重記録の防止、2026-10-03)
+    session_id: sessionId,
   };
   addPendingStudyLog(pending);
   resetSessionState();
   // タイマー画面はresetSessionState()で既に閉じている(体感即時)。ここから先の保存は裏で進める
-  const logPromise = sendPendingStudyLog(pending).catch(() =>
-    showToast(`「${subject}」の記録を送れませんでした。端末に保存したので次回起動時に再送します`)
-  );
+  const logPromise = sendPendingStudyLog(pending)
+    .then((result) => {
+      if (result?.already_ended) {
+        showToast(result.action === "discard" ? "This session was already discarded on another device" : "This session was already saved on another device");
+      }
+    })
+    .catch(() =>
+      showToast(`「${subject}」の記録を送れませんでした。端末に保存したので次回起動時に再送します`)
+    );
   // サーバーの保存と再集計を待つと表示が変わるまで数秒〜十数秒かかるため、終えた分を手元の
   // 表示に先に足しておく。正しい数字はこの後の再読み込みで上書きされる(2026-09-29)
   const localApplyPromise = applyStudyLogLocally(pending).catch((err) => console.error("local apply failed", err));
@@ -2385,6 +2603,11 @@ async function finishSession(elapsedMinutes) {
   }
   await localApplyPromise;
   await logPromise;
+  reloadStudyViews();
+}
+
+// 学習記録が増えた後に、それを使う表示をまとめて読み直す(finishSession・ほかの端末からの終了で共通)
+function reloadStudyViews() {
   loadStudySummary();
   loadStudyLogList();
   loadStudyChart();
@@ -7332,6 +7555,14 @@ document.addEventListener("keydown", (e) => {
 
   // パネルが開いている間はEsc以外の1文字キーで別のパネルを重ねない
   if (visiblePanels().length) return;
+
+  // Space: 自分のタイマーが無く、ほかの端末でCompassのタイマーが動いている時は、止めるパネルを開く
+  // (自分のタイマーがある時の一時停止/再開は上で処理済み。開くだけで止まりはしない、2026-10-03)
+  if (e.key === " " && peerSessionStatus?.source === "compass") {
+    e.preventDefault();
+    openPeerStopPanel();
+    return;
+  }
 
   // / で検索、, で設定(4アプリ共通の割り当て、2026-10-03)
   if (e.key === "/") {

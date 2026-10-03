@@ -1020,6 +1020,22 @@
   <button type="button" id="copyweek-commit" class="hidden">Copy These Events</button>
 </div>
 
+<!-- ほかの端末で動いているCompassのタイマーを止めるパネル。上の帯(peer-session-banner)を押す/Spaceで開く(2026-10-03)。
+     Stop & saveをformの送信にして、Ctrl+Enter(開いているパネルのformを送信)で止められるようにしている -->
+<div id="peer-stop-backdrop" class="backdrop hidden"></div>
+<div id="peer-stop-panel" class="add-panel peer-stop-panel hidden" role="dialog" aria-label="Session on another device">
+  <div class="panel-header">
+    <p class="meta" id="peer-stop-source"></p>
+    <button type="button" id="peer-stop-close" class="panel-close" aria-label="Close">×</button>
+  </div>
+  <form id="peer-stop-form" class="peer-stop-form">
+    <div class="peer-stop-time"><span id="peer-stop-subject"></span> · <span id="peer-stop-elapsed"></span></div>
+    <p class="meta hidden" id="peer-stop-legacy"></p>
+    <button type="submit" id="peer-stop-save">■ Stop &amp; save</button>
+    <button type="button" id="peer-stop-discard" class="danger-outline">Discard</button>
+  </form>
+</div>
+
 <div id="shortcut-backdrop" class="backdrop hidden"></div>
 <div id="shortcut-panel" class="add-panel hidden">
   <div class="panel-header">
@@ -1047,6 +1063,7 @@
     <tr><td><kbd>N</kbd> / <kbd>Shift</kbd>+<kbd>N</kbd></td><td>New event / new task on the selected day</td></tr>
     <tr><th colspan="2">Anywhere</th></tr>
     <tr><td><kbd>Space</kbd></td><td>Pause / resume the running timer</td></tr>
+    <tr><td><kbd>Space</kbd> (no timer here)</td><td>Open the timer running on another device, then <kbd>Ctrl</kbd>+<kbd>Enter</kbd> to stop &amp; save</td></tr>
     <tr><td><kbd>Alt</kbd>+<kbd>1</kbd>–<kbd>4</kbd></td><td>Switch tabs</td></tr>
     <tr><td><kbd>Alt</kbd>+<kbd>←</kbd> / <kbd>→</kbd></td><td>Back / forward to the previous tab</td></tr>
     <tr><td><kbd>?</kbd> (left <kbd>Shift</kbd>+<kbd>/</kbd>)</td><td>Show this list</td></tr>
