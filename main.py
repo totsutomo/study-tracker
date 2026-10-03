@@ -219,6 +219,8 @@ class FocusSessionSync(BaseModel):
 class SessionActiveSync(BaseModel):
     active: bool  # true = session running (started, not yet finished/discarded)
     subject: str | None = None
+    # 開始した端末の種別("pc" | "phone" | "tablet")。他端末のバナーに「どこで計測中か」を出すため(2026-10-03)
+    device: str | None = None
 
 
 class SessionPauseSync(BaseModel):
@@ -3251,6 +3253,7 @@ def focus_session_active(payload: SessionActiveSync):
             ("session_active", "1"),
             ("session_subject", payload.subject or ""),
             ("session_started_at", started_at),
+            ("session_device", payload.device or ""),
         ):
             conn.execute(
                 "INSERT INTO settings (key, value) VALUES (?, ?) "
@@ -3265,7 +3268,7 @@ def focus_session_active(payload: SessionActiveSync):
     else:
         conn.execute(
             "DELETE FROM settings WHERE key IN "
-            "('session_active', 'session_subject', 'session_started_at', 'session_paused')"
+            "('session_active', 'session_subject', 'session_started_at', 'session_paused', 'session_device')"
         )
     conn.commit()
     conn.close()
@@ -3366,7 +3369,15 @@ def _focus_session_status(conn) -> dict:
             "SELECT value FROM settings WHERE key = 'session_paused'"
         ).fetchone()
         paused = bool(paused_row and paused_row[0] == "1")
-        return _with_elapsed({"active": True, "subject": subject, "started_at": started_at, "paused": paused})
+        device_row = conn.execute(
+            "SELECT value FROM settings WHERE key = 'session_device'"
+        ).fetchone()
+        # source/deviceは表示用の追加フィールド(どのアプリ・どの端末で計測中か、2026-10-03)。
+        # JpBlockerはactiveしか読まないので影響なし
+        return _with_elapsed({
+            "active": True, "subject": subject, "started_at": started_at, "paused": paused,
+            "source": "compass", "device": (device_row[0] if device_row else None) or None,
+        })
 
     # vocab-appのreview/reading/newsモード(2026-09-02〜)。Compass本体のsession_activeとは
     # 別フラグ(vocab_session_*, POST /api/vocab-session/active参照)なので、ここでOR条件と
@@ -3376,14 +3387,14 @@ def _focus_session_status(conn) -> dict:
         conn, "vocab_session_active", "vocab_session_mode", "vocab_session_started_at"
     )
     if vocab_active:
-        return _with_elapsed({"active": True, "subject": "English", "started_at": vocab_started_at, "paused": False})
+        return _with_elapsed({"active": True, "subject": "English", "started_at": vocab_started_at, "paused": False, "source": "vocab-app"})
 
     # Stackの復習中(2026-10-02〜)。vocab-appと同じくOR条件で合成するだけ
     stack_active, stack_subject, stack_started_at = _read_session_flag(
         conn, "stack_session_active", "stack_session_subject", "stack_session_started_at"
     )
     if stack_active:
-        return _with_elapsed({"active": True, "subject": stack_subject, "started_at": stack_started_at, "paused": False})
+        return _with_elapsed({"active": True, "subject": stack_subject, "started_at": stack_started_at, "paused": False, "source": "stack"})
 
     return {"active": False}
 

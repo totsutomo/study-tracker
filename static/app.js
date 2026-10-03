@@ -1613,10 +1613,22 @@ function syncFocusSessionServer(remainingSeconds, subject) {
 // その場合サーバー側はsession_activeが1のまま残り、JpBlocker側のマナーモード解除・
 // ブロック解除が永久に発火しなくなる(実際に約14時間このバグでスタックした実績あり)。
 // keepalive:trueならページが閉じてもブラウザがリクエスト送信を引き継いで完了させる。
+// この端末の種別。他端末のpeer-session-bannerに「どの端末で計測中か」を出すために開始時に送る(2026-10-03)。
+// Androidタブレットの「PC版サイト」表示ではUAが"X11; Linux"になるので、タッチ対応のLinuxもtabletとみなす
+function detectDeviceKind() {
+  const ua = navigator.userAgent || "";
+  if (/iPhone|iPod/.test(ua)) return "phone";
+  if (/Android/.test(ua)) return /Mobile/.test(ua) ? "phone" : "tablet";
+  if (/iPad/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1)) return "tablet";
+  if (/Linux/.test(ua) && !/Windows/.test(ua) && navigator.maxTouchPoints > 0) return "tablet";
+  return "pc";
+}
+const THIS_DEVICE_KIND = detectDeviceKind();
+
 function syncSessionActiveFlag(active, subject) {
   api("/api/focus-session/active", {
     method: "POST",
-    body: JSON.stringify({ active, subject: subject || null }),
+    body: JSON.stringify({ active, subject: subject || null, device: active ? THIS_DEVICE_KIND : null }),
     keepalive: true,
   }).catch(() => {});
 }
@@ -1650,6 +1662,21 @@ let peerSessionTickInterval = null;
 let peerSessionSubject = null;
 let peerSessionStartedAt = null; // Date | null
 let peerSessionPaused = false;
+let peerSessionSourceText = ""; // " · Stack" / " · phone"など。この端末のCompassで始めたものは空
+
+const PEER_SESSION_SOURCE_LABEL = { stack: "Stack", "vocab-app": "vocab-app" };
+const PEER_SESSION_DEVICE_LABEL = { phone: "phone", pc: "PC", tablet: "tablet" };
+
+// どこで計測中かの添え書き。Compass本体なら開始端末名(この端末自身なら何も付けない)、
+// Stack/vocab-appならアプリ名。旧版のクライアント・サーバーで情報が無い時も何も付けない
+function peerSessionSourceSuffix(status) {
+  if (status.source === "compass") {
+    if (!status.device || status.device === THIS_DEVICE_KIND) return "";
+    return ` · ${PEER_SESSION_DEVICE_LABEL[status.device] || status.device}`;
+  }
+  const label = PEER_SESSION_SOURCE_LABEL[status.source];
+  return label ? ` · ${label}` : "";
+}
 
 function updatePeerSessionBanner() {
   const banner = document.getElementById("peer-session-banner");
@@ -1664,13 +1691,13 @@ function updatePeerSessionBanner() {
   // サーバー側がstarted_atを巻き戻してくれる(main.py focus_session_pause参照)ので、次の
   // ポーリングで元の経過分数表示に自然に戻る。
   if (peerSessionPaused) {
-    label.innerHTML = `${ICONS.clock}${peerSessionSubject || "Studying"} · Paused`;
+    label.innerHTML = `${ICONS.clock}${peerSessionSubject || "Studying"} · Paused${peerSessionSourceText}`;
     banner.classList.remove("hidden");
     return;
   }
   const elapsedMin = Math.max(0, Math.floor((Date.now() - peerSessionStartedAt.getTime()) / 60000));
-  label.innerHTML = `${ICONS.clock}${peerSessionSubject || "Studying"} · ${formatLogDuration(elapsedMin)}`;
-  banner.title = `Studying now on another device${subjectText}`;
+  label.innerHTML = `${ICONS.clock}${peerSessionSubject || "Studying"} · ${formatLogDuration(elapsedMin)}${peerSessionSourceText}`;
+  banner.title = `Studying now${peerSessionSourceText ? ` (${peerSessionSourceText.slice(3)})` : ""}${subjectText}`;
   banner.classList.remove("hidden");
 }
 
@@ -1694,6 +1721,7 @@ async function checkPeerSession() {
   if (status && status.active) {
     peerSessionSubject = status.subject || null;
     peerSessionPaused = !!status.paused;
+    peerSessionSourceText = peerSessionSourceSuffix(status);
     // Unlike other timestamps in this app (which the client writes in its own local time via
     // nowLocalTimestamp()), session_started_at is written server-side by main.py's datetime.now()
     // - i.e. the server's (UTC) clock, not this device's local time. Parsing it the same way as
