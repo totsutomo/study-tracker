@@ -7032,14 +7032,37 @@ async function disablePush() {
   await sub.unsubscribe();
 }
 
+// serviceWorker.ready never settles if the worker failed to register, which used to leave the
+// button looking dead; cap the wait so that case surfaces as an error too.
+function withTimeout(promise, ms, message) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error(message)), ms)),
+  ]);
+}
+
 document.getElementById("push-toggle-btn").addEventListener("click", async () => {
-  const sub = await getPushSubscription();
-  if (sub) {
-    await disablePush();
-  } else {
-    await enablePush();
+  const btn = document.getElementById("push-toggle-btn");
+  btn.disabled = true;
+  try {
+    const sub = await withTimeout(getPushSubscription(), 10000, "Service worker isn't ready (timed out)");
+    if (sub) {
+      await disablePush();
+    } else {
+      await enablePush();
+    }
+  } catch (err) {
+    // Brave ships with its push service off, so subscribe() fails with "push service error"
+    const isBrave = navigator.brave && (await navigator.brave.isBrave().catch(() => false));
+    let msg = `Couldn't change notifications:\n${err.name || "Error"}: ${err.message || err}`;
+    if (isBrave) {
+      msg += "\n\nBrave: open brave://settings/privacy, turn on \"Use Google services for push messaging\", then restart Brave.";
+    }
+    alert(msg);
+  } finally {
+    btn.disabled = false;
+    updatePushStatus();
   }
-  updatePushStatus();
 });
 
 updatePushStatus();
