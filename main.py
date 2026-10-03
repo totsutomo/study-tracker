@@ -2557,8 +2557,15 @@ def get_screen_budget_params(token: str | None = None):
     return params
 
 
+# スクリーンタイム予算の1日は3時(27時)に切り替わる(2026-10-04)。0〜3時の夜ふかしを前日分として
+# 数え、日付が変わった瞬間に予算が復活して夜中に使えてしまうのを防ぐ。dateは「3時間前の日付」で、
+# JpBlocker(ScreenBudgetSync/ScreenTimeSync)・FocusGuard(screen_budget.py)・app.jsの
+# screenBudgetDateStr()も同じ区切りで日付を作って送ってくる。値を変える時は4か所そろえること。
+SCREEN_BUDGET_DAY_START_HOUR = 3
+
+
 def _compute_screen_budget_status(conn, date: str) -> dict:
-    # dateはJpBlocker/FocusGuardなど呼び出し側のローカル日付("YYYY-MM-DD")を必須で受け取る。
+    # dateはJpBlocker/FocusGuardなど呼び出し側の「予算日」("YYYY-MM-DD"、上の3時区切り)を必須で受け取る。
     # タイマー経由のstudy_logs.logged_atはクライアントがNZのローカル時刻で送ってくる(app.jsの
     # localDatetimeNow)ので、date(logged_at)がそのままNZの日付になる。以前はUTCとみなして
     # '+12 hours'で補正していたが、実際には二重補正になっており、NZの正午以降の勉強が翌日分に
@@ -2570,8 +2577,9 @@ def _compute_screen_budget_status(conn, date: str) -> dict:
     # 手動ログ入力(タイマーを使わず分数を直接入力)は実績を盛れてしまうため対象外にする。
     study_minutes = conn.execute(
         "SELECT COALESCE(SUM(minutes), 0) FROM study_logs "
-        "WHERE start_trigger IS NOT NULL AND date(logged_at) = ?",
-        (date,),
+        "WHERE start_trigger IS NOT NULL "
+        "AND datetime(logged_at) >= datetime(?, ?) AND datetime(logged_at) < datetime(?, ?)",
+        (date, f"+{SCREEN_BUDGET_DAY_START_HOUR} hours", date, f"+{24 + SCREEN_BUDGET_DAY_START_HOUR} hours"),
     ).fetchone()[0]
 
     todo_row = conn.execute(

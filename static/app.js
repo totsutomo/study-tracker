@@ -352,6 +352,15 @@ function todayStr() {
   return formatLocalDate(new Date());
 }
 
+// スクリーンタイム予算の日付。予算は3時(27時)に切り替わるので、3時より前なら前日の日付を使う
+// (main.pyのSCREEN_BUDGET_DAY_START_HOUR参照)
+const SCREEN_BUDGET_DAY_START_HOUR = 3;
+function screenBudgetDateStr() {
+  const d = new Date();
+  if (d.getHours() < SCREEN_BUDGET_DAY_START_HOUR) d.setDate(d.getDate() - 1);
+  return formatLocalDate(d);
+}
+
 // ---------- todos ----------
 
 const PRIORITY_LABEL = { high: "High", medium: "Med", low: "Low" };
@@ -3143,7 +3152,7 @@ async function loadScreenBudget() {
   const fill = document.getElementById("screen-budget-banner-fill");
   let s;
   try {
-    s = await api(`/api/screen-budget/current?date=${todayStr()}`);
+    s = await api(`/api/screen-budget/current?date=${screenBudgetDateStr()}`);
   } catch (e) {
     return; // ネットワーク一時失敗時は前回の表示を維持する(daily-min-banner等と同じ方針)
   }
