@@ -4897,14 +4897,25 @@ function sleepElapsedLabel() {
   return `Sleeping since ${sleepActiveLog.bedtime_at.slice(11, 16)} · ${formatLogDuration(elapsedMin)}`;
 }
 
+// スマホでは睡眠ロックが外れる時刻(サーバーが返すlock_until)まで、起床・記録の削除・解除時刻の
+// 変更など、ロックを終わらせる操作を表示ごと消す(2026-10-03)。ロック自体はJpBlockerがかけるが、
+// それが効かなかった時にCompassから自分で抜けられてしまう抜け道をふさぐ。PC・タブレットでは従来通り押せる
+function sleepLockedOnThisDevice() {
+  return THIS_DEVICE_KIND === "phone" && !!sleepActiveLog?.lock_until && nowLocalTimestamp() < sleepActiveLog.lock_until;
+}
+
 function updateSleepBanner() {
   const strip = document.getElementById("sleep-now");
+  const locked = sleepLockedOnThisDevice();
   if (!sleepActiveLog) {
     strip.classList.add("hidden");
   } else {
-    document.getElementById("sleep-now-label").innerHTML = `${ICONS.moon} ${sleepElapsedLabel()}`;
+    const until = locked ? ` · until ${sleepActiveLog.lock_until.slice(11, 16)}` : "";
+    document.getElementById("sleep-now-label").innerHTML = `${ICONS.moon} ${sleepElapsedLabel()}${until}`;
     strip.classList.remove("hidden");
   }
+  document.getElementById("sleep-now-wake-btn").classList.toggle("hidden", locked);
+  document.getElementById("sleep-lock-form").classList.toggle("hidden", locked);
   positionNowDock();
 }
 
@@ -4947,7 +4958,7 @@ let sleepLocalGen = 0;
 function cacheSleepActive() {
   const log = sleepActiveLog;
   if (log && !log.id) return; // 就寝のPOST返事待ち。idなしでは起床を送れない
-  cacheSet(SLEEP_ACTIVE_PATH, log && { id: log.id, bedtime_at: log.bedtime_at, wake_at: null });
+  cacheSet(SLEEP_ACTIVE_PATH, log && { id: log.id, bedtime_at: log.bedtime_at, wake_at: null, lock_until: log.lock_until || null });
 }
 
 function setSleepActive(log) {
@@ -5061,6 +5072,7 @@ async function maybeShowMorningPanel() {
   if (timerSubject || visiblePanels().length) return;
   if (sleepActiveLog) {
     if (!sleepActiveLog.id) return; // 就寝の保存中
+    if (sleepLockedOnThisDevice()) return; // 解除時刻まではスマホから起床を記録させない
     const bed = new Date(sleepActiveLog.bedtime_at.replace(" ", "T"));
     if (Date.now() - bed.getTime() < 3 * 3600 * 1000) return; // 寝てすぐ・昼寝中は聞かない
     openWakeMoodPanel({ id: sleepActiveLog.id, bedtime_at: sleepActiveLog.bedtime_at, wake_at: nowLocalTimestamp() }, "pending");
@@ -5090,7 +5102,7 @@ document.addEventListener("visibilitychange", () => {
 });
 
 async function wakeUp() {
-  if (!sleepActiveLog) return;
+  if (!sleepActiveLog || sleepLockedOnThisDevice()) return;
   const activeLog = sleepActiveLog;
   setSleepActive(null); // 楽観的に即座に「起床済み」表示へ
   try {
@@ -5307,6 +5319,13 @@ function renderSleepLogList(logs) {
         <button type="button" class="quick-date-btn sleep-edit-save">Save</button>
       </div>
     `;
+    // 寝ている最中の記録は、起床時刻を入れたり消したりするとロックが外れるのでスマホでは触らせない
+    if (!l.wake_at && sleepLockedOnThisDevice()) {
+      li.querySelector(".edit-btn").remove();
+      li.querySelector(".delete-btn").remove();
+      list.appendChild(li);
+      return;
+    }
     li.querySelector(".edit-btn").addEventListener("click", () => {
       li.querySelector(".sleep-edit-row").classList.toggle("hidden");
     });
@@ -7277,7 +7296,7 @@ function renderQuickNow() {
     items.push(`
       <div class="quick-now-card sleep">
         <div class="quick-now-text"><span>${ICONS.moon} ${sleepElapsedLabel()}</span></div>
-        <button type="button" class="quick-now-btn" data-act="wake">☀ I'm up</button>
+        ${sleepLockedOnThisDevice() ? "" : `<button type="button" class="quick-now-btn" data-act="wake">☀ I'm up</button>`}
       </div>`);
   }
   if (activationActiveLog) {

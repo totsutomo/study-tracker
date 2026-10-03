@@ -2143,14 +2143,13 @@ def _parse_hhmm(value: str):
     return (int(m.group(1)), int(m.group(2))) if m else None
 
 
-def _sleep_lock_remaining_sec(conn) -> int:
-    """睡眠ロックがあと何秒続くか(0 = ロックなし)。JpBlockerはこの秒数を手元に控えて、
-    機内モード等で問い合わせが失敗してもその時刻まではロックを続ける。"""
+def _sleep_lock_until(conn):
+    """睡眠ロックが外れる時刻(NZ時刻、naive)。いまロック中でなければNone。"""
     row = conn.execute(
         "SELECT bedtime_at FROM sleep_logs WHERE wake_at IS NULL ORDER BY bedtime_at DESC LIMIT 1"
     ).fetchone()
     if not row:
-        return 0
+        return None
     until_row = conn.execute("SELECT value FROM settings WHERE key = 'sleep_lock_until'").fetchone()
     hm = _parse_hhmm(until_row[0] if until_row else "") or _parse_hhmm(SLEEP_LOCK_UNTIL_DEFAULT)
     bedtime = datetime.fromisoformat(row[0][:19].replace(" ", "T"))
@@ -2158,11 +2157,17 @@ def _sleep_lock_remaining_sec(conn) -> int:
     if unlock <= bedtime:
         unlock += timedelta(days=1)
     if unlock - bedtime > timedelta(hours=SLEEP_LOCK_MAX_HOURS):
-        return 0
-    now = nz_now_naive()
-    if not (bedtime <= now < unlock):
-        return 0
-    return int((unlock - now).total_seconds())
+        return None
+    if not (bedtime <= nz_now_naive() < unlock):
+        return None
+    return unlock
+
+
+def _sleep_lock_remaining_sec(conn) -> int:
+    """睡眠ロックがあと何秒続くか(0 = ロックなし)。JpBlockerはこの秒数を手元に控えて、
+    機内モード等で問い合わせが失敗してもその時刻まではロックを続ける。"""
+    unlock = _sleep_lock_until(conn)
+    return int((unlock - nz_now_naive()).total_seconds()) if unlock else 0
 
 
 SLEEP_NAP_MAX_MINUTES = 180     # これ未満で、寝た時刻が9〜21時なら昼寝
@@ -2205,6 +2210,10 @@ def active_sleep_log():
     )
     row = cur.fetchone()
     result = row_to_dict(cur, row)
+    if result is not None:
+        # スマホのCompassはこの時刻まで「I'm up」を出さない(睡眠ロックの抜け道をふさぐ、2026-10-03)
+        unlock = _sleep_lock_until(conn)
+        result["lock_until"] = unlock.strftime("%Y-%m-%d %H:%M:%S") if unlock else None
     conn.close()
     return result
 
