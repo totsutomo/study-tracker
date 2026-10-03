@@ -64,15 +64,32 @@
 
 
 <!-- 最低ライン・スクリーンタイム・別端末で計測中の3本を1行にまとめた帯(2026-09-27)。
-     以前は3本が縦に積まれてスマホ画面の約2割を常に使っていた -->
+     以前は3本が縦に積まれてスマホ画面の約2割を常に使っていた。
+     2026-10-04に計器(HUD)風に作り直し、計測中のタイマーも画面下のnow-dockからここへ移した。
+     計測中は帯全体が科目色のタイマーに変わり、勉強・スクリーンタイムは右側に縮めて残す -->
 <div id="status-strip" class="status-strip">
-  <div id="daily-min-banner" class="strip-item daily-min-banner hidden">
-    <span id="daily-min-banner-label"></span>
-    <div class="stat-bar-track"><div class="stat-bar-fill" id="daily-min-banner-fill"></div></div>
+  <div id="mini-timer-bar" class="strip-live hidden">
+    <div class="hud-lab hud-live-lab">
+      <span class="rec-dot"></span><span>Rec ·&nbsp;</span><span id="mini-timer-subject" class="mini-timer-subject"></span>
+      <span id="mini-timer-status" class="mini-timer-status"></span>
+    </div>
+    <div class="hud-live-row">
+      <span id="mini-timer-time" class="hud-timer">00:00</span>
+      <button type="button" id="mini-pause-btn" class="icon-btn" aria-label="Pause/Resume">⏸</button>
+      <button type="button" id="mini-stop-btn" class="icon-btn" aria-label="Save and stop">⏹</button>
+    </div>
   </div>
-  <div id="screen-budget-banner" class="strip-item screen-budget-banner hidden">
-    <span id="screen-budget-banner-label"></span>
-    <div class="stat-bar-track"><div class="stat-bar-fill" id="screen-budget-banner-fill"></div></div>
+  <div class="hud-side">
+    <div id="daily-min-banner" class="strip-item daily-min-banner hidden">
+      <div class="hud-lab"><span>Study</span><span id="daily-min-banner-ratio" class="hud-ratio"></span></div>
+      <div class="hud-big" id="daily-min-banner-label"></div>
+      <div class="stat-bar-track hud-seg"><div class="stat-bar-fill" id="daily-min-banner-fill"></div></div>
+    </div>
+    <div id="screen-budget-banner" class="strip-item screen-budget-banner hidden">
+      <div class="hud-lab"><span>Screen</span><span id="screen-budget-banner-ratio" class="hud-ratio"></span></div>
+      <div class="hud-big" id="screen-budget-banner-label"></div>
+      <div class="stat-bar-track hud-seg"><div class="stat-bar-fill" id="screen-budget-banner-fill"></div></div>
+    </div>
   </div>
   <div id="peer-session-banner" class="peer-session-banner hidden">
     <span id="peer-session-banner-label"></span>
@@ -258,7 +275,8 @@
 
     <div class="study-subpanel" data-sub="log">
 
-    <h3 class="goal-heading">Goal <button type="button" id="goal-edit-btn" class="link-btn">✎ Edit goals</button></h3>
+    <!-- Today/This monthの数字の行はすぐ下のGoalカードと同じ数字だったので消し、そこにしかなかったTotalだけここに残す(2026-10-04) -->
+    <h3 class="goal-heading"><span>Goal <span class="goal-total">· Total <span id="stat-total"></span></span></span> <button type="button" id="goal-edit-btn" class="link-btn">✎ Edit goals</button></h3>
     <div class="goal-cards-row">
       <div class="goal-progress-card">
         <div class="goal-progress-row">
@@ -294,12 +312,6 @@
         <input type="number" id="monthly-goal-input" min="0" step="0.5"></label>
       <button type="submit">Save</button>
     </form>
-
-    <div class="stats-header">
-      <div class="stat-cell"><span class="stat-label">Today</span><span class="stat-value" id="stat-today"></span></div>
-      <div class="stat-cell"><span class="stat-label">This month</span><span class="stat-value" id="stat-month"></span></div>
-      <div class="stat-cell"><span class="stat-label">Total</span><span class="stat-value" id="stat-total"></span></div>
-    </div>
 
     <!-- 広いPC幅(1280px以上)では、左にグラフ2つ・右にActivity/7日合計/What moves my studyの2列にして
          右側の余白をなくす(2026-10-02)。それより狭い幅ではCSSのorderで今までどおりの縦一列の順に戻す -->
@@ -780,26 +792,10 @@
   </div>
 </div>
 
-<!-- 進行中のもの(タイマー・睡眠・サボり)をタブバーのすぐ上に積む帯(2026-10-02)。
-     以前は睡眠・サボりのバナーが画面の一番上にあり、終える操作は設定画面の中だった -->
+<!-- 進行中のもの(睡眠・サボり)をタブバーのすぐ上に積む帯(2026-10-02)。
+     以前は睡眠・サボりのバナーが画面の一番上にあり、終える操作は設定画面の中だった。
+     タイマーも以前はここにあったが、2026-10-04に上のstatus-stripへ移した -->
 <div id="now-dock" class="now-dock">
-<div id="mini-timer-bar" class="mini-timer-bar hidden">
-  <span class="rec-dot"></span>
-  <span id="mini-timer-subject" class="mini-timer-subject"></span>
-  <span id="mini-timer-time" class="mini-timer-time">00:00</span>
-  <span id="mini-timer-status" class="mini-timer-status"></span>
-  <button type="button" id="mini-pause-btn" class="icon-btn" aria-label="Pause/Resume">⏸</button>
-  <button type="button" id="mini-discard-btn" class="icon-btn danger-text" aria-label="Discard">
-    <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor"
-         stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-      <polyline points="3 6 5 6 21 6"/>
-      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
-      <line x1="10" y1="11" x2="10" y2="17"/>
-      <line x1="14" y1="11" x2="14" y2="17"/>
-    </svg>
-  </button>
-  <button type="button" id="mini-stop-btn" class="icon-btn" aria-label="Save and stop">⏹</button>
-</div>
 <div id="sleep-now" class="now-strip sleep-now hidden">
   <span class="now-strip-label" id="sleep-now-label"></span>
   <button type="button" id="sleep-now-wake-btn" class="now-strip-action">☀ I'm up</button>

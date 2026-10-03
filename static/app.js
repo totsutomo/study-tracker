@@ -2123,6 +2123,7 @@ function updateFocusDisplay() {
   document.getElementById("focus-ring-fill").style.strokeDashoffset = RING_CIRCUMFERENCE * (1 - progress);
   const miniTime = document.getElementById("mini-timer-time");
   if (miniTime) miniTime.textContent = text;
+  renderDailyMinStrip();
 }
 
 function startTimerTick() {
@@ -2185,11 +2186,15 @@ function expandFocusOverlay() {
 
 document.getElementById("focus-minimize-btn").addEventListener("click", minimizeFocusOverlay);
 
+// 2026-10-04からミニタイマーは画面上のstatus-stripの中にある。表示中は帯ごと
+// .liveにして科目色のタイマー表示に切り替える(勉強・スクリーンタイムは右に縮めて残す)
 function showMiniBar() {
   const bar = document.getElementById("mini-timer-bar");
   bar.classList.remove("hidden");
   document.getElementById("mini-timer-subject").textContent = timerSubject;
-  bar.style.setProperty("--subject-color", colorFor(timerSubject));
+  const strip = document.getElementById("status-strip");
+  strip.classList.add("live");
+  strip.style.setProperty("--subject-color", colorFor(timerSubject));
   updateMiniStatus();
   updateFocusDisplay();
   positionMiniBar();
@@ -2198,7 +2203,7 @@ function showMiniBar() {
 // 下部タブバーはスマホ幅でだけ表示されるので、その高さは表示中にウィンドウ幅が変わると変わる。
 // 以前は表示した瞬間の高さを固定していたため、狭いウィンドウで開始してから広げると、
 // PC表示で消えたタブバーの分(約53px)だけバーの下に隙間が残っていた(2026-09-27)。
-// 2026-10-02からはミニタイマーバーを睡眠・サボりの帯と一緒にnow-dockへ積み、dockごと動かす。
+// 2026-10-02からは睡眠・サボりの帯をnow-dockへ積み、dockごと動かす(ミニタイマーは10-04に上の帯へ移動)。
 // 高さはCSS変数にも入れ、本文の下余白・トースト・⚡メニューの位置がそれを参照する
 function positionNowDock() {
   const tabbarH = document.getElementById("tabbar").getBoundingClientRect().height;
@@ -2217,12 +2222,14 @@ window.addEventListener("resize", positionNowDock);
 
 function hideMiniBar() {
   document.getElementById("mini-timer-bar").classList.add("hidden");
+  document.getElementById("status-strip").classList.remove("live");
   positionNowDock();
 }
 
 function updateMiniStatus() {
   document.getElementById("mini-timer-status").textContent = isPaused ? "Paused" : "";
   document.getElementById("mini-pause-btn").textContent = isPaused ? "▶" : "⏸";
+  document.getElementById("status-strip").classList.toggle("paused", isPaused);
 }
 
 function pauseSession() {
@@ -2665,7 +2672,6 @@ document.getElementById("focus-stop-btn").addEventListener("click", stopAndSaveS
 document.getElementById("mini-stop-btn").addEventListener("click", stopAndSaveSession);
 
 document.getElementById("focus-discard-btn").addEventListener("click", discardSession);
-document.getElementById("mini-discard-btn").addEventListener("click", discardSession);
 
 // ---------- daily / weekly chart ----------
 
@@ -3067,6 +3073,29 @@ function formatDuration(minutes) {
   return `${(minutes / 60).toFixed(1)} hr`;
 }
 
+// 上の帯(status-strip)の「Study」欄。計測中は今のセッションの分も足して毎秒更新し、
+// 止めて保存する前から最低ラインまでの残りが減っていくのが見えるようにする(2026-10-04)。
+// 保存後はloadGoalProgressの数字に計測分が入り、timerSubjectも空になるので二重には数えない
+function renderDailyMinStrip() {
+  const p = lastGoalProgress;
+  const banner = document.getElementById("daily-min-banner");
+  if (!p || !p.daily_minimum_minutes) {
+    banner.classList.add("hidden");
+    return;
+  }
+  const running = timerSubject ? Math.floor(currentElapsedMs() / 60000) : 0;
+  const today = p.today_minutes + running;
+  const goal = p.daily_minimum_minutes;
+  const reached = today >= goal;
+  document.getElementById("daily-min-banner-ratio").textContent = `${today}/${goal}`;
+  document.getElementById("daily-min-banner-label").innerHTML = reached
+    ? `${ICONS.check} Done<small> · ${formatDuration(today)}</small>`
+    : `${goal - today}<small> min to go</small>`;
+  document.getElementById("daily-min-banner-fill").style.width = `${Math.min(100, (today / goal) * 100)}%`;
+  banner.classList.remove("hidden");
+  banner.classList.toggle("reached", reached);
+}
+
 async function loadGoalProgress() {
   // Moodグラフは目標の数字とは無関係なので、progressの返事を待たずに同時に読み込む(2026-09-29)
   loadMoodPanel();
@@ -3075,30 +3104,20 @@ async function loadGoalProgress() {
 
 function renderGoalProgress(p) {
   lastGoalProgress = p;
-  document.getElementById("stat-today").textContent = formatDuration(p.today_minutes);
-  document.getElementById("stat-month").textContent = formatDuration(p.month_minutes);
   document.getElementById("stat-total").textContent = formatDuration(p.total_minutes);
 
   const dailyMinLabel = document.getElementById("daily-min-label");
   const dailyMinFill = document.getElementById("daily-min-fill");
-  const banner = document.getElementById("daily-min-banner");
-  const bannerLabel = document.getElementById("daily-min-banner-label");
-  const bannerFill = document.getElementById("daily-min-banner-fill");
+  renderDailyMinStrip();
   if (p.daily_minimum_minutes) {
     const reached = p.today_minutes >= p.daily_minimum_minutes;
     const labelText = `${p.today_minutes} / ${p.daily_minimum_minutes} min${reached ? ` ${ICONS.check}` : ""}`;
     const fillPct = `${Math.min(100, (p.today_minutes / p.daily_minimum_minutes) * 100)}%`;
     dailyMinLabel.innerHTML = labelText;
     dailyMinFill.style.width = fillPct;
-    banner.classList.remove("hidden");
-    banner.classList.toggle("reached", reached);
-    // スクリーンタイム側も「〜min left」になるため、帯の中でどちらの話か分かるよう頭に「Study」を付ける
-    bannerLabel.innerHTML = reached ? `Study ${labelText}` : `Study: ${p.daily_minimum_minutes - p.today_minutes} min to go`;
-    bannerFill.style.width = fillPct;
   } else {
     dailyMinLabel.textContent = "Not set";
     dailyMinFill.style.width = "0%";
-    banner.classList.add("hidden");
   }
   document.getElementById("daily-goal-input").value = p.daily_minimum_minutes || "";
 
@@ -3146,16 +3165,20 @@ function renderGoalProgress(p) {
 // この表示は最大で約1分遅れた値になる(リアルタイムではない)。
 const SCREEN_BUDGET_DEVICE_LABEL = { phone: "phone", pc: "PC", tablet: "tablet" };
 
+// 1回2秒ほどかかり、起動時はほかの十数本と同時に走るため、スマホでは帯に出るまで10秒前後
+// 空いていた(2026-10-04)。勉強ログ等と同じapiCachedで、前回の値を先に出してから最新に差し替える
 async function loadScreenBudget() {
+  try {
+    await apiCached(`/api/screen-budget/current?date=${screenBudgetDateStr()}`, renderScreenBudget);
+  } catch (e) {
+    // ネットワーク一時失敗時は前回の表示を維持する(daily-min-banner等と同じ方針)
+  }
+}
+
+function renderScreenBudget(s) {
   const banner = document.getElementById("screen-budget-banner");
   const label = document.getElementById("screen-budget-banner-label");
   const fill = document.getElementById("screen-budget-banner-fill");
-  let s;
-  try {
-    s = await api(`/api/screen-budget/current?date=${screenBudgetDateStr()}`);
-  } catch (e) {
-    return; // ネットワーク一時失敗時は前回の表示を維持する(daily-min-banner等と同じ方針)
-  }
   if (!s || !s.budget_minutes) {
     banner.classList.add("hidden");
     return;
@@ -3168,7 +3191,8 @@ async function loadScreenBudget() {
   const remaining = s.remaining_minutes;
 
   // 帯の中では幅が限られるので端末別の内訳はツールチップ(title)に回す
-  label.textContent = remaining > 0 ? `Screen: ${remaining} min left` : "Screen: used up";
+  label.innerHTML = remaining > 0 ? `${remaining}<small> min left</small>` : "Used up";
+  document.getElementById("screen-budget-banner-ratio").textContent = `${s.consumed_minutes}/${s.budget_minutes}`;
   banner.title = `Screen time today${deviceText}`;
   fill.style.width = `${Math.min(100, Math.max(0, (s.consumed_minutes / s.budget_minutes) * 100))}%`;
 

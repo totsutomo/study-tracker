@@ -149,20 +149,31 @@ body {
   }
 }
 
-/* ---------- status strip (2026-09-27) ----------
+/* ---------- status strip (2026-09-27、2026-10-04にHUD化) ----------
    最低ライン(daily-min)・スクリーンタイム(screen-budget)・別端末で計測中(peer-session)を1行に並べる。
-   最低ラインのバーは「勉強を始める合図」なので、タップしなくても常に見える形で残している */
+   最低ラインのバーは「勉強を始める合図」なので、タップしなくても常に見える形で残している。
+   10-04: 等幅の数字+目盛りバーの計器風にし、計測中のタイマー(mini-timer-bar)もここへ移した。
+   計測中は.liveで帯全体が科目色のグラデーションになり、Study/Screenは右に縮めて残す */
 .status-strip {
   display: flex;
-  align-items: center;
-  gap: 14px;
-  padding: 8px 16px 9px;
+  align-items: stretch;
   background: var(--card);
   border-bottom: 1px solid var(--border);
+  --hud-mono: "Cascadia Mono", "SF Mono", ui-monospace, Consolas, "Roboto Mono", monospace;
 }
 
-/* 3つとも非表示の日は帯ごと消す */
-.status-strip:not(:has(> :not(.hidden))) {
+/* 中身が全部非表示の日は帯ごと消す */
+.status-strip:not(:has(:is(.strip-item, .strip-live, .peer-session-banner):not(.hidden))) {
+  display: none;
+}
+
+.hud-side {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+}
+
+.hud-side:not(:has(> .strip-item:not(.hidden))) {
   display: none;
 }
 
@@ -172,26 +183,82 @@ body {
   display: flex;
   flex-direction: column;
   gap: 5px;
+  padding: 8px 16px 10px;
   cursor: pointer;
+}
+
+.strip-item + .strip-item {
+  border-left: 1px solid var(--border);
 }
 
 .strip-item.hidden {
   display: none;
 }
 
-.strip-item span {
-  font-size: 12px;
+.hud-lab {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 10.5px;
+  font-weight: 600;
   color: var(--text-muted);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.hud-ratio {
+  font-family: var(--hud-mono);
+  letter-spacing: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.hud-big {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  font-family: var(--hud-mono);
+  font-size: 17px;
+  font-weight: 700;
+  line-height: 1.15;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.strip-item .stat-bar-track {
-  height: 4px;
+.hud-big small {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--text-muted);
 }
 
-.daily-min-banner.reached span {
+.hud-big .inline-icon {
+  align-self: center;
+}
+
+/* 目盛り(10区切り)に見せるため、バーの上から隙間の模様で切り抜く */
+.strip-item .hud-seg {
+  flex: none;
+  height: 4px;
+  border-radius: 1px;
+  -webkit-mask: repeating-linear-gradient(90deg, #000 0 calc(10% - 2px), transparent calc(10% - 2px) 10%);
+  mask: repeating-linear-gradient(90deg, #000 0 calc(10% - 2px), transparent calc(10% - 2px) 10%);
+}
+
+.strip-item .hud-seg .stat-bar-fill {
+  border-radius: 0;
+}
+
+/* 最低ライン達成: 「済」がはっきり分かるようにラベルごとaccentに光らせる */
+.daily-min-banner.reached .hud-big,
+.daily-min-banner.reached .hud-lab {
+  color: var(--accent);
+}
+
+.daily-min-banner.reached .hud-big .inline-icon {
   color: var(--accent);
 }
 
@@ -200,11 +267,131 @@ body {
   box-shadow: 0 0 6px var(--accent-dim);
 }
 
-.screen-budget-banner .stat-bar-fill {
-  background: var(--text-muted);
+/* ---- 計測中(.live) ---- */
+.strip-live {
+  flex: 1.35 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  padding: 7px 8px 7px 16px;
+  cursor: pointer;
 }
 
-.screen-budget-banner.low span {
+.strip-live.hidden {
+  display: none;
+}
+
+.status-strip.live {
+  background: linear-gradient(90deg,
+    color-mix(in srgb, var(--subject-color, var(--accent)) 34%, var(--card)) 0%,
+    color-mix(in srgb, var(--subject-color, var(--accent)) 14%, var(--card)) 60%,
+    var(--card) 100%);
+}
+
+.hud-live-lab {
+  justify-content: flex-start;
+  gap: 0;
+  color: color-mix(in srgb, var(--subject-color, var(--accent)) 35%, var(--text));
+}
+
+.hud-live-lab .rec-dot {
+  width: 7px;
+  height: 7px;
+  margin-right: 7px;
+  color: var(--danger);
+  align-self: center;
+}
+
+.hud-live-lab .mini-timer-subject {
+  font-size: inherit;
+  font-weight: inherit;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.hud-live-lab .mini-timer-status {
+  margin-left: 6px;
+  font-size: inherit;
+  color: var(--text-muted);
+}
+
+.status-strip.paused .rec-dot {
+  animation-play-state: paused;
+  opacity: 0.35;
+}
+
+.status-strip.paused .hud-timer {
+  opacity: 0.55;
+}
+
+.hud-live-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.hud-timer {
+  font-family: var(--hud-mono);
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1.15;
+  font-variant-numeric: tabular-nums;
+  margin-right: auto;
+}
+
+.hud-live-row .icon-btn {
+  font-size: 17px;
+  min-height: 0;
+  padding: 2px 8px;
+}
+
+/* 計測中はStudy/Screenを右に縦2段の「ラベル+数字」だけに縮める(大きい数字とバーは隠す) */
+.status-strip.live .hud-side {
+  flex: 1 1 0;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+  padding: 7px 16px 7px 12px;
+  border-left: 1px solid color-mix(in srgb, var(--text) 8%, transparent);
+}
+
+.status-strip.live .strip-item {
+  padding: 0;
+  gap: 0;
+}
+
+.status-strip.live .strip-item + .strip-item {
+  border-left: none;
+}
+
+.status-strip.live .hud-big,
+.status-strip.live .hud-seg {
+  display: none;
+}
+
+/* PCの広い画面では欄が横に伸びすぎないよう幅を止める */
+@media (min-width: 768px) {
+  .hud-side {
+    flex: 0 1 600px;
+  }
+
+  .strip-live {
+    flex: 0 1 380px;
+  }
+
+  .status-strip.live .hud-side {
+    flex: 0 1 300px;
+  }
+}
+
+.screen-budget-banner .stat-bar-fill {
+  background: #9aa4b5;
+}
+
+.screen-budget-banner.low .hud-big,
+.screen-budget-banner.low .hud-ratio {
   color: #e0a030;
 }
 
@@ -212,7 +399,8 @@ body {
   background: #e0a030;
 }
 
-.screen-budget-banner.exhausted span {
+.screen-budget-banner.exhausted .hud-big,
+.screen-budget-banner.exhausted .hud-ratio {
   color: #e05050;
 }
 
@@ -226,6 +414,8 @@ body {
 .peer-session-banner {
   flex: none;
   max-width: 45%;
+  align-self: center;
+  margin: 0 12px 0 0;
   display: flex;
   align-items: center;
   padding: 3px 10px;
@@ -1221,47 +1411,6 @@ body.focus-open #tabbar {
   color: var(--danger);
 }
 
-.mini-timer-bar {
-  position: fixed;
-  left: 0;
-  right: 0;
-  bottom: 44px; /* now-dockの中ではposition:staticになり、dockごとタブバーの上に置かれる */
-  z-index: 25; /* must stay below .backdrop(29)/.add-panel(30) so modal panels eclipse it instead of floating on top */
-  background: var(--card);
-  border-top: 1px solid var(--border);
-  border-left: 3px solid var(--subject-color, var(--accent));
-  padding: 10px 14px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  cursor: pointer;
-}
-
-.mini-timer-subject {
-  font-size: 13px;
-  font-weight: 600;
-}
-
-.mini-timer-time {
-  font-variant-numeric: tabular-nums;
-  font-weight: 800;
-  color: var(--accent);
-}
-
-.mini-timer-status {
-  font-size: 12px;
-  color: var(--text-muted);
-}
-
-.mini-timer-bar .icon-btn {
-  margin-left: auto;
-  font-size: 18px;
-}
-
-.mini-timer-bar .icon-btn + .icon-btn {
-  margin-left: 4px;
-}
-
 /* ---------- study chart & goal progress ---------- */
 
 .goal-progress-card {
@@ -1320,7 +1469,7 @@ body.focus-open #tabbar {
 
 /* ---- Study > Log のカード配置(2026-10-02) ----
    HTMLは広いPC幅(1280px以上)の2列用にmain/sideでまとめてある。それより狭い幅では包みを
-   display:contentsで消し、orderで以前の縦一列の順(Activity→グラフ→時間帯→7日合計→履歴→What moves)に戻す。
+   display:contentsで消し、orderで縦一列の順(グラフ→時間帯→Activity→7日合計→履歴→What moves)に並べる。
    flexの中では上下のmarginが重ならず足し算になるので、以前と同じ間隔になるよう見出しのmarginを詰めている */
 .study-dash {
   display: flex;
@@ -1332,9 +1481,10 @@ body.focus-open #tabbar {
   display: contents;
 }
 
-.study-dash-activity { order: 1; }
-.study-dash-chart { order: 2; }
-.study-dash-hourly { order: 3; }
+/* Activity(草グラフ)は長期の継続を見るもので、直近の様子は棒グラフの方が詳しいため時間帯の下へ(2026-10-04) */
+.study-dash-chart { order: 1; }
+.study-dash-hourly { order: 2; }
+.study-dash-activity { order: 3; }
 .study-dash-summary { order: 4; }
 .study-dash-history { order: 5; }
 .study-dash-drivers { order: 6; }
@@ -2793,6 +2943,15 @@ kbd {
   justify-content: space-between;
 }
 
+.goal-total {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-muted);
+  letter-spacing: 0;
+  text-transform: none;
+  font-variant-numeric: tabular-nums;
+}
+
 .link-btn {
   background: none;
   border: none;
@@ -3137,10 +3296,6 @@ body.quick-open #tabbar {
   z-index: 25; /* .backdrop(29)より下: パネルを開いたら帯は背景の下に隠れる */
   display: flex;
   flex-direction: column;
-}
-
-.now-dock .mini-timer-bar {
-  position: static;
 }
 
 .now-strip {
