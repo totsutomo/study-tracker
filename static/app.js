@@ -75,7 +75,10 @@ function initCollapsibleSection(headerId, listId, label, defaultExpanded = false
 
 const updateStudyLogHeader = initCollapsibleSection("study-log-header", "study-log-list", "Log History");
 const updateActivationListHeader = initCollapsibleSection("activation-list-header", "activation-list", "History");
-const updateSleepLogHeader = initCollapsibleSection("sleep-log-header", "sleep-log-list", "History");
+// PC幅(1024px以上)では睡眠履歴をグラフの右の列に置いているので、畳まずに最初から開く(2026-10-04、
+// 畳んだままだと右の列が見出し1行だけになり、また右が空いてしまう)
+const updateSleepLogHeader = initCollapsibleSection("sleep-log-header", "sleep-log-list", "History",
+  window.matchMedia("(min-width: 1024px)").matches);
 
 // ---------- helpers ----------
 

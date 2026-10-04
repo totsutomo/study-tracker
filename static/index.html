@@ -387,13 +387,17 @@
     <div class="study-subpanel hidden" data-sub="insights">
     <div class="goal-progress-card insights-card">
       <h3 class="drivers-heading">How things move together <span class="drivers-period">· last 30 days</span></h3>
-      <div id="insights-matrix"></div>
+      <div class="pc-split insights-split">
+      <div class="pc-split-main" id="insights-matrix"></div>
+      <div class="pc-split-side">
       <ul class="insights-key">
         <li><b>Strong / Some / Weak</b>: how closely the two move together. ↑ = rise together, ↓ = one rises as the other falls</li>
         <li>Faded with “chance?”: too few days to rule out luck</li>
         <li>Gray: under 10 days to compare (slacking: under 3 slacking days)</li>
       </ul>
       <p class="meta" id="insights-detail">Tap a cell for the numbers</p>
+      </div>
+      </div>
     </div>
     </div>
 
@@ -495,6 +499,9 @@
       <div class="stat-cell"><span class="stat-label">Low days, still hit minimum</span><span class="stat-value" id="mood-stat-low-mood-rate"></span></div>
     </div>
 
+    <!-- PC幅では.pc-split(style.css)で、グラフの右に折りたたみ3つを並べる(2026-10-04、右が空いていたため) -->
+    <div class="pc-split">
+    <div class="pc-split-main">
     <div class="goal-progress-card mood-chart-main">
       <div class="goal-progress-row">
         <span>Mood trend (last 14 days)</span>
@@ -502,6 +509,8 @@
       <div id="mood-chart"></div>
       <p class="meta mood-chart-detail" id="mood-chart-detail">● Bedtime review · ○ Day average · Tap a point for details</p>
     </div>
+    </div>
+    <div class="pc-split-side">
 
     <!-- グラフより下は普段見ないので折りたたむ(開閉は端末ごとに覚える) -->
     <details class="mood-fold" id="mood-fold-tags">
@@ -520,6 +529,8 @@
       <summary>Daily log <span class="drivers-period">· last 14 days</span></summary>
       <ul id="mood-log-list" class="list"></ul>
     </details>
+    </div>
+    </div>
 
     </div>
 
@@ -552,6 +563,8 @@
       <div class="stat-cell"><span class="stat-label">Avg bedtime</span><span class="stat-value" id="sleep-stat-bedtime"></span></div>
       <div class="stat-cell"><span class="stat-label">Logged</span><span class="stat-value" id="sleep-stat-logged"></span></div>
     </div>
+    <div class="pc-split">
+    <div class="pc-split-main">
     <div class="goal-progress-card sleep-chart-card">
       <h3 class="drivers-heading">Sleep <span class="drivers-period">· last 30 nights</span></h3>
       <div id="sleep-chart"></div>
@@ -564,6 +577,8 @@
       <p class="meta">Naps and 14h+ records are left out of the averages. Dashed lines: avg bedtime / wake-up</p>
       <p class="meta" id="sleep-chart-detail">Tap a night for details</p>
     </div>
+    </div>
+    <div class="pc-split-side">
     <!-- 睡眠ロック(2026-10-03): 寝ている間はJpBlockerがスマホをロックし続け、この時刻に自動で外れる -->
     <form id="sleep-lock-form" class="add-form goal-form">
       <label class="goal-field"><span>Phone locked until</span>
@@ -573,6 +588,8 @@
     <p class="meta">While you're asleep, your phone stays locked until this time.</p>
     <h3 id="sleep-log-header">History</h3>
     <ul id="sleep-log-list" class="list"></ul>
+    </div>
+    </div>
     </div>
   </section>
 

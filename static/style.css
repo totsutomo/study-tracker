@@ -3598,7 +3598,7 @@ body.quick-open #tabbar {
 /* 説明文はchart-cardと同じ大きさにそろえる */
 .drivers-card > p.meta,
 .sleep-chart-card > p.meta,
-.insights-card > p.meta {
+.insights-card p.meta {
   font-size: 12px;
   color: var(--text-muted);
   margin: 6px 0 0;
@@ -3799,6 +3799,65 @@ body.quick-open #tabbar {
   .sleep-chart-card,
   .insights-card {
     max-width: 560px;
+  }
+}
+
+/* ---- PC幅の「メイン+右の列」(.pc-split、2026-10-04) ----
+   SVGのグラフは横に伸ばすと縦にも間延びするので、カードにmax-widthを付けて頭打ちにしてきたが、
+   そのたびに広い画面で右半分が丸ごと空いていた(Scores・Mood・Sleep・Insightsで同じ問題が続いた)。
+   縦に積むカードは頭打ちにせず、ここに入れて右の列に回す。スマホではただの箱なので見た目は変わらない。
+   レイアウトを変えたら tools/layout_audit.py で全画面を点検すること */
+@media (min-width: 1024px) {
+  .pc-split {
+    display: grid;
+    grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+    gap: 14px;
+    align-items: start;
+    margin-bottom: 12px;
+  }
+
+  .pc-split-main,
+  .pc-split-side {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    min-width: 0;
+  }
+
+  .pc-split .goal-progress-card,
+  .pc-split .mood-fold,
+  .pc-split .sleep-chart-card,
+  .pc-split .mood-chart-main {
+    max-width: none;
+    margin: 0;
+  }
+
+  .pc-split-side > h3,
+  .pc-split-side > p.meta,
+  .pc-split-side > form {
+    margin-top: 0;
+    margin-bottom: 0;
+  }
+
+  /* Insights: 表は細かいマスなので幅を抑え、凡例とタップした数字を右に置く */
+  .insights-card {
+    max-width: none;
+  }
+
+  .insights-split {
+    grid-template-columns: minmax(0, 560px) minmax(0, 1fr);
+    gap: 24px;
+    margin-bottom: 0;
+  }
+
+  .insights-split .insights-key {
+    margin-top: 0;
+  }
+
+  /* 右の列で開いた履歴は、グラフより長くならないよう枠の中でスクロールさせる */
+  .pc-split-side #sleep-log-list {
+    max-height: 420px;
+    overflow-y: auto;
   }
 }
 
