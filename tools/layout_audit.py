@@ -110,6 +110,16 @@ def main():
                 page.wait_for_load_state("networkidle", timeout=20000)
             except Exception:
                 pass
+            # 「What moves my 〜」(.drivers-list)は天気の取得などで遅れて埋まるので、中身が入るまで待つ
+            # (2026-10-05、読み込み前に測ってStudy/Logの右の列が短く見え、誤ってNGになった)
+            try:
+                page.wait_for_function(
+                    "[...document.querySelectorAll('.tab-panel.active .drivers-list')]"
+                    ".filter((el) => el.offsetParent).every((el) => el.children.length)",
+                    timeout=30000,
+                )
+            except Exception:
+                pass
             page.wait_for_timeout(800)
             r = page.evaluate(MEASURE_JS, [args.min_coverage, 20])
             bad = r["emptyPx"] >= args.max_empty_px and name not in GAP_OK
