@@ -10,6 +10,8 @@ function switchTab(tabId, { fromHistory = false } = {}) {
   if (!fromHistory && prevTab !== tabId) history.pushState({ tab: tabId }, "");
   tabButtons.forEach((b) => b.classList.toggle("active", b.dataset.tab === tabId));
   tabPanels.forEach((p) => p.classList.toggle("active", p.id === tabId));
+  // PCサイドバーの字下げサブ項目は、親タブが開いている時だけ選択中の色を付ける
+  document.querySelectorAll(".side-subs").forEach((g) => g.classList.toggle("active", g.dataset.parent === tabId));
   if (typeof timerSubject !== "undefined" && timerSubject && !overlayMinimized) {
     minimizeFocusOverlay();
   }
@@ -7226,8 +7228,16 @@ async function hydrateFromCache() {
 // ---------- mood tab sub-tabs (2026-09-27) ----------
 // 最後に開いていたサブタブは端末ごとの使い勝手なのでlocalStorageで覚える
 
+// PC: サイドバーの字下げサブ項目と、見出し横の「› Log」をサブタブの状態にそろえる(2026-10-04)
+function syncSideSubs(parentTabId, sub, label) {
+  document.querySelectorAll(`.side-subs[data-parent="${parentTabId}"] .side-sub-btn`).forEach((b) => b.classList.toggle("active", b.dataset.sub === sub));
+  const h2Sub = document.getElementById(parentTabId === "tab-study" ? "study-h2-sub" : "mood-h2-sub");
+  if (h2Sub && label) h2Sub.textContent = `› ${label}`;
+}
+
 function switchMoodSubtab(sub) {
   document.querySelectorAll("#mood-subtabs .period-btn").forEach((b) => b.classList.toggle("active", b.dataset.sub === sub));
+  syncSideSubs("tab-mood", sub, document.querySelector(`#mood-subtabs .period-btn[data-sub="${sub}"]`)?.textContent);
   document.querySelectorAll(".mood-subpanel").forEach((p) => p.classList.toggle("hidden", p.dataset.sub !== sub));
   try {
     localStorage.setItem("moodSubtab", sub);
@@ -7243,6 +7253,7 @@ document.querySelectorAll("#mood-subtabs .period-btn").forEach((b) => {
 // Study: Log / Scores(2026-10-02、Scoresタブを統合)。Scoresはたまに見るだけなので覚えずに毎回Logから
 function switchStudySubtab(sub) {
   document.querySelectorAll("#study-subtabs .period-btn").forEach((b) => b.classList.toggle("active", b.dataset.sub === sub));
+  syncSideSubs("tab-study", sub, document.querySelector(`#study-subtabs .period-btn[data-sub="${sub}"]`)?.textContent);
   document.querySelectorAll(".study-subpanel").forEach((p) => p.classList.toggle("hidden", p.dataset.sub !== sub));
   // Insightsはたまに見るだけなので、開いた時に読み込む(起動時の通信を増やさない)
   if (sub === "insights") loadInsightsMatrix().catch((err) => console.error("insights load failed:", err));
@@ -7250,6 +7261,15 @@ function switchStudySubtab(sub) {
 
 document.querySelectorAll("#study-subtabs .period-btn").forEach((b) => {
   b.addEventListener("click", () => switchStudySubtab(b.dataset.sub));
+});
+
+document.querySelectorAll(".side-subs .side-sub-btn").forEach((b) => {
+  b.addEventListener("click", () => {
+    const parentTabId = b.closest(".side-subs").dataset.parent;
+    switchTab(parentTabId);
+    if (parentTabId === "tab-study") switchStudySubtab(b.dataset.sub);
+    else switchMoodSubtab(b.dataset.sub);
+  });
 });
 
 try {

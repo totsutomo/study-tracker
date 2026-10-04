@@ -2532,6 +2532,11 @@ body:has(#tab-calendar.active) {
   font-weight: 700;
 }
 
+/* 見出し横の「› Log」はPC(サイドバーでサブ項目を選ぶ時)だけ出す。スマホはページ内の帯があるので不要 */
+.h2-sub {
+  display: none;
+}
+
 /* モバイルではsidebar-navではなく従来通り下部#tabbarを使う(md+側で表示を入れ替える) */
 .sidebar-nav {
   display: none;
@@ -2595,6 +2600,58 @@ body:has(#tab-calendar.active) {
 
   .sidebar-nav .tab-btn.active {
     background: var(--card-hover);
+  }
+
+  /* ---- サイドバーの字下げサブ項目(2026-10-04)。PCは余白があるので、ページ内の
+     Log/Scores/Insights・Mood/Slacking/Sleepの帯をやめてここから直接開けるようにした。
+     サブ項目がある親は、選択中の背景をサブ項目側に譲って文字色だけにする ---- */
+  .sidebar-nav .tab-btn.has-subs.active {
+    background: none;
+  }
+
+  .side-subs {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    margin: -2px 0 6px;
+  }
+
+  .side-sub-btn {
+    background: none;
+    border: none;
+    border-left: 2px solid transparent;
+    border-radius: var(--radius-sm);
+    padding: 7px 12px 7px 42px;
+    color: var(--text-muted);
+    font: inherit;
+    font-size: 13px;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .side-sub-btn:hover {
+    background: var(--card-hover);
+    color: var(--text);
+  }
+
+  .side-subs.active .side-sub-btn.active {
+    background: var(--card-hover);
+    border-left-color: var(--accent);
+    color: var(--accent);
+    font-weight: 700;
+  }
+
+  #study-subtabs,
+  #mood-subtabs {
+    display: none;
+  }
+
+  .h2-sub {
+    display: inline;
+    margin-left: 10px;
+    font-size: 14px;
+    font-weight: 400;
+    color: var(--text-muted);
   }
 
   #tabbar {
@@ -2693,6 +2750,35 @@ body:has(#tab-calendar.active) {
 
   .chart-grid .chart-card {
     max-width: none;
+  }
+
+  /* ---- Scores(2026-10-04): 画面が広い時は、Overviewを幅いっぱいにしてグラフ4枚を1段に並べる。
+     820px頭打ちのままだと右半分が空いていた。グラフ1枚の幅は2列の時とほぼ同じなので縦に間延びしない。
+     表は幅いっぱいに伸ばすと列の間がスカスカになるので、成果以外の列は固定幅にする ---- */
+  @media (min-width: 1280px) {
+    .chart-card.overview-card {
+      max-width: none;
+    }
+
+    .chart-grid {
+      max-width: none;
+      grid-template-columns: repeat(4, 1fr);
+    }
+
+    #overview-table .overview-row {
+      grid-template-columns: 160px 200px 170px 1fr;
+    }
+
+    /* 1枚が細くなる分、見出しとトグルが横に並びきらない時はトグルを見出しの下へ回す
+       (見出しやボタンの文字が途中で折り返して2行になるのを防ぐ) */
+    .chart-grid .chart-header-row {
+      flex-wrap: wrap;
+    }
+
+    .chart-grid .chart-header-row h3,
+    .chart-grid .chart-header-row .period-btn {
+      white-space: nowrap;
+    }
   }
 
   /* ---- Mood: グラフはStudyのchart-cardと同じ理由(SVGが幅に比例して縦にも伸びる)で頭打ちにする。

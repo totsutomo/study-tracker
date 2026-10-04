@@ -45,20 +45,32 @@
     </svg>
     <span>Calendar</span>
   </button>
-  <button class="tab-btn" data-tab="tab-study">
+  <button class="tab-btn has-subs" data-tab="tab-study">
     <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor"
          stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
       <circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15.5 14"/>
     </svg>
     <span>Study</span>
   </button>
-  <button class="tab-btn" data-tab="tab-mood">
+  <!-- PCではページ内のサブタブ帯の代わりに、サイドバーの親の下へ字下げで並べる(2026-10-04)。
+       構造はスマホと同じ(親4つ+サブ)のまま。.tab-btnではないのでAlt+数字の並びには入らない -->
+  <div class="side-subs" data-parent="tab-study">
+    <button type="button" class="side-sub-btn active" data-sub="log">Log</button>
+    <button type="button" class="side-sub-btn" data-sub="scores">Scores</button>
+    <button type="button" class="side-sub-btn" data-sub="insights">Insights</button>
+  </div>
+  <button class="tab-btn has-subs" data-tab="tab-mood">
     <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor"
          stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
       <circle cx="12" cy="12" r="9"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/>
     </svg>
     <span>Mood</span>
   </button>
+  <div class="side-subs" data-parent="tab-mood">
+    <button type="button" class="side-sub-btn active" data-sub="mood">Mood</button>
+    <button type="button" class="side-sub-btn" data-sub="slacking">Slacking</button>
+    <button type="button" class="side-sub-btn" data-sub="sleep">Sleep</button>
+  </div>
 </nav>
 <div class="app-main-col">
 
@@ -265,7 +277,7 @@
   </div>
 
   <section id="tab-study" class="tab-panel">
-    <h2>Study</h2>
+    <h2>Study<span class="h2-sub" id="study-h2-sub">› Log</span></h2>
     <!-- Scoresタブはここへ統合した(2026-10-02、4タブ+⚡化)。Moodタブのサブタブと同じ形 -->
     <div class="period-toggle mood-subtabs" id="study-subtabs">
       <button type="button" class="period-btn active" data-sub="log">Log</button>
@@ -458,7 +470,7 @@
   </section>
 
   <section id="tab-mood" class="tab-panel">
-    <h2>Mood</h2>
+    <h2>Mood<span class="h2-sub" id="mood-h2-sub">› Mood</span></h2>
     <!-- 気分・サボり(発動ログ)・睡眠の3画面分が縦に積まれて長かったため切り替え式にした(2026-09-27) -->
     <div class="period-toggle mood-subtabs" id="mood-subtabs">
       <button type="button" class="period-btn active" data-sub="mood">Mood</button>
