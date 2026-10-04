@@ -499,9 +499,9 @@
       <div class="stat-cell"><span class="stat-label">Low days, still hit minimum</span><span class="stat-value" id="mood-stat-low-mood-rate"></span></div>
     </div>
 
-    <!-- PC幅では.pc-split(style.css)で、グラフの右に折りたたみ3つを並べる(2026-10-04、右が空いていたため) -->
-    <div class="pc-split">
-    <div class="pc-split-main">
+    <!-- PC幅では.mood-grid(style.css)で2×2に並べる: グラフ|Tags、What moves|Daily log(2026-10-05。
+         10-04は「左=グラフ、右=折りたたみ3つ」にしたが、開くと右だけ伸びて左の下が空いた) -->
+    <div class="mood-grid">
     <div class="goal-progress-card mood-chart-main">
       <div class="goal-progress-row">
         <span>Mood trend (last 14 days)</span>
@@ -509,8 +509,6 @@
       <div id="mood-chart"></div>
       <p class="meta mood-chart-detail" id="mood-chart-detail">● Bedtime review · ○ Day average · Tap a point for details</p>
     </div>
-    </div>
-    <div class="pc-split-side">
 
     <!-- グラフより下は普段見ないので折りたたむ(開閉は端末ごとに覚える) -->
     <details class="mood-fold" id="mood-fold-tags">
@@ -529,7 +527,6 @@
       <summary>Daily log <span class="drivers-period">· last 14 days</span></summary>
       <ul id="mood-log-list" class="list"></ul>
     </details>
-    </div>
     </div>
 
     </div>

@@ -3825,9 +3825,7 @@ body.quick-open #tabbar {
   }
 
   .pc-split .goal-progress-card,
-  .pc-split .mood-fold,
-  .pc-split .sleep-chart-card,
-  .pc-split .mood-chart-main {
+  .pc-split .sleep-chart-card {
     max-width: none;
     margin: 0;
   }
@@ -3837,6 +3835,31 @@ body.quick-open #tabbar {
   .pc-split-side > form {
     margin-top: 0;
     margin-bottom: 0;
+  }
+
+  /* Mood: グラフ|Tags、What moves|Daily log の2×2(2026-10-05)。同じ行の2枚は高さをそろえる。
+     閉じている折りたたみは見出し1行の高さのまま(引き伸ばすと中身のない大きな箱になるため) */
+  .mood-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+    gap: 14px;
+    align-items: stretch;
+    margin-bottom: 12px;
+  }
+
+  .mood-grid > .mood-chart-main,
+  .mood-grid > .mood-fold {
+    max-width: none;
+    margin: 0;
+  }
+
+  .mood-grid > .mood-fold:not([open]) {
+    align-self: start;
+  }
+
+  /* Daily logは左のWhat movesより長くならないよう、枠の中でスクロールさせる */
+  .mood-grid #mood-log-list {
+    max-height: 380px;
   }
 
   /* Insights: 表は細かいマスなので幅を抑え、凡例とタップした数字を右に置く */

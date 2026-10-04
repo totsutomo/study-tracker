@@ -4,8 +4,12 @@ Scores・Moodで、カードにmax-widthの頭打ちを付けたせいで広い�
 同じ問題が続けて見つかったため、目視ではなく機械的に全タブ・全サブタブを確かめる。
 
 やっていること: 各画面をPC幅で開き、パネルを縦20pxの帯に区切って、帯ごとに「見た目のある箱」
-(背景・枠線のある要素、文字・画像・SVG)が右端のどこまで届いているかを測る。右端まで届かない
-帯(既定は届いている割合65%未満)が合計200px以上続く画面を「右が空いている」として報告する。
+(背景・枠線のある要素、文字・画像・SVG)が横方向をどれだけ埋めているかを測る。横に大きな空き
+(既定は幅の35%超。右端・左端・真ん中のどこでも)がある帯が合計200px以上ある画面を報告する。
+
+2026-10-05: 以前は「右端まで届いているか」だけを見ていたため、Moodで右の列だけ長く伸びて
+左の列の下が空く状態を見逃した。また折りたたみ(<details>)は開いた状態で測るようにした
+(閉じたままだと中身のない短い画面として測ってしまう)。
 
 使い方(本番DBにつながないよう、環境変数なしでローカルサーバーを起動してから):
   python tools/layout_audit.py [http://localhost:8011] [--width 1536] [--shots DIR]
@@ -18,7 +22,7 @@ from playwright.sync_api import sync_playwright
 
 # (タブID, サブタブのセレクタ or None, 表示名)
 VIEWS = [
-    ("tab-todo", None, "ToDo"),
+    ("tab-todo", None, "ToDo"),  # 長いリスト+右に短い列2本。列の下が空くのは自然なので空き判定はしない
     ("tab-calendar", None, "Calendar"),
     ("tab-study", '.side-sub-btn[data-sub="log"]', "Study/Log"),
     ("tab-study", '.side-sub-btn[data-sub="scores"]', "Study/Scores"),
@@ -27,6 +31,9 @@ VIEWS = [
     ("tab-mood", '.side-sub-btn[data-sub="slacking"]', "Mood/Slacking"),
     ("tab-mood", '.side-sub-btn[data-sub="sleep"]', "Mood/Sleep"),
 ]
+
+# 列の長さがそろわないのが自然な画面(数値は表示するがNGにはしない)
+GAP_OK = {"ToDo"}
 
 MEASURE_JS = """
 ([minCoverage, band]) => {
@@ -44,19 +51,22 @@ MEASURE_JS = """
     if (cs.visibility === 'hidden' || cs.display === 'none' || parseFloat(cs.opacity) === 0) continue;
     const visual =
       (cs.backgroundColor && cs.backgroundColor !== 'rgba(0, 0, 0, 0)' && cs.backgroundColor !== 'transparent') ||
-      parseFloat(cs.borderTopWidth) > 0 || parseFloat(cs.borderLeftWidth) > 0 ||
+      ['Top', 'Right', 'Bottom', 'Left'].some((k) => parseFloat(cs[`border${k}Width`]) > 0) ||
       ['svg', 'img', 'canvas', 'input', 'button', 'textarea', 'select'].includes(el.tagName.toLowerCase()) ||
       [...el.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim());
     if (!visual) continue;
-    boxes.push([r.top + scrollY, r.bottom + scrollY, r.right]);
+    boxes.push([r.top + scrollY, r.bottom + scrollY, Math.max(r.left, left), Math.min(r.right, right)]);
   }
   const top = pr.top + scrollY, bottom = pr.bottom + scrollY;
   let emptyPx = 0, worst = 1, firstEmptyY = null;
   for (let y = top; y < bottom; y += band) {
-    let maxRight = null;
-    for (const [t, b, rr] of boxes) if (t < y + band && b > y) maxRight = Math.max(maxRight ?? -1e9, rr);
-    if (maxRight === null) continue; // 何もない帯(カード間の隙間など)は数えない
-    const cov = (maxRight - left) / width;
+    const spans = boxes.filter(([t, b]) => t < y + band && b > y).map(([, , l, r]) => [l, r]).sort((a, b) => a[0] - b[0]);
+    if (!spans.length) continue; // 何もない帯(カード間の隙間など)は数えない
+    // 左端→箱→箱→右端と見ていき、いちばん大きい横の空きを求める
+    let maxGap = 0, x = left;
+    for (const [l, r] of spans) { maxGap = Math.max(maxGap, l - x); x = Math.max(x, r); }
+    maxGap = Math.max(maxGap, right - x);
+    const cov = 1 - maxGap / width;
     if (cov < minCoverage) { emptyPx += band; worst = Math.min(worst, cov); firstEmptyY ??= Math.round(y - top); }
   }
   return { emptyPx, worst: Math.round(worst * 100), firstEmptyY, panelWidth: Math.round(width) };
@@ -94,11 +104,17 @@ def main():
                 page.wait_for_load_state("networkidle", timeout=20000)
             except Exception:
                 pass
+            # 折りたたみはすべて開いて測る(開けた時にレイアウトが崩れないかを見たいので)
+            page.evaluate("document.querySelectorAll('.tab-panel.active details').forEach((d) => { d.open = true; })")
+            try:
+                page.wait_for_load_state("networkidle", timeout=20000)
+            except Exception:
+                pass
             page.wait_for_timeout(800)
             r = page.evaluate(MEASURE_JS, [args.min_coverage, 20])
-            bad = r["emptyPx"] >= args.max_empty_px
+            bad = r["emptyPx"] >= args.max_empty_px and name not in GAP_OK
             mark = "NG" if bad else "ok"
-            print(f"[{mark}] {name:16s} 右が空いた帯 {r['emptyPx']:5d}px (最小カバー率 {r['worst']}%, 最初の位置 y={r['firstEmptyY']})")
+            print(f"[{mark}] {name:16s} 空きのある帯 {r['emptyPx']:5d}px (最小の埋まり率 {r['worst']}%, 最初の位置 y={r['firstEmptyY']})")
             if bad:
                 failed.append(name)
             if args.shots:
