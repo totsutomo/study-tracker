@@ -78,7 +78,12 @@ def main():
     with sync_playwright() as p:
         browser = p.chromium.launch()
         page = browser.new_page(viewport={"width": args.width, "height": 1000}, color_scheme="dark")
-        page.goto(args.base, wait_until="networkidle")
+        page.goto(args.base, wait_until="load")
+        # 本番は定期的な通信が続いて「静かな状態」にならないことがあるので、待つのは最大20秒まで
+        try:
+            page.wait_for_load_state("networkidle", timeout=20000)
+        except Exception:
+            page.wait_for_timeout(3000)
         for tab_id, sub_sel, name in VIEWS:
             if sub_sel:
                 page.click(sub_sel)
