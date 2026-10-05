@@ -7520,6 +7520,7 @@ function closeTopmostLayer() {
 }
 
 // ToDoタブ: ↑↓(J/K)でカードを選び、Xで完了、Enterで編集(Stackの一覧と同じ割り当て、2026-10-03)。
+// Pで選択中カードの▶(タイマー開始パネル)を開く→パネル内はEnterでStart(2026-10-05)。
 // 描き直しでカードのDOMが入れ替わるため、選択はtodoのidで覚えておく(変数kbSelectedTodoIdはallTodosの隣)
 
 function visibleTodoCards() {
@@ -7554,6 +7555,12 @@ function handleTodoKey(e) {
     li.querySelector("input[type=checkbox]").click();
     setKbSelectedTodo(after);
     return true;
+  }
+  if (key === "p") {
+    // ▶が無いカード(完了・スキップ済み、カテゴリ無し)では何もしない
+    const playBtn = li.querySelector(".play-btn");
+    if (playBtn) playBtn.click();
+    return !!playBtn;
   }
   if (e.key === "Enter" && !e.target.closest?.("button, a")) {
     const t = allTodos.find((x) => x.id === kbSelectedTodoId);
