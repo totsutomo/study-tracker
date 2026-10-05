@@ -2596,6 +2596,7 @@ async function finishSession(elapsedMinutes) {
     note: linkedTodo ? linkedTodo.title : null,
     logged_at: `${localDatetimeNow().replace("T", " ")}:00`,
     start_trigger: startTrigger,
+    timed: true, // タイマーで計った記録(スクリーンタイム予算の勉強ボーナス対象)
     // ほかの端末で既に止めて記録済みなら、サーバーがこの記録を捨てる(二重記録の防止、2026-10-03)
     session_id: sessionId,
   };

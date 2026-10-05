@@ -254,6 +254,9 @@ class StudyLogCreate(BaseModel):
     dedupe: bool = False
     # Compassタイマーの記録なら、そのセッション番号。ほかの端末で既に記録済みなら記録しない
     session_id: str | None = None
+    # Compassタイマーで計った記録か(スクリーンタイム予算の勉強ボーナス対象)。session_id付きの
+    # 記録もタイマー由来とみなす(古いapp.jsがキャッシュに残っていてtimedを送らない場合の保険)
+    timed: bool = False
 
 
 class VocabAppStudyLogCreate(BaseModel):
@@ -876,15 +879,16 @@ def _create_study_log(log: StudyLogCreate):
         if existing:
             conn.close()
             return {"id": existing[0]}
+    timed = 1 if (log.timed or log.session_id) else None
     if log.logged_at:
         cur = conn.execute(
-            "INSERT INTO study_logs (subject, minutes, note, logged_at, start_trigger) VALUES (?, ?, ?, ?, ?)",
-            (log.subject, log.minutes, log.note, log.logged_at, log.start_trigger),
+            "INSERT INTO study_logs (subject, minutes, note, logged_at, start_trigger, timed) VALUES (?, ?, ?, ?, ?, ?)",
+            (log.subject, log.minutes, log.note, log.logged_at, log.start_trigger, timed),
         )
     else:
         cur = conn.execute(
-            "INSERT INTO study_logs (subject, minutes, note, start_trigger) VALUES (?, ?, ?, ?)",
-            (log.subject, log.minutes, log.note, log.start_trigger),
+            "INSERT INTO study_logs (subject, minutes, note, start_trigger, timed) VALUES (?, ?, ?, ?, ?)",
+            (log.subject, log.minutes, log.note, log.start_trigger, timed),
         )
     conn.commit()
     new_id = cur.lastrowid
@@ -2573,11 +2577,13 @@ def _compute_screen_budget_status(conn, date: str) -> dict:
     _apply_due_screen_budget_changes(conn)
     params = _read_screen_budget_params(conn)
 
-    # 抜け穴塞ぎ(2026-08-30決定): タイマー経由(start_trigger IS NOT NULL)の記録のみボーナス対象。
+    # 抜け穴塞ぎ(2026-08-30決定): タイマー経由の記録のみボーナス対象。
     # 手動ログ入力(タイマーを使わず分数を直接入力)は実績を盛れてしまうため対象外にする。
+    # timed=1がCompassタイマー、start_trigger付きはStack/vocab-app等の連携アプリの自動記録。
+    # timed列ができる前(〜2026-10-05)のタイマー記録は、「きっかけ」を選んだものしか数えられない
     study_minutes = conn.execute(
         "SELECT COALESCE(SUM(minutes), 0) FROM study_logs "
-        "WHERE start_trigger IS NOT NULL "
+        "WHERE (timed = 1 OR start_trigger IS NOT NULL) "
         "AND datetime(logged_at) >= datetime(?, ?) AND datetime(logged_at) < datetime(?, ?)",
         (date, f"+{SCREEN_BUDGET_DAY_START_HOUR} hours", date, f"+{24 + SCREEN_BUDGET_DAY_START_HOUR} hours"),
     ).fetchone()[0]
@@ -3566,7 +3572,7 @@ def focus_session_remote_end(payload: SessionRemoteEnd):
         if payload.action == "save":
             # logged_atは開始端末が送るのと同じNZのwall-clock(nz_now_naive参照)
             conn.execute(
-                "INSERT INTO study_logs (subject, minutes, note, logged_at, start_trigger) VALUES (?, ?, ?, ?, ?)",
+                "INSERT INTO study_logs (subject, minutes, note, logged_at, start_trigger, timed) VALUES (?, ?, ?, ?, ?, 1)",
                 (
                     subject or "",
                     minutes,

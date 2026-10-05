@@ -450,6 +450,11 @@ def _migrate(conn):
     study_log_cols = [row[1] for row in conn.execute("PRAGMA table_info(study_logs)").fetchall()]
     if "start_trigger" not in study_log_cols:
         conn.execute("ALTER TABLE study_logs ADD COLUMN start_trigger TEXT")
+    # Compassのタイマーで計った記録なら1(2026-10-05)。スクリーンタイム予算の勉強ボーナスは
+    # これを見る。以前はstart_triggerの有無で判定していたが、start_triggerは開始時に任意で選ぶ
+    # 「きっかけ」なので、選ばずに始めたタイマーの記録が手入力と区別できずボーナス0になっていた
+    if "timed" not in study_log_cols:
+        conn.execute("ALTER TABLE study_logs ADD COLUMN timed INTEGER")
     # vocab-app連携(復習セッションの自動記録)用。件数の単位はunitで区別する("words"等)。
     # 既存のタイマー/手動入力レコードはcount/unitとも常にNULLのまま。
     if "count" not in study_log_cols:
