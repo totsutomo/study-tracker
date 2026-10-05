@@ -2726,6 +2726,9 @@ body:has(#tab-calendar.active) {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
     gap: 12px;
+    /* 下のすき間は直後の#today-activity-echoの余白に頼っていたが、あれは普段hiddenなので
+       グラフの段とくっついて重なって見えていた(2026-10-05)。.study-dashのgapにそろえる */
+    margin-bottom: 14px;
   }
 
   .goal-cards-row .goal-progress-card {
