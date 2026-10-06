@@ -3678,6 +3678,8 @@ def push_check(token: str | None = None):
                 if WEEKDAY_CODES[d.weekday()] in days:
                     occurrence_dates.append(d)
         occurrence_dates.sort()
+        if not event["start_time"]:
+            continue  # 終日の予定(start_time="")は通知時刻を決められないので対象外
         for occ_date in occurrence_dates:
             if last_notified is not None and occ_date <= last_notified:
                 continue

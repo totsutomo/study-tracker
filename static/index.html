@@ -617,6 +617,7 @@
 
         <div id="cal-week-view" class="cal-week-view hidden">
           <div class="cal-week-header" id="cal-week-header"></div>
+          <div class="cal-week-allday hidden" id="cal-week-allday"></div>
           <div class="cal-week-scroll" id="cal-week-scroll">
             <div class="cal-week-body" id="cal-week-body">
               <div class="cal-time-axis" id="cal-time-axis"></div>
@@ -673,6 +674,7 @@
       <div class="start-row">
         <input type="time" id="event-start-time" required>
         <span class="meta" id="event-end-hint"></span>
+        <button type="button" class="day-chip allday-toggle" id="event-allday-btn" aria-pressed="false">All day</button>
       </div>
       <details class="more-options" id="event-more-options">
         <summary id="event-more-summary">More options</summary>
@@ -681,9 +683,9 @@
             <option value="">Category: None</option>
           </select>
           <div class="event-only">
-            <label class="field-label" for="event-end-time">End</label>
-            <input type="time" id="event-end-time" required>
-            <select id="event-notify">
+            <label class="field-label timed-only" for="event-end-time">End</label>
+            <input type="time" id="event-end-time" class="timed-only" required>
+            <select id="event-notify" class="timed-only">
               <option value="">No notification</option>
               <option value="0">Notify at start time</option>
               <option value="10">Notify 10 min before</option>
@@ -739,11 +741,12 @@
       <div class="form-row">
         <input type="date" id="event-detail-date" required>
       </div>
-      <div class="form-row">
+      <label class="checkbox-label"><input type="checkbox" id="event-detail-allday"> All day</label>
+      <div class="form-row timed-only">
         <input type="time" id="event-detail-start-time" required>
         <input type="time" id="event-detail-end-time" required>
       </div>
-      <select id="event-detail-notify">
+      <select id="event-detail-notify" class="timed-only">
         <option value="">No notification</option>
         <option value="0">Notify at start time</option>
         <option value="10">Notify 10 min before</option>
@@ -776,7 +779,7 @@
 </div>
 
 <div id="focus-overlay" class="focus-overlay hidden">
-  <button type="button" id="focus-minimize-btn" class="focus-minimize" aria-label="Back to ToDo and other screens">‹ Back</button>
+  <button type="button" id="focus-minimize-btn" class="focus-minimize" aria-label="Back to ToDo and other screens">‹ Back<kbd class="key-hint">Esc</kbd></button>
   <div class="focus-subject">
     <span class="rec-dot"></span>
     <span id="focus-subject-name"></span>
@@ -812,9 +815,9 @@
     <div class="focus-timer" id="focus-timer">00:00</div>
   </div>
   <div class="focus-controls">
-    <button type="button" id="focus-pause-btn" class="secondary">Pause</button>
+    <button type="button" id="focus-pause-btn" class="secondary"><span id="focus-pause-label">Pause</span><kbd class="key-hint">Space</kbd></button>
     <button type="button" id="focus-discard-btn" class="danger-outline">Discard</button>
-    <button type="button" id="focus-stop-btn">Save and stop</button>
+    <button type="button" id="focus-stop-btn">Save and stop<kbd class="key-hint">Ctrl+Enter</kbd></button>
   </div>
 </div>
 
@@ -844,26 +847,26 @@
     <div class="quick-section-head">
       <span>Study ▶</span>
       <span class="quick-head-note hidden" id="quick-study-note">Timer running</span>
-      <button type="button" id="quick-settings-btn" class="link-btn quick-settings-btn">⚙ Settings</button>
+      <button type="button" id="quick-settings-btn" class="link-btn quick-settings-btn">⚙ Settings<kbd class="key-hint">,</kbd></button>
     </div>
     <div class="quick-subjects" id="quick-subjects"></div>
   </div>
   <div class="quick-section">
-    <div class="quick-section-head"><span>Mood now</span><span class="quick-head-note" id="quick-mood-status"></span></div>
+    <div class="quick-section-head"><span>Mood now</span><span class="quick-head-note" id="quick-mood-status"></span><span class="quick-key-note"><kbd class="key-hint">M</kbd><span class="quick-mood-key-help"> then 1–9, 0 = 10</span></span></div>
     <div id="quick-mood-picker"></div>
   </div>
   <div class="quick-section" id="quick-life-section">
     <div class="quick-section-head"><span>Life</span></div>
     <div class="quick-grid">
-      <button type="button" id="quick-bed-btn" class="quick-tile quick-bed">🛏 Go to bed</button>
-      <button type="button" id="quick-slack-btn" class="quick-tile quick-slack">🧭 Slacking</button>
+      <button type="button" id="quick-bed-btn" class="quick-tile quick-bed">🛏 Go to bed<kbd class="key-hint">B</kbd></button>
+      <button type="button" id="quick-slack-btn" class="quick-tile quick-slack">🧭 Slacking<kbd class="key-hint">L</kbd></button>
     </div>
   </div>
   <div class="quick-section">
     <div class="quick-section-head"><span>Add</span></div>
     <div class="quick-grid">
-      <button type="button" id="quick-todo-btn" class="quick-tile">☑ ToDo</button>
-      <button type="button" id="quick-event-btn" class="quick-tile">▦ Event</button>
+      <button type="button" id="quick-todo-btn" class="quick-tile">☑ ToDo<kbd class="key-hint">T</kbd></button>
+      <button type="button" id="quick-event-btn" class="quick-tile">▦ Event<kbd class="key-hint">E</kbd></button>
     </div>
   </div>
 </div>
@@ -1072,20 +1075,30 @@
     <tr><td><kbd>,</kbd></td><td>Settings</td></tr>
     <tr><td><kbd>S</kbd></td><td>Open the ⚡ record menu</td></tr>
     <tr><td><kbd>S</kbd> then <kbd>1</kbd>–<kbd>9</kbd></td><td>Pick a subject to study, then <kbd>Enter</kbd> to start</td></tr>
-    <tr><td><kbd>S</kbd> then <kbd>B</kbd> / <kbd>L</kbd></td><td>Go to bed / start Slacking</td></tr>
+    <tr><td><kbd>S</kbd> then <kbd>B</kbd> / <kbd>L</kbd></td><td>Go to bed / start Slacking (while asleep / slacking: I'm up / Back to work)</td></tr>
+    <tr><td><kbd>S</kbd> then <kbd>M</kbd>, <kbd>1</kbd>–<kbd>9</kbd> / <kbd>0</kbd></td><td>Log mood now (<kbd>0</kbd> = 10)</td></tr>
+    <tr><td><kbd>S</kbd> then <kbd>T</kbd> / <kbd>E</kbd></td><td>Add a ToDo / an event</td></tr>
+    <tr><td><kbd>S</kbd> then <kbd>,</kbd></td><td>Record menu settings</td></tr>
     <tr><th colspan="2">ToDo</th></tr>
     <tr><td><kbd>↑</kbd> / <kbd>↓</kbd> (or <kbd>K</kbd> / <kbd>J</kbd>)</td><td>Select a task</td></tr>
     <tr><td><kbd>X</kbd></td><td>Complete the selected task</td></tr>
     <tr><td><kbd>P</kbd></td><td>Open the timer for the selected task, then <kbd>Enter</kbd> to start</td></tr>
     <tr><td><kbd>Enter</kbd></td><td>Edit the selected task</td></tr>
+    <tr><td><kbd>Delete</kbd> / <kbd>Shift</kbd>+<kbd>S</kbd></td><td>Delete / skip the selected task</td></tr>
     <tr><th colspan="2">Calendar</th></tr>
     <tr><td><kbd>←</kbd> / <kbd>→</kbd> (or <kbd>K</kbd> / <kbd>J</kbd>)</td><td>Previous / next month (week in Week view)</td></tr>
     <tr><td><kbd>T</kbd></td><td>Jump to today</td></tr>
     <tr><td><kbd>M</kbd> / <kbd>W</kbd></td><td>Month view / Week view</td></tr>
     <tr><td><kbd>Shift</kbd>+<kbd>←</kbd><kbd>→</kbd><kbd>↑</kbd><kbd>↓</kbd></td><td>Move the selected day (±1 day / ±1 week)</td></tr>
     <tr><td><kbd>N</kbd> / <kbd>Shift</kbd>+<kbd>N</kbd></td><td>New event / new task on the selected day</td></tr>
+    <tr><td><kbd>↑</kbd> / <kbd>↓</kbd> then <kbd>Enter</kbd></td><td>Pick an event / task of the selected day and open it</td></tr>
+    <tr><td><kbd>Delete</kbd></td><td>Delete the picked event</td></tr>
+    <tr><th colspan="2">Study / Mood</th></tr>
+    <tr><td><kbd>[</kbd> / <kbd>]</kbd></td><td>Previous / next sub-tab (Log · Scores · Insights, Mood · Slacking · Sleep)</td></tr>
+    <tr><td><kbd>1</kbd>–<kbd>9</kbd> / <kbd>0</kbd></td><td>Log mood (Mood tab and mood questions; <kbd>0</kbd> = 10), then <kbd>←</kbd><kbd>→</kbd><kbd>↑</kbd><kbd>↓</kbd> + <kbd>Enter</kbd> to pick tags</td></tr>
     <tr><th colspan="2">Anywhere</th></tr>
     <tr><td><kbd>Space</kbd></td><td>Pause / resume the running timer</td></tr>
+    <tr><td><kbd>Ctrl</kbd>+<kbd>Enter</kbd> (timer screen)</td><td>Save and stop the timer</td></tr>
     <tr><td><kbd>Space</kbd> (no timer here)</td><td>Open the timer running on another device, then <kbd>Ctrl</kbd>+<kbd>Enter</kbd> to stop &amp; save</td></tr>
     <tr><td><kbd>Alt</kbd>+<kbd>1</kbd>–<kbd>4</kbd></td><td>Switch tabs</td></tr>
     <tr><td><kbd>Alt</kbd>+<kbd>←</kbd> / <kbd>→</kbd></td><td>Back / forward to the previous tab</td></tr>

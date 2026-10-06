@@ -2152,7 +2152,7 @@ function openFocusOverlay() {
   document.getElementById("focus-subject-name").textContent = timerSubject;
   document.getElementById("focus-timer").style.color = color;
   document.getElementById("focus-ring-fill").style.stroke = color;
-  document.getElementById("focus-pause-btn").textContent = "Pause";
+  document.getElementById("focus-pause-label").textContent = "Pause";
   document.getElementById("focus-clockonly-badge").classList.toggle("hidden", !sessionClockOnly);
   document.getElementById("focus-keepawake-badge").classList.toggle("hidden", !sessionKeepAwake);
   const overlay = document.getElementById("focus-overlay");
@@ -2278,7 +2278,7 @@ function resumeSession() {
 
 function updatePauseUI() {
   const overlay = document.getElementById("focus-overlay");
-  document.getElementById("focus-pause-btn").textContent = isPaused ? "Resume" : "Pause";
+  document.getElementById("focus-pause-label").textContent = isPaused ? "Resume" : "Pause";
   overlay.classList.toggle("paused", isPaused);
   updateMiniStatus();
   updateFocusDisplay();
@@ -6121,7 +6121,7 @@ function renderWeekTimeGrid() {
     .map((d, i) => {
       const classes = ["cal-week-col"];
       if (d === today) classes.push("today");
-      const dayEvents = calEventsCache.filter((e) => e.occurrence_date === d);
+      const dayEvents = calEventsCache.filter((e) => e.occurrence_date === d && e.start_time);
       const blocks = layoutDayEvents(dayEvents)
         .map(({ ev, start, end, col, totalCols }) => {
           const top = (start / 60) * CAL_HOUR_HEIGHT;
@@ -6141,6 +6141,8 @@ function renderWeekTimeGrid() {
       return `<div class="${classes.join(" ")}" data-date="${d}">${blocks}</div>`;
     })
     .join("");
+
+  renderWeekAllDayLane(days);
 
   columns.querySelectorAll(".cal-event-block").forEach((el) => {
     el.addEventListener("click", () => {
@@ -6165,14 +6167,42 @@ function renderWeekTimeGrid() {
   let scrollToMinutes;
   if (days.includes(today)) {
     scrollToMinutes = new Date().getHours() * 60;
-  } else if (calEventsCache.length) {
-    const earliest = Math.min(...calEventsCache.map((e) => timeToMinutes(e.start_time)));
-    scrollToMinutes = earliest;
+  } else if (calEventsCache.some((e) => e.start_time)) {
+    scrollToMinutes = Math.min(...calEventsCache.filter((e) => e.start_time).map((e) => timeToMinutes(e.start_time)));
   } else {
     scrollToMinutes = 8 * 60;
   }
   scrollBox.scrollTop = Math.max((scrollToMinutes / 60) * CAL_HOUR_HEIGHT - 80, 0);
 }
+
+// 終日の予定は時刻の格子に置けないので、曜日ヘッダーのすぐ下に帯で並べる
+function renderWeekAllDayLane(days) {
+  const lane = document.getElementById("cal-week-allday");
+  const byDay = days.map((d) => calEventsCache.filter((e) => e.occurrence_date === d && !e.start_time));
+  if (!byDay.some((list) => list.length)) {
+    lane.classList.add("hidden");
+    lane.innerHTML = "";
+    return;
+  }
+  lane.classList.remove("hidden");
+  lane.innerHTML =
+    `<span class="cal-week-allday-label">All day</span>` +
+    byDay
+      .map((list) => `<div class="cal-week-allday-cell">${list
+        .map((ev) => `<button type="button" class="cal-week-allday-item" data-id="${ev.id}" style="--c:${colorFor(ev.category || "")}">${escapeHtml(ev.title)}</button>`)
+        .join("")}</div>`)
+      .join("");
+  lane.querySelectorAll(".cal-week-allday-item").forEach((el) => {
+    el.addEventListener("click", () => {
+      const ev = calEventsCache.find((e) => String(e.id) === el.dataset.id);
+      if (ev) openEventDetail(ev);
+    });
+  });
+}
+
+// カレンダーの日の一覧で↑↓選択中の行(setCalKbIndexの説明を参照)
+let calKbIndex = -1;
+let calKbDate = null;
 
 function renderCalDayDetail() {
   const title = document.getElementById("cal-detail-title");
@@ -6187,6 +6217,10 @@ function renderCalDayDetail() {
     return;
   }
   title.textContent = formatCalDetailTitle(selectedCalDate);
+  if (calKbDate !== selectedCalDate) {
+    calKbDate = selectedCalDate;
+    calKbIndex = -1;
+  }
 
   // 勉強の達成状況(以前はマス目の緑の点・✓で、意味がどこにも書かれていなかった)
   const study = calStudyTotalsCache.get(selectedCalDate);
@@ -6198,7 +6232,7 @@ function renderCalDayDetail() {
 
   const dayEvents = calEventsCache
     .filter((e) => e.occurrence_date === selectedCalDate)
-    .sort((a, b) => a.start_time.localeCompare(b.start_time));
+    .sort((a, b) => (a.start_time || "").localeCompare(b.start_time || ""));
   eventList.innerHTML = "";
   if (dayEvents.length === 0) {
     eventList.innerHTML = `<li class="cal-empty">No events</li>`;
@@ -6209,12 +6243,13 @@ function renderCalDayDetail() {
     li.className = "cal-event-row clickable";
     const noteMark = ev.note ? ` ${ICONS.note}` : "";
     li.innerHTML = `
-      <span class="cal-event-row-time">${ev.start_time}</span>
+      ${ev.start_time ? `<span class="cal-event-row-time">${ev.start_time}</span>` : `<span class="cal-event-row-time allday">All day</span>`}
       <span class="cal-event-row-bar" style="background:${colorFor(ev.category || "")}"></span>
       <span class="cal-event-row-title">${escapeHtml(ev.title)}${ev.recurrence ? ` ${ICONS.repeat}` : ""}${noteMark}</span>
       <span class="cal-event-row-chevron" aria-hidden="true">›</span>
     `;
     li.addEventListener("click", () => openEventDetail(ev));
+    li.calEvent = ev;
     eventList.appendChild(li);
   });
 
@@ -6260,6 +6295,8 @@ function renderCalDayDetail() {
     });
     todoList.appendChild(li);
   });
+
+  if (calKbIndex !== -1) setCalKbIndex(Math.min(calKbIndex, calDayRows().length - 1));
 }
 
 document.getElementById("cal-detail-add").addEventListener("click", () => {
@@ -6389,6 +6426,36 @@ const eventAddBackdrop = document.getElementById("event-add-backdrop");
 // 手で変えたらそれ以降は追従させない。Taskに切り替えると同じ欄からToDo(Show on calendar=ON)を作る
 let addKind = "event";
 let eventEndTouched = false;
+// 終日(2026-10-06): 開始・終了を空文字で保存する。サーバー側の列はそのままで、空=終日として扱う
+let eventAllDay = false;
+
+function setEventAllDay(on) {
+  eventAllDay = on;
+  const btn = document.getElementById("event-allday-btn");
+  btn.classList.toggle("active", on);
+  btn.setAttribute("aria-pressed", String(on));
+  eventAddPanel.classList.toggle("is-allday", on);
+  if (addKind !== "task") document.getElementById("event-start-label").textContent = on ? "Time" : "Start";
+  updateEventTimeRequired();
+  updateEventMoreSummary();
+}
+
+function updateEventTimeRequired() {
+  const timed = addKind !== "task" && !eventAllDay;
+  document.getElementById("event-start-time").required = timed;
+  document.getElementById("event-end-time").required = timed;
+}
+
+function updateEventMoreSummary() {
+  document.getElementById("event-more-summary").textContent =
+    addKind === "task"
+      ? "More options — category · priority · show on calendar · note"
+      : eventAllDay
+        ? "More options — category · repeat · note"
+        : "More options — category · end time · notify · repeat · note";
+}
+
+document.getElementById("event-allday-btn").addEventListener("click", () => setEventAllDay(!eventAllDay));
 
 function openEventAddPanel({ date = null, kind = "event" } = {}) {
   const form = document.getElementById("event-form");
@@ -6397,6 +6464,7 @@ function openEventAddPanel({ date = null, kind = "event" } = {}) {
   document.getElementById("event-more-options").open = false;
   eventEndTouched = false;
   document.getElementById("event-date").value = date || selectedCalDate || todayStr();
+  setEventAllDay(false);
   setAddKind(kind);
   eventAddPanel.classList.remove("hidden");
   eventAddBackdrop.classList.remove("hidden");
@@ -6409,13 +6477,10 @@ function setAddKind(kind) {
   document.querySelectorAll("#add-kind-toggle .add-kind-btn").forEach((b) => b.classList.toggle("active", b.dataset.kind === kind));
   eventAddPanel.classList.toggle("is-task", isTask);
   document.getElementById("event-add-heading").textContent = isTask ? "New task" : "New event";
-  document.getElementById("event-start-label").textContent = isTask ? "Time (optional)" : "Start";
-  document.getElementById("event-more-summary").textContent = isTask
-    ? "More options — category · priority · show on calendar · note"
-    : "More options — category · end time · notify · repeat · note";
+  document.getElementById("event-start-label").textContent = isTask ? "Time (optional)" : eventAllDay ? "Time" : "Start";
+  updateEventMoreSummary();
+  updateEventTimeRequired();
   const start = document.getElementById("event-start-time");
-  start.required = !isTask;
-  document.getElementById("event-end-time").required = !isTask;
   if (isTask) {
     start.value = "";
     document.getElementById("quick-task-show-cal").checked = true; // カレンダーから作ったTaskは自動でON
@@ -6597,7 +6662,7 @@ function applyEventLocally(eventId, ev) {
   calMonthData.forEach((data, key) => {
     const kept = eventId == null ? data.events : data.events.filter((e) => e.id !== eventId);
     const events = [...kept, ...expandEventForMonth(full, key)];
-    events.sort((a, b) => a.occurrence_date.localeCompare(b.occurrence_date) || a.start_time.localeCompare(b.start_time));
+    events.sort((a, b) => a.occurrence_date.localeCompare(b.occurrence_date) || (a.start_time || "").localeCompare(b.start_time || ""));
     calMonthData.set(key, { ...data, events });
     // この反映より前に始まった取得が後から返ってきて、反映前の内容で上書きしないようにする
     calMonthFetchSeq.set(key, (calMonthFetchSeq.get(key) || 0) + 1);
@@ -6666,13 +6731,14 @@ guardedSubmit(document.getElementById("event-form"), async (e) => {
   const title = document.getElementById("event-title").value.trim();
   const category = document.getElementById("event-category").value || null;
   const evDate = document.getElementById("event-date").value;
-  const startTime = document.getElementById("event-start-time").value;
-  const endTime = document.getElementById("event-end-time").value;
+  const allDay = eventAllDay;
+  const startTime = allDay ? "" : document.getElementById("event-start-time").value;
+  const endTime = allDay ? "" : document.getElementById("event-end-time").value;
   const recurrenceUntilInput = document.getElementById("event-recurrence-until").value || null;
-  const notifyVal = document.getElementById("event-notify").value;
+  const notifyVal = allDay ? "" : document.getElementById("event-notify").value;
   const notify_offset_minutes = notifyVal !== "" ? parseInt(notifyVal, 10) : null;
   const note = document.getElementById("event-note").value.trim() || null;
-  if (!title || !evDate || !startTime || !endTime) return;
+  if (!title || !evDate || (!allDay && (!startTime || !endTime))) return;
   const recurrence = selectedEventRecurrenceDays.size ? [...selectedEventRecurrenceDays].join(",") : null;
   const payload = {
     title,
@@ -6687,6 +6753,7 @@ guardedSubmit(document.getElementById("event-form"), async (e) => {
   };
   e.target.reset();
   setEventRecurrenceDays([]);
+  setEventAllDay(false);
   closeEventAddPanel();
   const local = applyEventLocally(null, { ...payload, created_at: null, last_notified_occurrence: null });
   try {
@@ -6944,8 +7011,12 @@ function openEventDetail(ev) {
   document.getElementById("event-detail-title").value = ev.title;
   document.getElementById("event-detail-category").value = ev.category || "";
   document.getElementById("event-detail-date").value = ev.date;
-  document.getElementById("event-detail-start-time").value = ev.start_time;
-  document.getElementById("event-detail-end-time").value = ev.end_time;
+  const allDay = !ev.start_time;
+  document.getElementById("event-detail-allday").checked = allDay;
+  setEventDetailAllDay(allDay);
+  // 終日の予定を時刻ありに切り替えた時のために、仮の時刻を入れておく
+  document.getElementById("event-detail-start-time").value = ev.start_time || "09:00";
+  document.getElementById("event-detail-end-time").value = ev.end_time || "10:00";
   document.getElementById("event-detail-notify").value =
     ev.notify_offset_minutes === null || ev.notify_offset_minutes === undefined ? "" : String(ev.notify_offset_minutes);
   document.getElementById("event-detail-recurrence-until").value = ev.recurrence_until || "";
@@ -6955,6 +7026,14 @@ function openEventDetail(ev) {
   document.getElementById("event-detail-panel").classList.remove("hidden");
   document.getElementById("event-detail-backdrop").classList.remove("hidden");
 }
+
+function setEventDetailAllDay(on) {
+  document.getElementById("event-detail-panel").classList.toggle("is-allday", on);
+  document.getElementById("event-detail-start-time").required = !on;
+  document.getElementById("event-detail-end-time").required = !on;
+}
+
+document.getElementById("event-detail-allday").addEventListener("change", (e) => setEventDetailAllDay(e.target.checked));
 
 function closeEventDetail() {
   document.getElementById("event-detail-panel").classList.add("hidden");
@@ -6972,6 +7051,13 @@ document.getElementById("event-detail-delete").addEventListener("click", () => {
   if (!ev) return;
   if (ev.recurrence && !confirm("This is a recurring event. Delete the entire series?")) return;
   closeEventDetail();
+  deleteEventWithUndo(ev, { confirmed: true });
+});
+
+// 詳細パネルのDeleteと、カレンダーの一覧で選んだ行のDeleteキー(2026-10-06)が共通で使う
+function deleteEventWithUndo(ev, { confirmed = false } = {}) {
+  if (ev.id == null) return;
+  if (!confirmed && ev.recurrence && !confirm("This is a recurring event. Delete the entire series?")) return;
   undoableDelete(`Deleted "${ev.title}"`, {
     apply: () => {
       pendingEventDeleteIds.add(ev.id);
@@ -6988,20 +7074,21 @@ document.getElementById("event-detail-delete").addEventListener("click", () => {
       renderCalendarView();
     },
   });
-});
+}
 
 guardedSubmit(document.getElementById("event-detail-form"), async (e) => {
   if (!currentDetailEventId) return;
   const title = document.getElementById("event-detail-title").value.trim();
   const category = document.getElementById("event-detail-category").value || null;
   const evDate = document.getElementById("event-detail-date").value;
-  const startTime = document.getElementById("event-detail-start-time").value;
-  const endTime = document.getElementById("event-detail-end-time").value;
+  const allDay = document.getElementById("event-detail-allday").checked;
+  const startTime = allDay ? "" : document.getElementById("event-detail-start-time").value;
+  const endTime = allDay ? "" : document.getElementById("event-detail-end-time").value;
   const recurrenceUntilInput = document.getElementById("event-detail-recurrence-until").value || null;
-  const notifyVal = document.getElementById("event-detail-notify").value;
+  const notifyVal = allDay ? "" : document.getElementById("event-detail-notify").value;
   const notify_offset_minutes = notifyVal !== "" ? parseInt(notifyVal, 10) : null;
   const note = document.getElementById("event-detail-note").value.trim() || null;
-  if (!title || !evDate || !startTime || !endTime) return;
+  if (!title || !evDate || (!allDay && (!startTime || !endTime))) return;
   const recurrence = selectedEventDetailRecurrenceDays.size ? [...selectedEventDetailRecurrenceDays].join(",") : null;
   const payload = {
     title,
@@ -7312,6 +7399,7 @@ function closeQuickPanel() {
   clearInterval(quickNowTick);
   quickNowTick = null;
   endSubjectPick();
+  endMoodPick();
 }
 
 document.querySelectorAll(".quick-btn").forEach((btn) => {
@@ -7353,14 +7441,14 @@ function renderQuickNow() {
     items.push(`
       <div class="quick-now-card sleep">
         <div class="quick-now-text"><span>${ICONS.moon} ${sleepElapsedLabel()}</span></div>
-        ${sleepLockedOnThisDevice() ? "" : `<button type="button" class="quick-now-btn" data-act="wake">☀ I'm up</button>`}
+        ${sleepLockedOnThisDevice() ? "" : `<button type="button" class="quick-now-btn" data-act="wake">☀ I'm up<kbd class="key-hint">B</kbd></button>`}
       </div>`);
   }
   if (activationActiveLog) {
     items.push(`
       <div class="quick-now-card slack">
         <div class="quick-now-text"><span>${ICONS.alert} ${activationElapsedLabel()}</span></div>
-        <button type="button" class="quick-now-btn" data-act="return">Back to work</button>
+        <button type="button" class="quick-now-btn" data-act="return">Back to work<kbd class="key-hint">L</kbd></button>
       </div>`);
   }
   const list = document.getElementById("quick-now-list");
@@ -7495,6 +7583,69 @@ function endSubjectPick() {
   document.getElementById("quick-subjects").classList.remove("numbered");
 }
 
+// ⚡メニューのM→数字で気分を記録(2026-10-06)。数字キーは科目選択と共用なので、Mで切り替えてから待つ
+let moodPickTimer = null;
+
+function startMoodPick() {
+  endSubjectPick();
+  document.getElementById("quick-mood-picker").classList.add("keying");
+  clearTimeout(moodPickTimer);
+  moodPickTimer = setTimeout(endMoodPick, 5000);
+}
+
+function endMoodPick() {
+  clearTimeout(moodPickTimer);
+  moodPickTimer = null;
+  document.getElementById("quick-mood-picker").classList.remove("keying");
+}
+
+// 数字キーで気分を選び、続けてキーボードでタグを選べるよう最初のタグへフォーカスを移す(0 = 10)
+function pickMoodByKey(container, digitKey) {
+  const score = digitKey === "0" ? 10 : Number(digitKey);
+  container.querySelector(`.mood-scale-btn[data-score="${score}"]`)?.click();
+  container.querySelector(".mood-tags:not(.hidden) .mood-tag-btn")?.focus();
+}
+
+// タグの並び(列数は画面幅で変わる)の中で、矢印の方向の隣のタグへフォーカスを動かす
+function moveMoodTagFocus(btn, key) {
+  const btns = [...btn.closest(".mood-tag-grid").querySelectorAll(".mood-tag-btn")];
+  const cols = btns.filter((b) => b.offsetTop === btns[0].offsetTop).length || 1;
+  const delta = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -cols, ArrowDown: cols }[key] || 0;
+  btns[btns.indexOf(btn) + delta]?.focus();
+}
+
+// 数字キーで気分を選べる場所: いちばん上のパネルの中の気分欄(⚡メニューは数字が科目選択なのでMで切り替える)、
+// またはパネルが無い時のMoodタブ(Moodのサブタブ)
+function moodPickerForDigitKeys() {
+  const panels = visiblePanels();
+  if (panels.length) {
+    const top = panels.at(-1);
+    return top === quickPanel ? null : top.querySelector(".mood-picker-box");
+  }
+  const moodSub = document.querySelector('.mood-subpanel[data-sub="mood"]');
+  if (activeTabId() === "tab-mood" && moodSub && !moodSub.classList.contains("hidden")) {
+    return document.getElementById("mood-tab-picker");
+  }
+  return null;
+}
+
+// [ / ] でStudy・Moodの中のタブを前後に切り替える(端まで行ったら反対側へ回る)
+function cycleSubtab(delta) {
+  const tab = activeTabId();
+  const box = { "tab-study": "study-subtabs", "tab-mood": "mood-subtabs" }[tab];
+  if (!box) return false;
+  const btns = [...document.querySelectorAll(`#${box} .period-btn`)];
+  const i = Math.max(0, btns.findIndex((b) => b.classList.contains("active")));
+  const next = btns[(i + delta + btns.length) % btns.length];
+  if (tab === "tab-study") switchStudySubtab(next.dataset.sub);
+  else switchMoodSubtab(next.dataset.sub);
+  return true;
+}
+
+function isFocusOverlayShown() {
+  return !!timerSubject && !overlayMinimized && !document.getElementById("focus-overlay").classList.contains("hidden");
+}
+
 function closeTopmostLayer() {
   if (!shortcutPanel.classList.contains("hidden")) {
     closeShortcutPanel();
@@ -7537,6 +7688,13 @@ function setKbSelectedTodo(li) {
   }
 }
 
+// 完了・スキップ・削除は一覧をその場で描き直すので、操作前に覚えたカードの要素はもう画面に無い。
+// idで描き直し後のカードを探して選び直す(2026-10-06。以前はXの後に枠が消えていた)
+function selectTodoCardAfterRender(prevLi) {
+  const id = prevLi?.dataset.todoId;
+  setKbSelectedTodo(id ? document.querySelector(`#todo-groups li[data-todo-id="${id}"]`) : null);
+}
+
 function handleTodoKey(e) {
   const key = e.key.toLowerCase();
   const cards = visibleTodoCards();
@@ -7554,7 +7712,17 @@ function handleTodoKey(e) {
     // 完了したカードは下の「Done」に移って見えなくなるので、選択は次のカードへ送る
     const after = cards[idx + 1] || cards[idx - 1] || null;
     li.querySelector("input[type=checkbox]").click();
-    setKbSelectedTodo(after);
+    selectTodoCardAfterRender(after);
+    return true;
+  }
+  if (e.key === "Delete" || (key === "s" && e.shiftKey)) {
+    // 削除(Undoあり)・スキップしたカードは一覧から外れるので、選択は次のカードへ送る(2026-10-06)
+    const t = allTodos.find((x) => x.id === kbSelectedTodoId);
+    if (!t || t.id == null) return false;
+    const after = cards[idx + 1] || cards[idx - 1] || null;
+    if (e.key === "Delete") deleteTodo(t);
+    else toggleTodoSkip(t);
+    selectTodoCardAfterRender(after);
     return true;
   }
   if (key === "p") {
@@ -7587,6 +7755,23 @@ function handleCalendarKey(e) {
     }
     return false;
   }
+  if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+    const rows = calDayRows();
+    if (!rows.length) return false;
+    const next = calKbIndex === -1 ? (e.key === "ArrowDown" ? 0 : rows.length - 1) : calKbIndex + (e.key === "ArrowDown" ? 1 : -1);
+    setCalKbIndex(Math.max(0, Math.min(rows.length - 1, next)));
+    return true;
+  }
+  if (e.key === "Enter" && calKbIndex !== -1 && !e.target.closest?.("button, a")) {
+    calDayRows()[calKbIndex]?.click();
+    return true;
+  }
+  if (e.key === "Delete" && calKbIndex !== -1) {
+    const ev = calDayRows()[calKbIndex]?.calEvent;
+    if (!ev) return false; // ToDoの行はToDoタブ側で消す(ここのデータはカレンダー用の別キャッシュのため)
+    deleteEventWithUndo(ev);
+    return true;
+  }
   if (e.key === "ArrowLeft" || key === "k") calGoPrev();
   else if (e.key === "ArrowRight" || key === "j") calGoNext();
   else if (key === "t") document.getElementById("cal-today-btn").click();
@@ -7594,6 +7779,23 @@ function handleCalendarKey(e) {
     document.querySelector(`#cal-view-toggle .cal-view-btn[data-view="${key === "m" ? "month" : "week"}"]`).click();
   } else return false;
   return true;
+}
+
+// 選んだ日の一覧(予定→ToDo)を↑↓で選ぶ(2026-10-06)。描き直しでDOMが入れ替わるので番号で覚え、
+// 日付が変わったら選択を外す(renderCalDayDetailの最後で付け直す)
+
+function calDayRows() {
+  return [...document.querySelectorAll("#cal-event-list li.clickable, #cal-todo-list li.clickable")];
+}
+
+function setCalKbIndex(i) {
+  const rows = calDayRows();
+  rows.forEach((r) => r.classList.remove("kb-selected"));
+  calKbIndex = i >= 0 && i < rows.length ? i : -1;
+  if (calKbIndex !== -1) {
+    rows[calKbIndex].classList.add("kb-selected");
+    rows[calKbIndex].scrollIntoView({ block: "nearest" });
+  }
 }
 
 // 選択日をdelta日ずらす。表示中の月/週からはみ出したら表示もそこへ移す
@@ -7626,10 +7828,25 @@ document.addEventListener("keydown", (e) => {
     if (form) {
       e.preventDefault();
       form.requestSubmit();
+    } else if (isFocusOverlayShown()) {
+      // タイマー画面のSave and stop(2026-10-06)。最小化中は誤って止めないよう効かせない
+      e.preventDefault();
+      stopAndSaveSession();
     }
     return;
   }
-  if (e.ctrlKey || e.metaKey || e.altKey || isTypingTarget(e.target)) return;
+  // パネルを閉じた後も隠れた入力欄にフォーカスが残り、次のSやNが効かなくなっていた(2026-10-06)。
+  // 見えない欄にいる時は外してから、普通のキーとして扱う
+  if (e.target !== document.body && e.target.closest?.(".hidden")) e.target.blur();
+  else if (isTypingTarget(e.target)) return;
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+
+  if (moodPickTimer && /^[0-9]$/.test(e.key) && !quickPanel.classList.contains("hidden")) {
+    endMoodPick();
+    e.preventDefault();
+    pickMoodByKey(document.getElementById("quick-mood-picker"), e.key);
+    return;
+  }
 
   if (subjectPickTimer && /^[1-9]$/.test(e.key) && !quickPanel.classList.contains("hidden")) {
     const btn = document.querySelectorAll("#quick-subjects .subject-btn")[Number(e.key) - 1];
@@ -7648,13 +7865,55 @@ document.addEventListener("keydown", (e) => {
     return;
   }
 
-  // ⚡メニューの中: B=Go to bed、L=Slacking(2026-10-03)
+  // ⚡メニューの中: B=Go to bed、L=Slacking(2026-10-03)、T/E=ToDo/Event追加・,=設定・M=気分(2026-10-06)
   if (!quickPanel.classList.contains("hidden")) {
-    const btnId = { b: "quick-bed-btn", l: "quick-slack-btn" }[e.key.toLowerCase()];
-    if (btnId) {
+    const key = e.key.toLowerCase();
+    if (key === "m") {
       e.preventDefault();
+      startMoodPick();
+      return;
+    }
+    // 寝ている間のB・サボり中のLは、Nowの「I'm up」「Back to work」を押す(始めるボタンはその間隠れている)
+    const nowAct = { b: sleepActiveLog && "wake", l: activationActiveLog && "return" }[key];
+    if (nowAct) {
+      const nowBtn = document.querySelector(`#quick-now-list [data-act="${nowAct}"]`);
+      if (nowBtn) {
+        e.preventDefault();
+        endSubjectPick();
+        endMoodPick();
+        nowBtn.click();
+      }
+      return;
+    }
+    const btnId = {
+      b: "quick-bed-btn",
+      l: "quick-slack-btn",
+      t: "quick-todo-btn",
+      e: "quick-event-btn",
+      ",": "quick-settings-btn",
+    }[key];
+    if (btnId) {
+      e.preventDefault(); // 開いたパネルのタイトル欄に文字が入らないように
       endSubjectPick();
+      endMoodPick();
       document.getElementById(btnId).click();
+      return;
+    }
+  }
+
+  // 気分のタグ: 矢印でフォーカスを動かし、Enter/Spaceで選ぶ(ボタン本来の動作)
+  if (e.target.classList?.contains("mood-tag-btn") && e.key.startsWith("Arrow")) {
+    e.preventDefault();
+    moveMoodTagFocus(e.target, e.key);
+    return;
+  }
+
+  // 気分を聞くパネル(Back to work等)とMoodタブでは、数字キーでそのまま気分を選ぶ(2026-10-06)
+  if (/^[0-9]$/.test(e.key)) {
+    const picker = moodPickerForDigitKeys();
+    if (picker) {
+      e.preventDefault();
+      pickMoodByKey(picker, e.key);
       return;
     }
   }
@@ -7680,6 +7939,11 @@ document.addEventListener("keydown", (e) => {
   if (e.key === ",") {
     e.preventDefault();
     openSettingsPanel();
+    return;
+  }
+
+  if ((e.key === "[" || e.key === "]") && cycleSubtab(e.key === "]" ? 1 : -1)) {
+    e.preventDefault();
     return;
   }
 
