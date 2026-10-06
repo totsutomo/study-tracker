@@ -4140,8 +4140,22 @@ body.quick-open #tabbar {
   font-weight: 600;
 }
 
+/* 保存の状態(2026-10-06): 通信中は薄く「Saving…」、終わったら緑で「✓ Saved 時刻」 */
 .mood-saved-note {
-  font-size: 12px;
+  margin-left: auto;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.mood-saved-note.saved {
+  color: var(--success);
+  font-weight: 600;
+}
+
+.mood-done-btn {
+  margin-left: 10px;
+  padding: 6px 16px;
+  font-size: 13px;
 }
 
 .mood-other-form {

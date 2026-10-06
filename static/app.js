@@ -3277,9 +3277,24 @@ function minimumLineHtml(withButton) {
 //   minimumButton: 低い数字の時の最低ライン表示に▶ボタンを付けるか(Back to workは自前の▶があるのでfalse)
 //   onChange: 保存・変更のたびに呼ぶ(Moodタブの描き直し等)
 //   onStartTimer: 最低ラインの▶を押した時(開いているパネルを閉じてから⚡を開く)
+//   onDone: 渡すとタグ欄に「Done」ボタン(Ctrl+Enter)を出す。保存が終わってから記録の写しで呼ぶ(⚡・Moodタブ)
 function createMoodPicker(container, opts) {
   const { kind, minimumButton = true } = opts;
   let entry = null; // { saving: Promise<id>, id, score, tags, note, logged_at }
+  // 保存中の通信の数と、最後の通信。「Saving…→Saved」の表示とDoneの待ち合わせに使う(2026-10-06。
+  // 以前は通信中でも「Saved ✓」と出ていて、しかも小さく、本当に保存されたのか分からなかった)
+  let pending = 0;
+  let lastSave = Promise.resolve();
+
+  function track(promise) {
+    pending++;
+    const done = promise.finally(() => {
+      pending--;
+      render();
+    });
+    lastSave = done.catch(() => {});
+    return done;
+  }
 
   container.classList.add("mood-picker-box");
   container.innerHTML = `
@@ -3289,7 +3304,8 @@ function createMoodPicker(container, opts) {
       <div class="mood-tag-grid"></div>
       <div class="mood-tags-foot">
         <button type="button" class="link-btn mood-other-link">Other…</button>
-        <span class="meta mood-saved-note"></span>
+        <span class="mood-saved-note"></span>
+        ${opts.onDone ? `<button type="button" class="mood-done-btn">Done<kbd class="key-hint">Ctrl+Enter</kbd></button>` : ""}
       </div>
       <form class="mood-other-form hidden">
         <input type="text" maxlength="40" placeholder="In your own words (optional)">
@@ -3334,7 +3350,9 @@ function createMoodPicker(container, opts) {
     const hasOther = entry.tags.includes(MOOD_OTHER_TAG);
     otherLink.classList.toggle("active", hasOther);
     otherForm.classList.toggle("hidden", !hasOther);
-    savedNote.textContent = entry.id || entry.saving ? "Saved ✓" : "";
+    const saving = pending > 0 || !entry.id;
+    savedNote.textContent = saving ? "Saving…" : `✓ Saved ${(entry.logged_at || "").slice(11, 16)}`;
+    savedNote.classList.toggle("saved", !saving);
     const showMin = entry.score <= MOOD_LOW_SCORE && kind !== "day";
     minLine.innerHTML = showMin ? minimumLineHtml(minimumButton) : "";
     minLine.classList.toggle("hidden", !showMin || !minLine.innerHTML);
@@ -3358,7 +3376,7 @@ function createMoodPicker(container, opts) {
       render();
       changed();
       try {
-        await api(`/api/mood-logs/${await entryId()}`, { method: "PUT", body: JSON.stringify({ score }) });
+        await track(entryId().then((id) => api(`/api/mood-logs/${id}`, { method: "PUT", body: JSON.stringify({ score }) })));
       } catch (err) {
         entry.score = prev;
         render();
@@ -3375,12 +3393,13 @@ function createMoodPicker(container, opts) {
       logged_at: nowLocalTimestamp(),
       activation_log_id: opts.activationLogId?.() ?? null,
     };
-    const saving = api("/api/mood-logs", { method: "POST", body: JSON.stringify(body) }).then((r) => r.id);
+    const saving = track(api("/api/mood-logs", { method: "POST", body: JSON.stringify(body) }).then((r) => r.id));
     entry = { saving, id: null, score, tags: [], note: null, logged_at: body.logged_at, date: body.date, kind };
     render();
     changed();
     try {
       entry.id = await saving;
+      render();
     } catch (err) {
       entry = null;
       render();
@@ -3398,7 +3417,7 @@ function createMoodPicker(container, opts) {
     const body = { tags };
     if (note !== undefined) body.note = note ?? "";
     try {
-      const res = await api(`/api/mood-logs/${await entryId()}`, { method: "PUT", body: JSON.stringify(body) });
+      const res = await track(entryId().then((id) => api(`/api/mood-logs/${id}`, { method: "PUT", body: JSON.stringify(body) })));
       if (res.new_tag) {
         moodConfig.custom_tags = [...moodConfig.custom_tags, res.new_tag];
         showToast(`New button added: ${res.new_tag}`);
@@ -3442,7 +3461,28 @@ function createMoodPicker(container, opts) {
     if (e.target.closest(".mood-min-start")) opts.onStartTimer?.();
   });
 
+  // Done: 数字を押した時点で保存は始まっているので、ここでは通信の終わりを待って区切りを付けるだけ。
+  // 書きかけの「Other」の言葉があれば一緒に保存する
+  async function finish() {
+    if (!entry || !opts.onDone) return false;
+    const note = otherInput.value.trim() || null;
+    if (entry.tags.includes(MOOD_OTHER_TAG) && note !== (entry.note || null)) saveTags(entry.tags, note);
+    const target = entry;
+    await lastSave;
+    try {
+      await target.saving;
+    } catch {
+      return true; // 失敗はsaveScore側でトースト済み
+    }
+    if (entry !== target) return true; // 待っている間に失敗して消えた・別の記録に替わった
+    opts.onDone({ ...entry });
+    return true;
+  }
+
+  container.querySelector(".mood-done-btn")?.addEventListener("click", finish);
+
   return {
+    finish,
     reset() {
       entry = null;
       otherInput.value = "";
@@ -3722,7 +3762,17 @@ moodTabPicker = createMoodPicker(document.getElementById("mood-tab-picker"), {
     applyLocalMoodEntry(entry);
   },
   onStartTimer: startTimerFromMood,
+  onDone: (entry) => {
+    resetMoodTabPicker();
+    showMoodSavedToast(entry);
+  },
 });
+
+// Doneを押した後の「ちゃんと残った」の合図。何を付けたかも一緒に出す
+function showMoodSavedToast(entry) {
+  const labels = moodEntryLabels(entry);
+  showToast(`✓ Mood ${entry.score} saved${labels.length ? ` · ${labels.join(", ")}` : ""}`);
+}
 
 // Moodタブを開き直したら、新しい1回分から始める
 function resetMoodTabPicker() {
@@ -7485,6 +7535,10 @@ const quickMoodPicker = createMoodPicker(document.getElementById("quick-mood-pic
     renderQuickMoodStatus();
   },
   onStartTimer: startTimerFromMood,
+  onDone: (entry) => {
+    closeQuickPanel();
+    showMoodSavedToast(entry);
+  },
 });
 
 function renderQuickMoodStatus() {
@@ -7824,7 +7878,19 @@ document.addEventListener("keydown", (e) => {
   // Ctrl+Enter: 開いているパネルのフォームを保存(メモ欄など、Enterが改行になる欄からでも)。
   // vocab-app・Stackと同じキー(2026-10-03)
   if ((e.ctrlKey || e.metaKey) && e.key === "Enter" && !e.isComposing) {
-    const form = e.target.closest?.(".add-panel form") || visiblePanels().at(-1)?.querySelector("form");
+    // 気分を付けている途中なら、そのDone(⚡メニュー・Moodタブ、2026-10-06)。
+    // 以前は⚡メニューで押すと隠れた「Other」の欄が送られ、Otherタグが勝手に付いていた
+    const moodPicker = !quickPanel.classList.contains("hidden")
+      ? quickMoodPicker
+      : !visiblePanels().length && activeTabId() === "tab-mood"
+        ? moodTabPicker
+        : null;
+    if (moodPicker?.entry) {
+      e.preventDefault();
+      moodPicker.finish();
+      return;
+    }
+    const form = e.target.closest?.(".add-panel form") || visiblePanels().at(-1)?.querySelector("form:not(.mood-other-form)");
     if (form) {
       e.preventDefault();
       form.requestSubmit();
