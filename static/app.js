@@ -172,14 +172,19 @@ function api(path, options = {}, retries = 3) {
   return p;
 }
 
+// timeoutMs: 返事が来ないまま待ち続けないよう、その時間で打ち切って失敗扱いにする(気分のDone、2026-10-06)
 async function apiRequest(path, options = {}, retries = 3) {
+  const { timeoutMs, ...fetchOptions } = options;
   apiProgressStart();
   try {
     for (let attempt = 0; ; attempt++) {
+      const abort = timeoutMs ? new AbortController() : null;
+      const abortTimer = abort && setTimeout(() => abort.abort(), timeoutMs);
       try {
         const res = await fetch(path, {
           headers: { "Content-Type": "application/json" },
-          ...options,
+          ...fetchOptions,
+          ...(abort ? { signal: abort.signal } : {}),
         });
         if (!res.ok) throw new Error(`API error: ${res.status}`);
         const data = await res.json();
@@ -190,6 +195,8 @@ async function apiRequest(path, options = {}, retries = 3) {
       } catch (err) {
         if (attempt >= retries) throw err;
         await new Promise((r) => setTimeout(r, 700 * (attempt + 1)));
+      } finally {
+        clearTimeout(abortTimer);
       }
     }
   } finally {
@@ -3277,9 +3284,12 @@ function minimumLineHtml(withButton) {
 //   minimumButton: 低い数字の時の最低ライン表示に▶ボタンを付けるか(Back to workは自前の▶があるのでfalse)
 //   onChange: 保存・変更のたびに呼ぶ(Moodタブの描き直し等)
 //   onStartTimer: 最低ラインの▶を押した時(開いているパネルを閉じてから⚡を開く)
-//   onDone: 渡すとタグ欄に「Done」ボタン(Ctrl+Enter)を出す。保存が終わってから記録の写しで呼ぶ(⚡・Moodタブ)
+//   onDone: 渡すと「Doneを押すまで保存しない」形になり、タグ欄に「Done」ボタン(Ctrl+Enter)を出す(⚡・Moodタブ)。
+//           Doneの瞬間に呼ぶ(パネルを閉じる等)。保存はその後ろで行い、結果はトーストで知らせる。
+//           押し間違えた数字・タグがそのまま残らないように(2026-10-06、とっつーの依頼)
 function createMoodPicker(container, opts) {
   const { kind, minimumButton = true } = opts;
+  const deferred = !!opts.onDone;
   let entry = null; // { saving: Promise<id>, id, score, tags, note, logged_at }
   // 保存中の通信の数と、最後の通信。「Saving…→Saved」の表示とDoneの待ち合わせに使う(2026-10-06。
   // 以前は通信中でも「Saved ✓」と出ていて、しかも小さく、本当に保存されたのか分からなかった)
@@ -3350,9 +3360,14 @@ function createMoodPicker(container, opts) {
     const hasOther = entry.tags.includes(MOOD_OTHER_TAG);
     otherLink.classList.toggle("active", hasOther);
     otherForm.classList.toggle("hidden", !hasOther);
-    const saving = pending > 0 || !entry.id;
-    savedNote.textContent = saving ? "Saving…" : `✓ Saved ${(entry.logged_at || "").slice(11, 16)}`;
-    savedNote.classList.toggle("saved", !saving);
+    if (deferred) {
+      savedNote.textContent = "Not saved yet";
+      savedNote.classList.remove("saved");
+    } else {
+      const saving = pending > 0 || !entry.id;
+      savedNote.textContent = saving ? "Saving…" : `✓ Saved ${(entry.logged_at || "").slice(11, 16)}`;
+      savedNote.classList.toggle("saved", !saving);
+    }
     const showMin = entry.score <= MOOD_LOW_SCORE && kind !== "day";
     minLine.innerHTML = showMin ? minimumLineHtml(minimumButton) : "";
     minLine.classList.toggle("hidden", !showMin || !minLine.innerHTML);
@@ -3369,6 +3384,12 @@ function createMoodPicker(container, opts) {
   }
 
   async function saveScore(score) {
+    if (deferred) {
+      if (entry) entry.score = score;
+      else entry = { id: null, score, tags: [], note: null, logged_at: null, date: null, kind };
+      render();
+      return;
+    }
     if (entry) {
       // 押し直しは同じ記録の数字だけ直す(1回の気分が2件に分かれないように)
       const prev = entry.score;
@@ -3413,6 +3434,7 @@ function createMoodPicker(container, opts) {
     entry.tags = tags;
     if (note !== undefined) entry.note = note;
     render();
+    if (deferred) return;
     changed();
     const body = { tags };
     if (note !== undefined) body.note = note ?? "";
@@ -3461,22 +3483,54 @@ function createMoodPicker(container, opts) {
     if (e.target.closest(".mood-min-start")) opts.onStartTimer?.();
   });
 
-  // Done: 数字を押した時点で保存は始まっているので、ここでは通信の終わりを待って区切りを付けるだけ。
-  // 書きかけの「Other」の言葉があれば一緒に保存する
-  async function finish() {
-    if (!entry || !opts.onDone) return false;
-    const note = otherInput.value.trim() || null;
-    if (entry.tags.includes(MOOD_OTHER_TAG) && note !== (entry.note || null)) saveTags(entry.tags, note);
-    const target = entry;
-    await lastSave;
-    try {
-      await target.saving;
-    } catch {
-      return true; // 失敗はsaveScore側でトースト済み
+  // Done: ここで初めて保存する。画面はすぐ閉じ(返事を待たない)、保存の結果はトーストで返す。
+  // 以前は数字の時点で保存し、Doneは通信の終わりを待っていたため、本番で返事が遅いと押しても何も起きなかった
+  function finish() {
+    if (!entry || !deferred) return false;
+    const hasOther = entry.tags.includes(MOOD_OTHER_TAG);
+    const rec = { ...entry, tags: [...entry.tags], note: hasOther ? otherInput.value.trim() || null : null };
+    if (!rec.id) {
+      rec.logged_at = nowLocalTimestamp();
+      rec.date = moodDateFor(kind);
     }
-    if (entry !== target) return true; // 待っている間に失敗して消えた・別の記録に替わった
-    opts.onDone({ ...entry });
+    entry = null;
+    otherInput.value = "";
+    render();
+    opts.onDone();
+    commit(rec);
     return true;
+  }
+
+  async function commit(rec) {
+    showToast(`Saving mood ${rec.score}…`, null, 30000);
+    const body = { score: rec.score, tags: rec.tags, note: rec.note ?? "" };
+    try {
+      let res;
+      if (rec.id) {
+        res = await api(`/api/mood-logs/${rec.id}`, { method: "PUT", body: JSON.stringify(body), timeoutMs: 20000 }, 0);
+      } else {
+        // 打ち切った後の再送で同じ記録が2件にならないよう、自動の再送はしない(失敗したらRetryで)
+        res = await api(
+          "/api/mood-logs",
+          {
+            method: "POST",
+            body: JSON.stringify({ ...body, note: rec.note, date: rec.date, kind, logged_at: rec.logged_at, activation_log_id: opts.activationLogId?.() ?? null }),
+            timeoutMs: 20000,
+          },
+          0,
+        );
+        rec.id = res.id;
+      }
+      if (res.new_tag) {
+        moodConfig.custom_tags = [...moodConfig.custom_tags, res.new_tag];
+        renderMoodSettings();
+      }
+      opts.onChange?.({ ...rec });
+      const labels = moodEntryLabels(rec);
+      showToast(`✓ Mood ${rec.score} saved${labels.length ? ` · ${labels.join(", ")}` : ""}${res.new_tag ? ` · New button: ${res.new_tag}` : ""}`);
+    } catch (err) {
+      showToast(`Couldn't save mood ${rec.score}`, { label: "Retry", onClick: () => commit(rec) }, 15000);
+    }
   }
 
   container.querySelector(".mood-done-btn")?.addEventListener("click", finish);
@@ -3756,23 +3810,11 @@ function startTimerFromMood() {
 
 moodTabPicker = createMoodPicker(document.getElementById("mood-tab-picker"), {
   kind: "moment",
-  onChange: (entry) => {
-    // 付けたばかりの記録はそのまま直せるよう「編集中」にしておく(+ Newで次の記録)
-    if (entry?.id) moodEditingId = entry.id;
-    applyLocalMoodEntry(entry);
-  },
+  // Doneで保存が終わった時に呼ばれる(チップ・グラフへ反映)。Doneを押した時点で入力欄は次の1回分に戻している
+  onChange: applyLocalMoodEntry,
   onStartTimer: startTimerFromMood,
-  onDone: (entry) => {
-    resetMoodTabPicker();
-    showMoodSavedToast(entry);
-  },
+  onDone: resetMoodTabPicker,
 });
-
-// Doneを押した後の「ちゃんと残った」の合図。何を付けたかも一緒に出す
-function showMoodSavedToast(entry) {
-  const labels = moodEntryLabels(entry);
-  showToast(`✓ Mood ${entry.score} saved${labels.length ? ` · ${labels.join(", ")}` : ""}`);
-}
 
 // Moodタブを開き直したら、新しい1回分から始める
 function resetMoodTabPicker() {
@@ -7526,8 +7568,8 @@ document.getElementById("quick-now-list").addEventListener("click", async (e) =>
   else if (act === "return") await returnActivation();
 });
 
-// ---- Mood: 数字を押した瞬間に保存し、そのあとボタン(複数可)を小さく聞く ----
-// メニューを開くたびに新しい1回分として始める(押し直しは同じ記録の上書き)
+// ---- Mood: 数字→ボタン(複数可)→Doneで保存(2026-10-06までは数字を押した瞬間に保存していた) ----
+// メニューを開くたびに新しい1回分として始める。Doneを押すまで保存しない(閉じたら捨てる)
 const quickMoodPicker = createMoodPicker(document.getElementById("quick-mood-picker"), {
   kind: "moment",
   onChange: (entry) => {
@@ -7535,10 +7577,7 @@ const quickMoodPicker = createMoodPicker(document.getElementById("quick-mood-pic
     renderQuickMoodStatus();
   },
   onStartTimer: startTimerFromMood,
-  onDone: (entry) => {
-    closeQuickPanel();
-    showMoodSavedToast(entry);
-  },
+  onDone: closeQuickPanel,
 });
 
 function renderQuickMoodStatus() {
