@@ -442,11 +442,13 @@
           <h3>Diary score</h3>
           <div class="period-toggle" id="diary-score-toggle">
             <button type="button" class="period-btn active" data-view="overall">Overall</button>
+            <button type="button" class="period-btn" data-view="language">Language</button>
+            <button type="button" class="period-btn" data-view="errors">Errors</button>
             <button type="button" class="period-btn" data-view="categories">By category</button>
           </div>
         </div>
         <div id="diary-score-chart"></div>
-        <p class="meta">"By category" shows task / coherence / lexical / grammar separately</p>
+        <p class="meta">Language = lexical + grammar (/50, best for tracking progress) · Errors = grammar + vocab mistakes per 100 words (lower is better) · "By category" shows the 4 items separately</p>
       </div>
 
       <div class="chart-card" id="scores-card-stack">

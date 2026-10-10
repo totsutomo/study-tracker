@@ -323,6 +323,11 @@ class DiaryScoreCreate(BaseModel):
     lexical: float
     grammar: float
     overall: float
+    # 2026-10-11追加。languageは省略時lexical+grammarで補う。words/errors/per100wは導入前の日記では送られない
+    language: float | None = None
+    words: int | None = None
+    errors: int | None = None
+    per100w: float | None = None
 
 
 class EikenWritingScoreCreate(BaseModel):
@@ -3055,7 +3060,8 @@ def cancel_pending_change(change_id: int, token: str | None = None):
 def list_diary_scores(days: int = 30):
     conn = get_connection()
     cur = conn.execute(
-        "SELECT date, style, task, coherence, lexical, grammar, overall FROM diary_scores "
+        "SELECT date, style, task, coherence, lexical, grammar, overall, "
+        "COALESCE(language, lexical + grammar) AS language, words, errors, per100w FROM diary_scores "
         "WHERE date >= ? ORDER BY date ASC",
         ((nz_today() - timedelta(days=days)).isoformat(),),
     )
@@ -3069,14 +3075,19 @@ def upsert_diary_score(score: DiaryScoreCreate):
     conn = get_connection()
     conn.execute(
         """
-        INSERT INTO diary_scores (date, style, task, coherence, lexical, grammar, overall)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO diary_scores (date, style, task, coherence, lexical, grammar, overall,
+                                  language, words, errors, per100w)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(date) DO UPDATE SET
             style = excluded.style, task = excluded.task, coherence = excluded.coherence,
             lexical = excluded.lexical, grammar = excluded.grammar, overall = excluded.overall,
+            language = excluded.language, words = excluded.words, errors = excluded.errors,
+            per100w = excluded.per100w,
             logged_at = datetime('now')
         """,
-        (score.date, score.style, score.task, score.coherence, score.lexical, score.grammar, score.overall),
+        (score.date, score.style, score.task, score.coherence, score.lexical, score.grammar, score.overall,
+         score.language if score.language is not None else score.lexical + score.grammar,
+         score.words, score.errors, score.per100w),
     )
     conn.commit()
     conn.close()

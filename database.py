@@ -468,6 +468,14 @@ def _migrate(conn):
     if "page_end" not in study_log_cols:
         conn.execute("ALTER TABLE study_logs ADD COLUMN page_end INTEGER")
 
+    # 日記採点の比較精度対策(2026-10-11)。language=lexical+grammar(0〜50、Taskを除いた英語力の指標)、
+    # words/errors/per100w=Today本文の語数・客観的な誤り(grammar+vocab)の件数・100語あたりの誤り件数。
+    # 導入前の行はNULLのまま(Obsidian側で再採点した分だけdiaryスキルから埋め直される)
+    diary_score_cols = [row[1] for row in conn.execute("PRAGMA table_info(diary_scores)").fetchall()]
+    for col, typ in (("language", "REAL"), ("words", "INTEGER"), ("errors", "INTEGER"), ("per100w", "REAL")):
+        if col not in diary_score_cols:
+            conn.execute(f"ALTER TABLE diary_scores ADD COLUMN {col} {typ}")
+
     # screen_time_logsをdate単独PKからdevice込みの複合PKへ移行(2026-09-14、PC/タブレット対応)。
     # SQLiteはPRIMARY KEYを直接変更できないため、mood_logsの時と同じリネーム→作り直し→コピー手順を使う。
     screen_time_cols = [row[1] for row in conn.execute("PRAGMA table_info(screen_time_logs)").fetchall()]

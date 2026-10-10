@@ -4191,7 +4191,7 @@ function renderStudyLogList(logs) {
 
 // ---------- scores (diary / hitotsubashi writing / stack) ----------
 
-let diaryScoreView = "overall"; // "overall" | "categories"
+let diaryScoreView = "overall"; // "overall" | "language" | "errors" | "categories"
 let lastDiaryScoreRows = [];
 let hitotsubashiScoreView = "overall"; // "overall" | "categories"
 let lastHitotsubashiScoreRows = [];
@@ -4478,19 +4478,26 @@ function niceTicks(max) {
   return { ticks, top };
 }
 
-function renderDiaryScoreChart(rows) {
+function renderDiaryScoreChart(allRows) {
   const container = document.getElementById("diary-score-chart");
+  const view = diaryScoreView;
+  // 誤り率は2026-10-11の採点基準改訂以降(と再採点した分)にしか無いので、値のある日だけで線を引く
+  const rows = view === "errors" ? allRows.filter((r) => r.per100w != null) : allRows;
   if (!rows.length) {
-    container.innerHTML = `<p class="meta">No diary scores yet</p>`;
+    container.innerHTML = `<p class="meta">${view === "errors" ? "No error-rate data yet" : "No diary scores yet"}</p>`;
     return;
   }
-  const overall = diaryScoreView === "overall";
-  const max = overall ? 100 : 25;
-  const { xOf, yOf, xLabels, svg } = scoreChartFrame(
-    rows.length, overall ? [0, 25, 50, 75, 100] : [0, 5, 10, 15, 20, 25], max);
+  const scale = {
+    overall: { ticks: [0, 25, 50, 75, 100], top: 100 },
+    language: { ticks: [0, 10, 20, 30, 40, 50], top: 50 },
+    errors: niceTicks(Math.max(...rows.map((r) => r.per100w))),
+    categories: { ticks: [0, 5, 10, 15, 20, 25], top: 25 },
+  }[view];
+  const { xOf, yOf, xLabels, svg } = scoreChartFrame(rows.length, scale.ticks, scale.top);
 
-  const seriesDefs = overall
-    ? [{ key: "overall", color: "#4f7cdb", width: 1.5, dots: true }]
+  const seriesDefs = view === "overall" ? [{ key: "overall", color: "#4f7cdb", width: 1.5, dots: true }]
+    : view === "language" ? [{ key: "language", color: "#e0a030", width: 1.5, dots: true }]
+    : view === "errors" ? [{ key: "per100w", color: "#e5555c", width: 1.5, dots: true }]
     : [
         { key: "task", color: "#4f7cdb", width: 1.2 },
         { key: "coherence", color: "#4a9c72", width: 1.2 },
