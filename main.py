@@ -875,7 +875,8 @@ def _create_study_log(log: StudyLogCreate):
         current = conn.execute("SELECT value FROM settings WHERE key = 'session_id'").fetchone()
         if current and current[0] == log.session_id:
             _clear_session_flags(conn)
-            conn.commit()
+        _history_session_ended(conn, log.session_id, saved=True)
+        conn.commit()
     if log.dedupe and log.logged_at:
         existing = conn.execute(
             "SELECT id FROM study_logs WHERE subject = ? AND minutes = ? AND logged_at = ?",
@@ -2612,6 +2613,12 @@ def _compute_screen_budget_status(conn, date: str) -> dict:
     consumed_by_device = {device: minutes for device, minutes in by_device_rows}
     consumed = sum(consumed_by_device.values())
 
+    # 記録されずに終わったセッション(2026-10-14)。予算日と同じ3時区切りで、今日と直近7日分
+    day = datetime.fromisoformat(date) + timedelta(hours=SCREEN_BUDGET_DAY_START_HOUR)
+    fmt = lambda d: d.isoformat(sep=" ", timespec="seconds")
+    discarded_today = _discarded_sessions_summary(conn, fmt(day), fmt(day + timedelta(days=1)))
+    discarded_7d = _discarded_sessions_summary(conn, fmt(day - timedelta(days=6)), fmt(day + timedelta(days=1)))
+
     return {
         "date": date,
         "budget_minutes": budget,
@@ -2631,6 +2638,7 @@ def _compute_screen_budget_status(conn, date: str) -> dict:
             "capped": (params["baseline_minutes"] + study_bonus + todo_bonus) > params["daily_cap"],
         },
         "study_packages": params["study_packages"],
+        "discarded_sessions": {"today": discarded_today, "last_7_days": discarded_7d},
     }
 
 
@@ -3341,6 +3349,73 @@ def _clear_session_flags(conn) -> None:
     conn.execute(f"DELETE FROM settings WHERE key IN ({placeholders})", SESSION_FLAG_KEYS)
 
 
+# ---------- セッション履歴(記録されずに終わったセッションの見える化、2026-10-14) ----------
+# 開始した時点でここに控えるので、Discardボタンを使わずに画面を閉じる・4時間放置する等の終わり方も拾える。
+# 「保存されなかった」の判定は_discarded_sessions_summary()側で行う
+
+def _history_session_started(conn, session_id: str | None, subject: str | None, device: str | None) -> None:
+    if not session_id:
+        return  # session_idを送らない旧版のCompass
+    now = nz_now_naive().isoformat(sep=" ", timespec="seconds")
+    # 終わりの連絡が届かないまま次を始めた前のセッションは、ここで終わったことにする
+    # (そうしないと4時間後に「放置」扱いで240分と数えてしまう)
+    conn.execute(
+        "UPDATE session_history SET ended_at = ? WHERE ended_at IS NULL AND session_id != ?",
+        (now, session_id),
+    )
+    conn.execute(
+        "INSERT OR IGNORE INTO session_history (session_id, subject, device, started_at) VALUES (?, ?, ?, ?)",
+        (session_id, subject or "", device or "", now),
+    )
+
+
+def _history_session_ended(conn, session_id: str | None, saved: bool = False) -> None:
+    if not session_id:
+        return
+    now = nz_now_naive().isoformat(sep=" ", timespec="seconds")
+    conn.execute(
+        "UPDATE session_history SET ended_at = COALESCE(ended_at, ?), saved = MAX(saved, ?) WHERE session_id = ?",
+        (now, 1 if saved else 0, session_id),
+    )
+
+
+# 押し間違えてすぐDiscardしたような短いものは数えない
+DISCARDED_SESSION_MIN_MINUTES = 3
+# Stopした時、旗を下ろすactive:falseは記録本体より先に届く(finishSession参照)。記録の到着を待つ猶予
+DISCARD_GRACE_MINUTES = 10
+
+
+def _discarded_sessions_summary(conn, start: str, end: str) -> dict:
+    """[start, end)(NZのwall-clock)に始まったセッションのうち、記録されずに終わったものの件数と分数。
+    終わった連絡が無いまま4時間を過ぎたもの(放置・タブを閉じた)も含める。後から記録が再送されて
+    きた場合はsaved=1になり、自然に数えなくなる。"""
+    now = nz_now_naive()
+    rows = conn.execute(
+        "SELECT started_at, ended_at FROM session_history "
+        "WHERE saved = 0 AND started_at >= ? AND started_at < ?",
+        (start, end),
+    ).fetchall()
+    count = 0
+    minutes = 0
+    max_minutes = FOCUS_SESSION_MAX_AGE_HOURS * 60
+    for started_at, ended_at in rows:
+        started = datetime.fromisoformat(started_at)
+        if ended_at:
+            ended = datetime.fromisoformat(ended_at)
+            if now - ended < timedelta(minutes=DISCARD_GRACE_MINUTES):
+                continue
+        else:
+            if now - started < timedelta(hours=FOCUS_SESSION_MAX_AGE_HOURS):
+                continue  # まだ動いている
+            ended = started + timedelta(hours=FOCUS_SESSION_MAX_AGE_HOURS)
+        m = min(max_minutes, int((ended - started).total_seconds() // 60))
+        if m < DISCARDED_SESSION_MIN_MINUTES:
+            continue
+        count += 1
+        minutes += m
+    return {"count": count, "minutes": minutes}
+
+
 def _read_remote_ended(conn) -> dict | None:
     row = conn.execute("SELECT value FROM settings WHERE key = 'session_remote_ended'").fetchone()
     if not row or not row[0]:
@@ -3361,6 +3436,7 @@ def focus_session_active(payload: SessionActiveSync):
         # FOCUS_SESSION_MAX_AGE_HOURS staleness auto-heal in _read_session_flag(), which only
         # ever clears the three active/subject/started_at keys, not the rest).
         _clear_session_flags(conn)
+        _history_session_started(conn, payload.session_id, payload.subject, payload.device)
         _upsert_settings(conn, [
             ("session_active", "1"),
             ("session_subject", payload.subject or ""),
@@ -3378,6 +3454,7 @@ def focus_session_active(payload: SessionActiveSync):
         # 古いセッションの「終わった」でそちらの旗を下ろさない。番号を送らない旧版は従来どおり下ろす
         if not payload.session_id or not current_id or current_id == payload.session_id:
             _clear_session_flags(conn)
+        _history_session_ended(conn, payload.session_id or current_id)
     conn.commit()
     conn.close()
     return {"ok": True}
@@ -3593,6 +3670,7 @@ def focus_session_remote_end(payload: SessionRemoteEnd):
                 ),
             )
         _clear_session_flags(conn)
+        _history_session_ended(conn, payload.session_id, saved=payload.action == "save")
         # 止めた後にカウントダウンの「time's up」push通知が来ないよう、その追跡も消す
         conn.execute(
             "DELETE FROM settings WHERE key IN "

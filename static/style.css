@@ -408,6 +408,19 @@ body {
   background: #e05050;
 }
 
+/* 記録されずに終わったセッション(直近7日)。ある時だけ出す(2026-10-14) */
+.hud-discard {
+  font-size: 10.5px;
+  color: #e05050;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.hud-discard.hidden {
+  display: none;
+}
+
 /* もう一方のデバイス(スマホ/PC)で今フォーカスタイマーが動いている時のFYI表示。
    気付いてもらう必要はあるので、帯の右端に緑の丸いバッジ+パルスで出す
    (勉強中=ポジティブな状態としてaccent-secondaryの緑を使用)。 */

@@ -191,6 +191,19 @@ CREATE TABLE IF NOT EXISTS pending_changes (
     applied_at TEXT
 );
 
+-- Compassの勉強セッション1回ごとの控え(2026-10-14)。記録されずに終わったセッション(Discard・
+-- 放置して4時間切れ)を数えて見える化するため。セッションを立ててゲームで遊び、最後にDiscardする
+-- 抜け道があった(10/9)。study_logsにはsession_id列が無いので、保存されたかどうかはここで持つ。
+-- 時刻はstudy_logs.logged_atと同じNZのwall-clock(nz_now_naive)で、予算日(3時区切り)でそのまま切れる
+CREATE TABLE IF NOT EXISTS session_history (
+    session_id TEXT PRIMARY KEY,
+    subject TEXT,
+    device TEXT,
+    started_at TEXT NOT NULL,
+    ended_at TEXT,
+    saved INTEGER NOT NULL DEFAULT 0
+);
+
 """
 
 DEFAULT_CATEGORIES = ("英語", "数学", "世界史", "その他")

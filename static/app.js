@@ -3209,6 +3209,17 @@ function renderScreenBudget(s) {
   banner.title = `Screen time today${deviceText}`;
   fill.style.width = `${Math.min(100, Math.max(0, (s.consumed_minutes / s.budget_minutes) * 100))}%`;
 
+  // 記録されずに終わったセッション(Discard・放置)を直近7日分だけ出す(2026-10-14)。
+  // セッションを立ててゲームで遊び、最後にDiscardする抜け道を、少なくとも自分に見えるようにする
+  const discardEl = document.getElementById("screen-budget-banner-discard");
+  const week = s.discarded_sessions?.last_7_days;
+  if (week?.count) {
+    discardEl.textContent = `Unsaved 7d: ${week.count} · ${week.minutes} min`;
+    const today = s.discarded_sessions.today;
+    banner.title += `\nUnsaved sessions — today: ${today.count} (${formatLogDuration(today.minutes)}), last 7 days: ${week.count} (${formatLogDuration(week.minutes)})`;
+  }
+  discardEl.classList.toggle("hidden", !week?.count);
+
   banner.classList.remove("hidden");
   banner.classList.toggle("exhausted", remaining <= 0);
   banner.classList.toggle("low", remaining > 0 && remaining <= s.budget_minutes * 0.2);
