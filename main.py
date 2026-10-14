@@ -2353,6 +2353,146 @@ def insights_daily(days: int = 30):
     return [by_date[d] for d in dates]
 
 
+# ---------- guard (ブロックの部品が手でオフにされていないかの見張り、2026-10-14) ----------
+# 端末の中だけで見張っても、見張り役(FocusGuard/JpBlocker)ごと止められたら気づけないので、
+# 検知役はここ(サーバー)に置く。端末は1分ごとに部品ごとのon/offを送るだけ(FocusGuardの
+# guard_report.py、JpBlockerのGuardReporter)。ここで前回からの変化を見て通知する:
+# - 部品がオフになった/戻った → とっつー・美緒・ボットの3人グループへ(端末自身の報告なので
+#   誤報にならない。同じ場所で美緒がその場で反応できるようにグループにした)
+# - 端末からの連絡が途絶えた → とっつー個人へ(電源オフ・電池切れ・圏外と見分けられないため)
+# 通知は専用のTelegramボット。未設定なら記録だけして送らない。
+GUARD_TELEGRAM_BOT_TOKEN = _env_token("GUARD_TELEGRAM_BOT_TOKEN")
+GUARD_TELEGRAM_CHAT_ID_SELF = _env_token("GUARD_TELEGRAM_CHAT_ID_SELF")
+GUARD_TELEGRAM_CHAT_ID_GROUP = _env_token("GUARD_TELEGRAM_CHAT_ID_GROUP")
+
+GUARD_DEVICE_LABELS = {"pc": "PC", "tablet": "タブレット", "phone": "スマホ"}
+GUARD_COMPONENT_LABELS = {
+    "brave_extension": "Brave拡張(サイトブロック)",
+    "keepalive_task": "FocusGuardの自動復帰",
+    "startup_shortcut": "FocusGuardの自動起動",
+    "brave_private_block": "Braveのプライベートウィンドウ禁止",
+    "jpblocker_accessibility": "JpBlockerのアプリブロック(ユーザー補助)",
+    "jpblocker_device_admin": "JpBlockerの画面ロック(デバイス管理者)",
+    "stayfree_accessibility": "StayFree(ユーザー補助)",
+}
+# これ以上連絡が無ければ「途絶えた」とみなす。スマホはほぼ常に電源が入っているので短く、
+# 学校のタブレットは週末に丸2日使わないことがあるので長く
+GUARD_SILENT_AFTER = {"phone": timedelta(hours=6), "pc": timedelta(hours=24), "tablet": timedelta(hours=72)}
+
+
+class GuardReport(BaseModel):
+    device: str
+    components: dict[str, str]
+
+
+def _guard_send_telegram(text: str, shared: bool):
+    chat_id = GUARD_TELEGRAM_CHAT_ID_GROUP if shared else GUARD_TELEGRAM_CHAT_ID_SELF
+    if not GUARD_TELEGRAM_BOT_TOKEN or not chat_id:
+        return
+
+    def send():
+        req = urllib.request.Request(
+            f"https://api.telegram.org/bot{GUARD_TELEGRAM_BOT_TOKEN}/sendMessage",
+            data=json.dumps({"chat_id": chat_id, "text": text}).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+        )
+        try:
+            urllib.request.urlopen(req, timeout=10).close()
+        except OSError as e:
+            print(f"[guard] telegram send failed: {e}")
+
+    # 端末への応答をTelegramの往復で待たせない
+    threading.Thread(target=send, daemon=True).start()
+
+
+def _guard_fmt_time(utc_naive: datetime) -> str:
+    return utc_naive.replace(tzinfo=timezone.utc).astimezone(NZ_TZ).strftime("%m/%d %H:%M")
+
+
+def _guard_fmt_duration(delta: timedelta) -> str:
+    minutes = int(delta.total_seconds() // 60)
+    return f"{minutes // 60}時間{minutes % 60}分" if minutes >= 60 else f"{minutes}分"
+
+
+def _guard_check_silent(conn, now: datetime, reporting_device: str):
+    for row in conn.execute("SELECT device, last_seen FROM guard_devices WHERE silent_alerted = 0").fetchall():
+        device, last_seen = row[0], datetime.fromisoformat(row[1])
+        limit = GUARD_SILENT_AFTER.get(device)
+        if device == reporting_device or limit is None or now - last_seen < limit:
+            continue
+        conn.execute("UPDATE guard_devices SET silent_alerted = 1 WHERE device = ?", (device,))
+        _guard_send_telegram(
+            f"📵 {GUARD_DEVICE_LABELS.get(device, device)}から{_guard_fmt_duration(now - last_seen)}連絡がありません"
+            f"(最後: {_guard_fmt_time(last_seen)})。電源を切っているだけなら問題なし",
+            shared=False,
+        )
+
+
+@app.post("/api/guard/report")
+def guard_report(payload: GuardReport, token: str | None = None):
+    if not DEVICE_TOKEN or token != DEVICE_TOKEN:
+        raise HTTPException(status_code=403, detail="invalid token")
+    if payload.device not in GUARD_DEVICE_LABELS:
+        raise HTTPException(status_code=400, detail="unknown device")
+    now = utc_now_naive()
+    now_s = now.isoformat(timespec="seconds")
+    device_label = GUARD_DEVICE_LABELS[payload.device]
+    conn = get_connection()
+
+    prev = conn.execute("SELECT silent_alerted FROM guard_devices WHERE device = ?", (payload.device,)).fetchone()
+    if prev and prev[0]:
+        _guard_send_telegram(f"📶 {device_label}からの連絡が戻りました", shared=False)
+    conn.execute(
+        "INSERT INTO guard_devices (device, last_seen, silent_alerted) VALUES (?, ?, 0) "
+        "ON CONFLICT(device) DO UPDATE SET last_seen = excluded.last_seen, silent_alerted = 0",
+        (payload.device, now_s),
+    )
+
+    for component, state in payload.components.items():
+        if component not in GUARD_COMPONENT_LABELS or state not in ("on", "off"):
+            continue
+        row = conn.execute(
+            "SELECT state, changed_at FROM guard_components WHERE device = ? AND component = ?",
+            (payload.device, component),
+        ).fetchone()
+        if row and row[0] == state:
+            continue
+        conn.execute(
+            "INSERT INTO guard_components (device, component, state, changed_at) VALUES (?, ?, ?, ?) "
+            "ON CONFLICT(device, component) DO UPDATE SET state = excluded.state, changed_at = excluded.changed_at",
+            (payload.device, component, state, now_s),
+        )
+        conn.execute(
+            "INSERT INTO guard_events (device, component, state, at) VALUES (?, ?, ?, ?)",
+            (payload.device, component, state, now_s),
+        )
+        label = f"{device_label}: {GUARD_COMPONENT_LABELS[component]}"
+        if state == "off":
+            _guard_send_telegram(f"⚠️ {label} がオフになりました({_guard_fmt_time(now)})", shared=True)
+        elif row:  # 初回の"on"は知らせない(導入したてで毎回届くだけなので)
+            off_for = now - datetime.fromisoformat(row[1])
+            _guard_send_telegram(f"✅ {label} がオンに戻りました(オフだった時間: {_guard_fmt_duration(off_for)})",
+                                 shared=True)
+
+    _guard_check_silent(conn, now, payload.device)
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+@app.get("/api/guard/status")
+def guard_status(token: str | None = None):
+    if not DEVICE_TOKEN or token != DEVICE_TOKEN:
+        raise HTTPException(status_code=403, detail="invalid token")
+    conn = get_connection()
+    devices = rows_to_dicts(conn.execute("SELECT device, last_seen, silent_alerted FROM guard_devices"))
+    components = rows_to_dicts(conn.execute("SELECT device, component, state, changed_at FROM guard_components"))
+    events = rows_to_dicts(conn.execute(
+        "SELECT device, component, state, at FROM guard_events ORDER BY id DESC LIMIT 50"))
+    conn.close()
+    return {"devices": devices, "components": components, "events": events}
+
+
 # ---------- screen time (JpBlocker連携、Part B) ----------
 
 @app.put("/api/screen-time")

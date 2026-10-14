@@ -204,6 +204,31 @@ CREATE TABLE IF NOT EXISTS session_history (
     saved INTEGER NOT NULL DEFAULT 0
 );
 
+-- ブロックの部品(Brave拡張・JpBlockerのユーザー補助等)が手でオフにされていないかの見張り
+-- (2026-10-14)。端末(FocusGuard/JpBlocker)が1分ごとに部品ごとのon/offを送り、前回から
+-- 変わった時だけTelegramで知らせる。時刻はすべてUTC(utc_now_naive)
+CREATE TABLE IF NOT EXISTS guard_components (
+    device TEXT NOT NULL,
+    component TEXT NOT NULL,
+    state TEXT NOT NULL,
+    changed_at TEXT NOT NULL,
+    PRIMARY KEY (device, component)
+);
+-- 端末ごとの最終報告時刻。silent_alerted=1は「連絡が途絶えた」通知を送り済み
+CREATE TABLE IF NOT EXISTS guard_devices (
+    device TEXT PRIMARY KEY,
+    last_seen TEXT NOT NULL,
+    silent_alerted INTEGER NOT NULL DEFAULT 0
+);
+-- on/offが変わった記録(後で美緒や自分が振り返れるように残す)
+CREATE TABLE IF NOT EXISTS guard_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    device TEXT NOT NULL,
+    component TEXT NOT NULL,
+    state TEXT NOT NULL,
+    at TEXT NOT NULL
+);
+
 """
 
 DEFAULT_CATEGORIES = ("英語", "数学", "世界史", "その他")
