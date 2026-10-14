@@ -2374,6 +2374,7 @@ GUARD_COMPONENT_LABELS = {
     "jpblocker_accessibility": "JpBlockerのアプリブロック(ユーザー補助)",
     "jpblocker_device_admin": "JpBlockerの画面ロック(デバイス管理者)",
     "stayfree_accessibility": "StayFree(ユーザー補助)",
+    "jpblocker_dnd_access": "勉強中の通知オフ(JpBlockerのマナーモード権限)",
 }
 # これ以上連絡が無ければ「途絶えた」とみなす。スマホはほぼ常に電源が入っているので短く、
 # 学校のタブレットは週末に丸2日使わないことがあるので長く
