@@ -1079,37 +1079,12 @@ def stack_session_active_preflight():
 # ブロックを効かせるためのフラグ(2026-10-02)。書き込むのはstack_session_*という別キーだけ。
 # 2026-10-16: 「オフ」が届かない/オンと順番が入れ替わると、何も開いていないのに古文が計測中のまま残った
 # (開きっぱなしの復習画面が表に出た瞬間のオンだけが届いた)。Stackは復習中1分ごとにオンを送り直し、
-# STACK_SESSION_LEASEの間それが来なければここで自動で切る(オフが届くことに頼らない)
+# SESSION_HEARTBEAT_LEASEの間それが来なければここで自動で切る(オフが届くことに頼らない)
 @app.post("/api/stack-session/active")
 def stack_session_active(payload: StackSessionActiveSync, token: str | None = None):
     _check_stack_token(token)
     conn = get_connection()
-    if payload.active:
-        now = utc_now_naive().isoformat(sep=" ", timespec="seconds")
-        # 生存連絡(1分ごとのオン)では開始時刻を動かさない。動かすとFocusGuardのバッジの経過時間が毎分0に戻る
-        # (期限切れの判定もここで済ませる。切れていれば下で開始時刻ごと書き直す)
-        already_active, _, _ = _read_session_flag(
-            conn, "stack_session_active", "stack_session_subject", "stack_session_started_at",
-            seen_at_key="stack_session_seen_at", lease=STACK_SESSION_LEASE,
-        )
-        values = [
-            ("stack_session_active", "1"),
-            ("stack_session_subject", payload.subject or ""),
-            ("stack_session_seen_at", now),
-        ]
-        if not already_active:
-            values.append(("stack_session_started_at", now))
-        for key, value in values:
-            conn.execute(
-                "INSERT INTO settings (key, value) VALUES (?, ?) "
-                "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-                (key, value),
-            )
-    else:
-        conn.execute(
-            "DELETE FROM settings WHERE key IN "
-            "('stack_session_active', 'stack_session_subject', 'stack_session_started_at', 'stack_session_seen_at')"
-        )
+    _write_heartbeat_flag(conn, "stack_session", "stack_session_subject", payload.active, payload.subject)
     conn.commit()
     conn.close()
     return JSONResponse(content={"ok": True}, headers=_stack_cors_headers())
@@ -1287,28 +1262,13 @@ def vocab_session_active_preflight():
 # vocab-appのreview/reading/newsモード中、FocusGuard(PC)にもCompass本体のセッションと
 # 同じようにブロック/通知抑制を効かせるためのフラグ(2026-09-02)。書き込むのは
 # vocab_session_*という別キー(session_active等には触らない、上のVocabSessionActiveSync参照)。
+# 2026-10-16: Stackと同じく生存連絡(1分ごとのオン)方式。SESSION_HEARTBEAT_LEASEの間来なければ自動で切る
 @app.post("/api/vocab-session/active")
 def vocab_session_active(payload: VocabSessionActiveSync, token: str | None = None):
     if not VOCAB_APP_TOKEN or token != VOCAB_APP_TOKEN:
         raise HTTPException(status_code=403, detail="invalid token", headers=_vocab_cors_headers())
     conn = get_connection()
-    if payload.active:
-        started_at = utc_now_naive().isoformat(sep=" ", timespec="seconds")
-        for key, value in (
-            ("vocab_session_active", "1"),
-            ("vocab_session_mode", payload.mode or ""),
-            ("vocab_session_started_at", started_at),
-        ):
-            conn.execute(
-                "INSERT INTO settings (key, value) VALUES (?, ?) "
-                "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-                (key, value),
-            )
-    else:
-        conn.execute(
-            "DELETE FROM settings WHERE key IN "
-            "('vocab_session_active', 'vocab_session_mode', 'vocab_session_started_at')"
-        )
+    _write_heartbeat_flag(conn, "vocab_session", "vocab_session_mode", payload.active, payload.mode)
     conn.commit()
     conn.close()
     return JSONResponse(content={"ok": True}, headers=_vocab_cors_headers())
@@ -3649,8 +3609,36 @@ def focus_session_pause(payload: SessionPauseSync):
 # を足して主要因は塞いだが、それでも防げない失敗経路の保険としてここでも自己修復する)。
 # 通常の勉強セッションがこれを超えることはまず無いはずの余裕を持った上限。
 FOCUS_SESSION_MAX_AGE_HOURS = 4
-# Stackの生存連絡(1分ごと)が途絶えてから自動で切るまで。2回続けて取りこぼしても切れない長さ
-STACK_SESSION_LEASE = timedelta(minutes=3)
+# Stack・vocab-appの生存連絡(1分ごと)が途絶えてから自動で切るまで。2回続けて取りこぼしても切れない長さ
+SESSION_HEARTBEAT_LEASE = timedelta(minutes=3)
+
+
+def _read_heartbeat_flag(conn, prefix: str, label_key: str) -> tuple[bool, str | None, str | None]:
+    return _read_session_flag(
+        conn, f"{prefix}_active", label_key, f"{prefix}_started_at",
+        seen_at_key=f"{prefix}_seen_at", lease=SESSION_HEARTBEAT_LEASE,
+    )
+
+
+def _write_heartbeat_flag(conn, prefix: str, label_key: str, active: bool, label: str | None) -> None:
+    """生存連絡方式のフラグ(Stack・vocab-app)を書く。オンのたびに最後の連絡時刻(seen_at)を更新するが、
+    すでに有効な間は開始時刻を動かさない(動かすとFocusGuardのバッジの経過時間が毎分0に戻る)。"""
+    keys = (f"{prefix}_active", label_key, f"{prefix}_started_at", f"{prefix}_seen_at")
+    if not active:
+        conn.execute("DELETE FROM settings WHERE key IN (?, ?, ?, ?)", keys)
+        return
+    now = utc_now_naive().isoformat(sep=" ", timespec="seconds")
+    # 期限切れの判定もここで済ませる(切れていれば開始時刻ごと書き直す)
+    already_active, _, _ = _read_heartbeat_flag(conn, prefix, label_key)
+    values = [(keys[0], "1"), (keys[1], label or ""), (keys[3], now)]
+    if not already_active:
+        values.append((keys[2], now))
+    for key, value in values:
+        conn.execute(
+            "INSERT INTO settings (key, value) VALUES (?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (key, value),
+        )
 
 
 def _read_session_flag(
@@ -3747,17 +3735,12 @@ def _focus_session_status(conn) -> dict:
     # 別フラグ(vocab_session_*, POST /api/vocab-session/active参照)なので、ここでOR条件と
     # して合成しているだけ——Compass側で実際に走っている別科目のセッションを上書きすることはない。
     # pauseの概念自体がまだ無いので常にfalse。
-    vocab_active, _vocab_mode, vocab_started_at = _read_session_flag(
-        conn, "vocab_session_active", "vocab_session_mode", "vocab_session_started_at"
-    )
+    vocab_active, _vocab_mode, vocab_started_at = _read_heartbeat_flag(conn, "vocab_session", "vocab_session_mode")
     if vocab_active:
         return _with_elapsed({"active": True, "subject": "English", "started_at": vocab_started_at, "paused": False, "source": "vocab-app"})
 
     # Stackの復習中(2026-10-02〜)。vocab-appと同じくOR条件で合成するだけ
-    stack_active, stack_subject, stack_started_at = _read_session_flag(
-        conn, "stack_session_active", "stack_session_subject", "stack_session_started_at",
-        seen_at_key="stack_session_seen_at", lease=STACK_SESSION_LEASE,
-    )
+    stack_active, stack_subject, stack_started_at = _read_heartbeat_flag(conn, "stack_session", "stack_session_subject")
     if stack_active:
         return _with_elapsed({"active": True, "subject": stack_subject, "started_at": stack_started_at, "paused": False, "source": "stack"})
 
