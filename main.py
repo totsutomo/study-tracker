@@ -1076,18 +1076,30 @@ def stack_session_active_preflight():
 
 
 # Stackの復習画面を開いている間、FocusGuard(PC)にもCompass本体のセッションと同じように
-# ブロックを効かせるためのフラグ(2026-10-02)。書き込むのはstack_session_*という別キーだけ
+# ブロックを効かせるためのフラグ(2026-10-02)。書き込むのはstack_session_*という別キーだけ。
+# 2026-10-16: 「オフ」が届かない/オンと順番が入れ替わると、何も開いていないのに古文が計測中のまま残った
+# (開きっぱなしの復習画面が表に出た瞬間のオンだけが届いた)。Stackは復習中1分ごとにオンを送り直し、
+# STACK_SESSION_LEASEの間それが来なければここで自動で切る(オフが届くことに頼らない)
 @app.post("/api/stack-session/active")
 def stack_session_active(payload: StackSessionActiveSync, token: str | None = None):
     _check_stack_token(token)
     conn = get_connection()
     if payload.active:
-        started_at = utc_now_naive().isoformat(sep=" ", timespec="seconds")
-        for key, value in (
+        now = utc_now_naive().isoformat(sep=" ", timespec="seconds")
+        # 生存連絡(1分ごとのオン)では開始時刻を動かさない。動かすとFocusGuardのバッジの経過時間が毎分0に戻る
+        # (期限切れの判定もここで済ませる。切れていれば下で開始時刻ごと書き直す)
+        already_active, _, _ = _read_session_flag(
+            conn, "stack_session_active", "stack_session_subject", "stack_session_started_at",
+            seen_at_key="stack_session_seen_at", lease=STACK_SESSION_LEASE,
+        )
+        values = [
             ("stack_session_active", "1"),
             ("stack_session_subject", payload.subject or ""),
-            ("stack_session_started_at", started_at),
-        ):
+            ("stack_session_seen_at", now),
+        ]
+        if not already_active:
+            values.append(("stack_session_started_at", now))
+        for key, value in values:
             conn.execute(
                 "INSERT INTO settings (key, value) VALUES (?, ?) "
                 "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
@@ -1096,7 +1108,7 @@ def stack_session_active(payload: StackSessionActiveSync, token: str | None = No
     else:
         conn.execute(
             "DELETE FROM settings WHERE key IN "
-            "('stack_session_active', 'stack_session_subject', 'stack_session_started_at')"
+            "('stack_session_active', 'stack_session_subject', 'stack_session_started_at', 'stack_session_seen_at')"
         )
     conn.commit()
     conn.close()
@@ -3637,36 +3649,49 @@ def focus_session_pause(payload: SessionPauseSync):
 # を足して主要因は塞いだが、それでも防げない失敗経路の保険としてここでも自己修復する)。
 # 通常の勉強セッションがこれを超えることはまず無いはずの余裕を持った上限。
 FOCUS_SESSION_MAX_AGE_HOURS = 4
+# Stackの生存連絡(1分ごと)が途絶えてから自動で切るまで。2回続けて取りこぼしても切れない長さ
+STACK_SESSION_LEASE = timedelta(minutes=3)
 
 
 def _read_session_flag(
-    conn, active_key: str, label_key: str, started_at_key: str
+    conn, active_key: str, label_key: str, started_at_key: str,
+    seen_at_key: str | None = None, lease: timedelta | None = None,
 ) -> tuple[bool, str | None, str | None]:
     """Reads one (active, label, started_at) triplet from `settings` and applies
     the same staleness auto-heal as before (see FOCUS_SESSION_MAX_AGE_HOURS above):
     a comms failure on the "session ended" call must never leave active=1 stuck
     forever. Returns (False, None, None) when inactive or expired (deleting the
-    stale rows as a side effect), else (True, label, started_at)."""
+    stale rows as a side effect), else (True, label, started_at).
+
+    seen_at_key/lease: for clients that re-send "active" periodically (heartbeat),
+    also expire the flag once the last heartbeat is older than `lease`."""
+    keys = [active_key, label_key, started_at_key] + ([seen_at_key] if seen_at_key else [])
     rows = conn.execute(
-        "SELECT key, value FROM settings WHERE key IN (?, ?, ?)",
-        (active_key, label_key, started_at_key),
+        f"SELECT key, value FROM settings WHERE key IN ({', '.join('?' * len(keys))})",
+        keys,
     ).fetchall()
     values = dict(rows)
     if values.get(active_key) != "1":
         return False, None, None
 
+    now = utc_now_naive()
     started_at = values.get(started_at_key)
     stale = False
     if started_at:
         try:
-            age = utc_now_naive() - datetime.fromisoformat(started_at)
-            stale = age > timedelta(hours=FOCUS_SESSION_MAX_AGE_HOURS)
+            stale = now - datetime.fromisoformat(started_at) > timedelta(hours=FOCUS_SESSION_MAX_AGE_HOURS)
         except ValueError:
             pass
+    if seen_at_key and lease is not None and not stale:
+        seen_at = values.get(seen_at_key) or started_at
+        try:
+            stale = seen_at is None or now - datetime.fromisoformat(seen_at) > lease
+        except ValueError:
+            stale = True
     if stale:
         conn.execute(
-            "DELETE FROM settings WHERE key IN (?, ?, ?)",
-            (active_key, label_key, started_at_key),
+            f"DELETE FROM settings WHERE key IN ({', '.join('?' * len(keys))})",
+            keys,
         )
         conn.commit()
         return False, None, None
@@ -3730,7 +3755,8 @@ def _focus_session_status(conn) -> dict:
 
     # Stackの復習中(2026-10-02〜)。vocab-appと同じくOR条件で合成するだけ
     stack_active, stack_subject, stack_started_at = _read_session_flag(
-        conn, "stack_session_active", "stack_session_subject", "stack_session_started_at"
+        conn, "stack_session_active", "stack_session_subject", "stack_session_started_at",
+        seen_at_key="stack_session_seen_at", lease=STACK_SESSION_LEASE,
     )
     if stack_active:
         return _with_elapsed({"active": True, "subject": stack_subject, "started_at": stack_started_at, "paused": False, "source": "stack"})
