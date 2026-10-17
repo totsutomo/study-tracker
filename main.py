@@ -2604,6 +2604,12 @@ SCREEN_BUDGET_DEFAULT_STUDY_PACKAGES = [
     "Claude.exe",           # Claudeデスクトップアプリ
     "ChatGPT.exe",          # ChatGPTデスクトップアプリ
 ]
+# 「使用」ではないのに前面に出続けるアプリ。保存済みのstudy_packagesの有無にかかわらず常に除外する
+# (2026-10-18。Sleep If U Canが夜間の睡眠モード表示で127分計上され、予算の大半を食っていた)。
+# 勉強アプリと違い緩める理由がないので、猶予つき変更(pending_changes)の対象外にしている。
+SCREEN_BUDGET_ALWAYS_EXCLUDED_PACKAGES = [
+    "droom.sleepIfUCan",    # Sleep If U Can(アラーム)
+]
 
 
 def _read_screen_budget_params(conn) -> dict:
@@ -2612,12 +2618,14 @@ def _read_screen_budget_params(conn) -> dict:
     ).fetchall()
     d = {row[0]: row[1] for row in rows}
     packages_raw = d.get("screen_budget_study_packages")
+    study_packages = json.loads(packages_raw) if packages_raw else list(SCREEN_BUDGET_DEFAULT_STUDY_PACKAGES)
+    study_packages += [p for p in SCREEN_BUDGET_ALWAYS_EXCLUDED_PACKAGES if p not in study_packages]
     return {
         "baseline_minutes": int(d.get("screen_budget_baseline_minutes", SCREEN_BUDGET_DEFAULTS["baseline_minutes"])),
         "study_ratio": float(d.get("screen_budget_study_ratio", SCREEN_BUDGET_DEFAULTS["study_ratio"])),
         "todo_bonus_max": int(d.get("screen_budget_todo_bonus_max", SCREEN_BUDGET_DEFAULTS["todo_bonus_max"])),
         "daily_cap": int(d.get("screen_budget_daily_cap", SCREEN_BUDGET_DEFAULTS["daily_cap"])),
-        "study_packages": json.loads(packages_raw) if packages_raw else list(SCREEN_BUDGET_DEFAULT_STUDY_PACKAGES),
+        "study_packages": study_packages,
     }
 
 
