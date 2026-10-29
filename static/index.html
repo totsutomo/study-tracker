@@ -45,7 +45,7 @@
     <span>Record</span>
     <kbd>S</kbd>
   </button>
-  <button class="tab-btn active" data-tab="tab-todo">
+  <button class="tab-btn has-subs active" data-tab="tab-todo">
     <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor"
          stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
       <line x1="9" y1="6" x2="20" y2="6"/><line x1="9" y1="12" x2="20" y2="12"/><line x1="9" y1="18" x2="20" y2="18"/>
@@ -53,6 +53,10 @@
     </svg>
     <span>ToDo</span>
   </button>
+  <div class="side-subs active" data-parent="tab-todo">
+    <button type="button" class="side-sub-btn active" data-sub="list">List</button>
+    <button type="button" class="side-sub-btn" data-sub="tree">Tree<span class="tree-badge hidden"></span></button>
+  </div>
   <button class="tab-btn" data-tab="tab-calendar">
     <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor"
          stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
@@ -127,8 +131,14 @@
 <main id="app">
 
   <section id="tab-todo" class="tab-panel active">
-    <h2>ToDo</h2>
+    <h2>ToDo<span class="h2-sub" id="todo-h2-sub">› List</span></h2>
+    <!-- 人生ツリー(2026-10-30)。週1回見るだけの画面なので、スマホのタブは増やさずToDoの中に置いた -->
+    <div class="period-toggle mood-subtabs" id="todo-subtabs">
+      <button type="button" class="period-btn active" data-sub="list">List</button>
+      <button type="button" class="period-btn" data-sub="tree">Tree<span class="tree-badge hidden"></span></button>
+    </div>
 
+    <div class="todo-subpanel" data-sub="list">
     <div class="filter-bar">
       <div class="search-input-wrap">
         <svg class="search-input-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
@@ -166,6 +176,11 @@
           <div id="todo-stats"></div>
         </div>
       </div>
+    </div>
+    </div>
+
+    <div class="todo-subpanel hidden" data-sub="tree">
+      <div id="life-tree" class="lt"></div>
     </div>
 
   </section>
@@ -1112,7 +1127,7 @@
     <tr><td><kbd>↑</kbd> / <kbd>↓</kbd> then <kbd>Enter</kbd></td><td>Pick an event / task of the selected day and open it</td></tr>
     <tr><td><kbd>Delete</kbd></td><td>Delete the picked event</td></tr>
     <tr><th colspan="2">Study / Mood</th></tr>
-    <tr><td><kbd>[</kbd> / <kbd>]</kbd></td><td>Previous / next sub-tab (Log · Scores · Insights, Mood · Slacking · Sleep)</td></tr>
+    <tr><td><kbd>[</kbd> / <kbd>]</kbd></td><td>Previous / next sub-tab (List · Tree, Log · Scores · Insights, Mood · Slacking · Sleep)</td></tr>
     <tr><td><kbd>1</kbd>–<kbd>9</kbd> / <kbd>0</kbd></td><td>Log mood (Mood tab and mood questions; <kbd>0</kbd> = 10), then <kbd>←</kbd><kbd>→</kbd><kbd>↑</kbd><kbd>↓</kbd> + <kbd>Enter</kbd> to pick tags, <kbd>Ctrl</kbd>+<kbd>Enter</kbd> = Done (saves)</td></tr>
     <tr><th colspan="2">Anywhere</th></tr>
     <tr><td><kbd>Space</kbd></td><td>Pause / resume the running timer</td></tr>

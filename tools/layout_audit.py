@@ -22,7 +22,8 @@ from playwright.sync_api import sync_playwright
 
 # (タブID, サブタブのセレクタ or None, 表示名)
 VIEWS = [
-    ("tab-todo", None, "ToDo"),  # 長いリスト+右に短い列2本。列の下が空くのは自然なので空き判定はしない
+    ("tab-todo", '.side-sub-btn[data-sub="list"]', "ToDo/List"),  # 長いリスト+右に短い列2本。列の下が空くのは自然なので空き判定はしない
+    ("tab-todo", '.side-sub-btn[data-sub="tree"]', "ToDo/Tree"),  # 人生ツリー(2026-10-30)
     ("tab-calendar", None, "Calendar"),
     ("tab-study", '.side-sub-btn[data-sub="log"]', "Study/Log"),
     ("tab-study", '.side-sub-btn[data-sub="scores"]', "Study/Scores"),
@@ -33,7 +34,7 @@ VIEWS = [
 ]
 
 # 列の長さがそろわないのが自然な画面(数値は表示するがNGにはしない)
-GAP_OK = {"ToDo"}
+GAP_OK = {"ToDo/List"}
 
 MEASURE_JS = """
 ([minCoverage, band]) => {
@@ -94,6 +95,10 @@ def main():
             page.wait_for_load_state("networkidle", timeout=20000)
         except Exception:
             page.wait_for_timeout(3000)
+        # 昨夜の睡眠記録がないと「Good morning」パネルが出てクリックをふさぐ(手元のdata.dbで起きやすい)ので閉じる
+        page.evaluate("""() => { const p = document.getElementById('wake-mood-panel');
+          if (p && !p.classList.contains('hidden')) document.getElementById('wake-mood-close').click(); }""")
+        page.wait_for_timeout(300)
         for tab_id, sub_sel, name in VIEWS:
             if sub_sel:
                 page.click(sub_sel)

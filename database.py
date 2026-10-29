@@ -229,6 +229,34 @@ CREATE TABLE IF NOT EXISTS guard_events (
     at TEXT NOT NULL
 );
 
+-- 人生ツリー(2026-10-30): 目標の階層。parent_idがNULLの行が枝(A〜E)で、codeとlabelはToDoの行に出すラベル用。
+-- kind: achieve(達成型)/maintain(維持型)/explore(探索型)/avoid(やらないこと)。
+-- auto_sourceがある目標は、現在値をCompassの記録・Drillから毎回計算する(main.pyのLIFE_TREE_AUTO_SOURCES)。
+-- todo_matchは「どのToDoがこの目標の分か」の自動判定("category:world,title:ライティング"のようにカンマ区切り)。
+-- 目標の追加・組み替えは画面ではなく、チャットでAIがAPIから行う前提。
+-- (名前がlife_goalsなのは、最初期のMVPの使われていないgoalsテーブル(title, doneだけ)が既存DBに残っているため)
+CREATE TABLE IF NOT EXISTS life_goals (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    parent_id INTEGER,
+    code TEXT,
+    label TEXT,
+    title TEXT NOT NULL,
+    kind TEXT NOT NULL DEFAULT 'achieve',
+    is_main INTEGER NOT NULL DEFAULT 0,
+    deadline TEXT,
+    target_value REAL,
+    current_value REAL,
+    unit TEXT,
+    auto_source TEXT,
+    todo_match TEXT,
+    note TEXT,
+    status TEXT NOT NULL DEFAULT 'active',
+    snooze_until TEXT,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT DEFAULT (datetime('now')),
+    updated_at TEXT DEFAULT (datetime('now'))
+);
+
 """
 
 DEFAULT_CATEGORIES = ("英語", "数学", "世界史", "その他")
@@ -411,6 +439,13 @@ def _migrate(conn):
         conn.execute(
             "UPDATE todos SET show_on_calendar = CASE WHEN COALESCE(recurrence, '') = '' THEN 1 ELSE 0 END"
         )
+    # 人生ツリー(2026-10-30): このToDoがどの目標(life_goals.id)の分か。NULLなら目標側のtodo_matchで自動判定する
+    if "life_goal_id" not in cols:
+        conn.execute("ALTER TABLE todos ADD COLUMN life_goal_id INTEGER")
+    # 「今は動かさない」と決めた目標(と、その下)は、この日まで「手当てが必要」に数えない(2026-10-30)
+    goal_cols = [row[1] for row in conn.execute("PRAGMA table_info(life_goals)").fetchall()]
+    if "snooze_until" not in goal_cols:
+        conn.execute("ALTER TABLE life_goals ADD COLUMN snooze_until TEXT")
     conn.execute("UPDATE todos SET recurrence = 'mon,tue,wed,thu,fri,sat,sun' WHERE recurrence = 'daily'")
     conn.execute("UPDATE todos SET recurrence = 'mon,tue,wed,thu,fri' WHERE recurrence = 'weekdays'")
 

@@ -608,7 +608,7 @@ function renderTodoItem(t, list) {
         <span class="todo-card-dot" style="background:${dotColor}"></span>
         <div class="todo-card-main">
           <span class="todo-card-title" title="${escapeHtml(t.title)}">${priorityLabel}${escapeHtml(t.title)}${noteMark}</span>
-          <span class="todo-card-meta">${t.category || ""} ${dueLabel}${recurLabel}${t.skipped ? " · Skipped" : ""}${countsAsStudyTodo(t) ? "" : " · Not counted"}</span>
+          <span class="todo-card-meta">${t.category || ""} ${dueLabel}${recurLabel}${t.skipped ? " · Skipped" : ""}${countsAsStudyTodo(t) ? "" : " · Not counted"}${lifeGoalChip(t)}</span>
         </div>
         <div class="todo-card-actions">
           ${showReschedule ? `
@@ -679,6 +679,7 @@ function todoGroupOf(t) {
 }
 
 let allTodos = [];
+let lifeTree = null; // /api/life-treeの内容(人生ツリー)。ToDoの行のラベルとTree画面で使う
 let kbSelectedTodoId = null; // ToDoタブでキーボード選択中のtodo(handleTodoKey参照)
 let doneExpanded = false;
 let skippedExpanded = false;
@@ -1406,7 +1407,8 @@ guardedSubmit(document.getElementById("todo-detail-form"), async (e) => {
 function escapeHtml(str) {
   const div = document.createElement("div");
   div.textContent = str;
-  return div.innerHTML;
+  // innerHTMLは<>&しか変えないので、title="${...}"のような属性値に入れても抜け出せないよう引用符も変える
+  return div.innerHTML.replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 }
 
 // ---------- study logs ----------
@@ -7392,6 +7394,8 @@ async function hydrateFromCache() {
     loadSleepActive(),
     loadCalendar({ refreshTodayPanel: false }),
   ]);
+  // 人生ツリーはDrillへの問い合わせを含むので、起動の待ち合わせ(background)には入れず裏で読むだけにする
+  loadLifeTree().catch((err) => console.error("life tree load failed:", err));
 
   // ホーム画面ショートカット(manifest.jsonのshortcuts、2026-10-03)。/?action=slackingで開かれたら、
   // 進行中の記録を確かめてから(同じ通信を共有するので往復は増えない)その場でSlackingを始める
@@ -7423,6 +7427,11 @@ async function hydrateFromCache() {
     history.replaceState(history.state, "", location.pathname + location.search); // タブの履歴は残す
     openBedtimePanel();
   }
+  // 日曜の「人生ツリー点検」ToDoの通知(main.pyのLIFE_TREE_REVIEW_TITLE)は/#treeで開かれる
+  if (location.hash === "#tree") {
+    history.replaceState(history.state, "", location.pathname + location.search);
+    openLifeTree();
+  }
   maybeShowMorningPanel().catch((err) => console.error("morning prompt failed:", err));
 })();
 
@@ -7432,7 +7441,7 @@ async function hydrateFromCache() {
 // PC: サイドバーの字下げサブ項目と、見出し横の「› Log」をサブタブの状態にそろえる(2026-10-04)
 function syncSideSubs(parentTabId, sub, label) {
   document.querySelectorAll(`.side-subs[data-parent="${parentTabId}"] .side-sub-btn`).forEach((b) => b.classList.toggle("active", b.dataset.sub === sub));
-  const h2Sub = document.getElementById(parentTabId === "tab-study" ? "study-h2-sub" : "mood-h2-sub");
+  const h2Sub = document.getElementById({ "tab-study": "study-h2-sub", "tab-mood": "mood-h2-sub", "tab-todo": "todo-h2-sub" }[parentTabId]);
   if (h2Sub && label) h2Sub.textContent = `› ${label}`;
 }
 
@@ -7464,11 +7473,319 @@ document.querySelectorAll("#study-subtabs .period-btn").forEach((b) => {
   b.addEventListener("click", () => switchStudySubtab(b.dataset.sub));
 });
 
+// ToDo: List / Tree(人生ツリー、2026-10-30)。Treeは週1回見るだけなので覚えずに毎回Listから
+function switchTodoSubtab(sub) {
+  document.querySelectorAll("#todo-subtabs .period-btn").forEach((b) => b.classList.toggle("active", b.dataset.sub === sub));
+  syncSideSubs("tab-todo", sub, sub === "tree" ? "Tree" : "List"); // ボタンの文字には数字も入るので名前は直接渡す
+  document.querySelectorAll(".todo-subpanel").forEach((p) => p.classList.toggle("hidden", p.dataset.sub !== sub));
+  // 開いた時に数字(ToDoの件数・自動の現在値)を取り直す。前回分は即座に出る
+  if (sub === "tree") loadLifeTree().catch((err) => console.error("life tree load failed:", err));
+}
+
+document.querySelectorAll("#todo-subtabs .period-btn").forEach((b) => {
+  b.addEventListener("click", () => switchTodoSubtab(b.dataset.sub));
+});
+
+function openLifeTree() {
+  switchTab("tab-todo");
+  switchTodoSubtab("tree");
+}
+
+// ---------- life tree (人生ツリー、2026-10-30) ----------
+// 目標の階層。毎日目に入るのは「Tree」横の数字(手当てが必要な数)とToDoの行の「A 一橋」ラベルだけで、
+// Tree画面は週1回の点検で開く。目標の追加・組み替え・保留はチャットでAIがAPI(/api/life-goals)から行い、
+// この画面でできるのは、自動の数字を持たない達成型の子の目標を「達成」にする(行をタップ)ことだけ。
+// 計画が崩れると一気にやる気をなくしやすい本人向けに、警告は赤ではなく琥珀色で、事実だけを書く
+// (Geminiのレビュー、2026-10-30)。固定の文言は英語、目標の中身(本人・AIが書いたもの)は日本語のまま。
+
+const LT_KIND_ICON = { achieve: "🎯", maintain: "♻", explore: "🔍", avoid: "✕" };
+let lifeTreeChipKey = "";
+
+function lifeTreeIndex() {
+  if (!lifeTree) return null;
+  if (lifeTree._index) return lifeTree._index;
+  const byId = new Map(lifeTree.goals.map((g) => [g.id, g]));
+  const active = lifeTree.goals.filter((g) => g.status === "active");
+  const rules = active.map((g) => [g.id, (g.todo_match || "").split(",").map((part) => {
+    const i = part.indexOf(":");
+    return i < 0 ? null : [part.slice(0, i).trim(), part.slice(i + 1).trim()];
+  }).filter((r) => r && (r[0] === "title" || r[0] === "category") && r[1])]);
+  lifeTree._index = { byId, activeIds: new Set(active.map((g) => g.id)), rules };
+  return lifeTree._index;
+}
+
+// main.pyのmatch_todo_goal()と同じ規則: 明示のlife_goal_id → タイトルの一部一致 → カテゴリー一致
+function matchTodoGoal(t, idx) {
+  if (t.life_goal_id != null && idx.activeIds.has(t.life_goal_id)) return t.life_goal_id;
+  for (const kind of ["title", "category"]) {
+    for (const [goalId, rules] of idx.rules) {
+      for (const [k, v] of rules) {
+        if (k !== kind) continue;
+        if (kind === "title" && (t.title || "").includes(v)) return goalId;
+        if (kind === "category" && t.category === v) return goalId;
+      }
+    }
+  }
+  return null;
+}
+
+function lifeTreeBranchOf(goalId, idx) {
+  let node = idx.byId.get(goalId);
+  const seen = new Set();
+  while (node && node.parent_id != null && idx.byId.has(node.parent_id) && !seen.has(node.id)) {
+    seen.add(node.id);
+    node = idx.byId.get(node.parent_id);
+  }
+  return node;
+}
+
+function lifeGoalChip(t) {
+  const idx = lifeTreeIndex();
+  if (!idx) return "";
+  const goalId = matchTodoGoal(t, idx);
+  const branch = goalId == null ? null : lifeTreeBranchOf(goalId, idx);
+  if (!branch || !branch.code) return "";
+  const text = branch.label ? `${branch.code} ${branch.label}` : branch.code;
+  return `<span class="goal-chip" data-code="${escapeHtml(branch.code)}" title="${escapeHtml(branch.title)}">${escapeHtml(text)}</span>`;
+}
+
+async function loadLifeTree() {
+  await apiCached("/api/life-tree", (data) => {
+    lifeTree = data;
+    updateTreeBadges();
+    renderLifeTree();
+    // ToDoの行のラベルが変わる時だけ一覧を描き直す(起動時に何度も全件を描き直さない)
+    const chipKey = JSON.stringify(data.goals.map((g) => [g.id, g.parent_id, g.code, g.label, g.todo_match, g.status]));
+    if (chipKey !== lifeTreeChipKey) {
+      lifeTreeChipKey = chipKey;
+      renderTodos();
+    }
+  });
+}
+
+function updateTreeBadges() {
+  const n = lifeTree?.attention_count || 0;
+  document.querySelectorAll(".tree-badge").forEach((b) => {
+    b.textContent = n;
+    b.classList.toggle("hidden", n === 0);
+  });
+}
+
+function ltNumber(v) {
+  return Number.isInteger(v) ? String(v) : String(Math.round(v * 10) / 10);
+}
+
+function ltParseDate(s) {
+  const m = (s || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  return m ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])) : null;
+}
+
+function ltDaysLeft(s) {
+  const d = ltParseDate(s);
+  if (!d) return null;
+  const today = ltParseDate(todayStr());
+  return Math.round((d - today) / 86400000);
+}
+
+// "2028-02" → "2028/2"、"2026-11-30" → "11/30 · 31d left"
+function ltDeadline(s) {
+  const m = (s || "").match(/^(\d{4})-(\d{2})(?:-(\d{2}))?$/);
+  if (!m) return s || "";
+  if (!m[3]) return `${m[1]}/${Number(m[2])}`;
+  const left = ltDaysLeft(s);
+  return `${Number(m[2])}/${Number(m[3])}${left === 0 ? " · Due today" : left != null && left > 0 ? ` · ${left}d left` : ""}`;
+}
+
+function ltShortDate(s) {
+  const d = ltParseDate(s);
+  return d ? `${d.getMonth() + 1}/${d.getDate()}` : "";
+}
+
+function ltReviewLabel() {
+  const parts = [];
+  if (lifeTree.last_review) parts.push(`Last review ${ltShortDate(lifeTree.last_review)}`);
+  const r = lifeTree.next_review;
+  if (r) {
+    const day = ltParseDate(r.date).toLocaleDateString("en-US", { weekday: "short" });
+    parts.push(`Next: ${day} ${ltShortDate(r.date)}${r.time ? " " + r.time : ""}`);
+  } else {
+    parts.push("No weekly review set up yet");
+  }
+  return parts.join(" · ");
+}
+
+// 保留中の表示。snooze_untilの当日から警告が戻るので「resumes」と書く。親の保留で止まっている時は自分の日付を出さない
+function ltPausedLabel(g) {
+  return g.snooze_until && g.snooze_until > todayStr() ? `Paused (resumes ${ltShortDate(g.snooze_until)})` : "Paused";
+}
+
+// 期限までに必要なペース(数を積み上げる目標だけ。平均点のような目標には出さない)
+function ltPace(g) {
+  const countable = !g.auto_source || g.auto_source === "world_episode" || g.auto_source.startsWith("drill_books:");
+  const left = ltDaysLeft(g.deadline);
+  if (!countable || g.kind !== "achieve" || g.value == null || !g.target_value || left == null || left <= 0) return "";
+  const remaining = g.target_value - g.value;
+  if (remaining <= 0) return "Reached";
+  // 先に10倍してから割る(0.7*10=7.000000000000001で0.8に切り上がるのを防ぐ)
+  return `${ltNumber(remaining)} to go · ~${ltNumber(Math.ceil((remaining * 10) / left - 1e-9) / 10)}/day`;
+}
+
+function ltRowHtml(g, children, depth) {
+  const unit = escapeHtml(g.unit || "");
+  let val = "";
+  if (g.value != null && g.target_value != null) val = `${ltNumber(g.value)} / ${ltNumber(g.target_value)}${unit}`;
+  else if (g.value != null) val = `${ltNumber(g.value)}${unit}`;
+  else if (g.target_value != null) val = `— / ${ltNumber(g.target_value)}${unit}`;
+  const warn = g.attention.length > 0;
+  const pct = g.kind === "achieve" && g.value != null && g.target_value ? Math.max(0, Math.min(100, (g.value / g.target_value) * 100)) : null;
+  const sub = [
+    g.deadline ? escapeHtml(ltDeadline(g.deadline)) : "",
+    escapeHtml(ltPace(g)),
+    g.note ? escapeHtml(g.note) : "",
+    g.auto_source && g.value == null ? "No data from the source right now" : "",
+  ].filter(Boolean).join(" · ");
+  // 自動の数字を持つ行は、達成/未達成を手で切り替えると数字と食い違うので押せない
+  const clickable = g.kind === "achieve" && !g.auto_source && g.status !== "dropped";
+  const autoTag = g.auto_source ? '<span class="lt-auto">auto</span>' : "";
+  const kids = (children.get(g.id) || []).map((c) => ltRowHtml(c, children, depth + 1)).join("");
+  return `
+    <li class="lt-row${g.status !== "active" ? " done" : ""}${clickable ? " clickable" : ""}" data-goal-id="${g.id}"${depth ? ` style="padding-left:${depth * 14}px"` : ""}>
+      <div class="lt-line"><span>${LT_KIND_ICON[g.kind] || ""} ${escapeHtml(g.title)}${sub ? "" : autoTag}</span>${val ? `<span class="lt-val">${val}</span>` : ""}</div>
+      ${pct != null ? `<div class="lt-bar"><i style="width:${pct.toFixed(1)}%"></i></div>` : ""}
+      ${sub ? `<div class="lt-sub">${sub}${autoTag}</div>` : ""}
+      ${g.paused ? `<div class="lt-sub">${ltPausedLabel(g)}</div>` : ""}
+      ${warn ? `<div class="lt-sub warn">${g.attention.map(escapeHtml).join(" · ")}</div>` : ""}
+    </li>${kids}`;
+}
+
+function ltBranchHtml(g, children) {
+  const kids = children.get(g.id) || [];
+  // 数字もメモも子もない維持型の子(睡眠・体など)は、行にせず丸い札で並べる
+  const isPlain = (c) => c.value == null && c.target_value == null && !c.note && !c.deadline && c.attention.length === 0 && !children.has(c.id);
+  const rows = kids.filter((c) => !isPlain(c));
+  const plain = kids.filter(isPlain);
+  const closed = g.status !== "active";
+  const pill = closed ? (g.status === "done" ? "Done" : "Dropped")
+    : g.paused ? ltPausedLabel(g)
+    : g.is_main ? `Focus${g.deadline ? " · " + ltDeadline(g.deadline) : ""}`
+    : g.kind === "maintain" ? "Maintain"
+    : g.kind === "explore" ? "Explore"
+    : ltDeadline(g.deadline);
+  const pillClass = closed || g.paused ? "" : g.is_main ? " main" : g.kind === "explore" ? " explore" : "";
+  const warn = g.attention.length > 0;
+  const foot = [];
+  if (warn) foot.push(`<div class="lt-foot-line warn">${g.attention.map(escapeHtml).join(" · ")}</div>`);
+  if (g.note) foot.push(`<div class="lt-foot-line">${escapeHtml(g.note)}</div>`);
+  if (g.open_todos > 0) foot.push(`<div class="lt-foot-line">${g.open_todos} open todo${g.open_todos === 1 ? "" : "s"}</div>`);
+  // PCの2列分け(splitBranches)に使う、だいたいの高さ(見出し1行=1.5)
+  const rowWeight = (c) => 1 + (c.kind === "achieve" && c.value != null && c.target_value ? 0.5 : 0)
+    + (c.deadline || c.note ? 0.6 : 0) + (c.attention.length ? 0.6 : 0)
+    + (children.get(c.id) || []).reduce((sum, k) => sum + rowWeight(k), 0);
+  const weight = 1.5 + rows.reduce((sum, c) => sum + rowWeight(c), 0) + (plain.length ? 1.2 : 0) + foot.length * 0.8;
+  return { weight, html: `
+    <div class="lt-branch${warn ? " warn" : ""}${closed ? " closed" : ""}" data-goal-id="${g.id}">
+      <div class="lt-head">${g.code ? `<span class="lt-tag" data-code="${escapeHtml(g.code)}">${escapeHtml(g.code)}</span>` : ""}${LT_KIND_ICON[g.kind] || ""} ${escapeHtml(g.title)}${pill ? `<span class="lt-pill${pillClass}">${escapeHtml(pill)}</span>` : ""}</div>
+      ${rows.length ? `<ul class="lt-rows">${rows.map((c) => ltRowHtml(c, children, 0)).join("")}</ul>` : ""}
+      ${plain.length ? `<div class="lt-keeps">${plain.map((c) => `<span>${escapeHtml(c.title)}</span>`).join("")}</div>` : ""}
+      ${foot.join("")}
+    </div>` };
+}
+
+// PCの2列は、枝の並び順を保ったまま「前半/後半」で左右の高さが一番近くなる所で分ける
+// (スマホでは左列→右列の順に縦に並ぶので、順番が入れ替わらない)
+function splitBranches(cards) {
+  const total = cards.reduce((sum, c) => sum + c.weight, 0);
+  let best = cards.length, bestDiff = Infinity, acc = 0;
+  for (let k = 1; k < cards.length; k++) {
+    acc += cards[k - 1].weight;
+    const diff = Math.abs(total - 2 * acc);
+    if (diff < bestDiff) { bestDiff = diff; best = k; }
+  }
+  return [cards.slice(0, best), cards.slice(best)];
+}
+
+function renderLifeTree() {
+  const el = document.getElementById("life-tree");
+  if (!el || !lifeTree) return;
+  if (lifeTree.goals.length === 0) {
+    el.innerHTML = '<p class="meta">No goals yet. Ask the AI in chat to set up the tree.</p>';
+    return;
+  }
+  const idx = lifeTreeIndex();
+  const children = new Map();
+  lifeTree.goals.forEach((g) => {
+    const parent = g.parent_id != null && idx.byId.has(g.parent_id) ? g.parent_id : null;
+    if (!children.has(parent)) children.set(parent, []);
+    children.get(parent).push(g);
+  });
+  // 達成・中止した枝は後ろへ(並びは/api/life-treeのsort_order順のまま)
+  const tops = (children.get(null) || []).slice().sort((a, b) => (a.status === "active" ? 0 : 1) - (b.status === "active" ? 0 : 1));
+  const cards = tops.filter((g) => g.kind !== "avoid").map((g) => ltBranchHtml(g, children));
+  const avoids = tops.filter((g) => g.kind === "avoid" && g.status === "active");
+  if (avoids.length) {
+    cards.push({
+      weight: 2.7,
+      html: `<div class="lt-branch closed"><div class="lt-head">✕ Not doing</div>
+        <div class="lt-keeps">${avoids.map((g) => `<span>${escapeHtml(g.title)}</span>`).join("")}</div></div>`,
+    });
+  }
+  const [left, right] = splitBranches(cards);
+  // 「手当てが必要」は数だけでなく中身を並べ、タップでその目標へ移動できるようにする(点検を数十秒で終えられるように)
+  const items = lifeTree.goals.flatMap((g) => g.attention.map((reason) => ({ id: g.id, title: g.title, reason })));
+  const star = lifeTree.north_star || {};
+  el.innerHTML = `
+    <div class="lt-alert${items.length ? " warn" : ""}">
+      <div class="lt-alert-head"><b>${items.length ? `Needs attention (${items.length})` : "Nothing needs attention"}</b><span>${escapeHtml(ltReviewLabel())}</span></div>
+      ${items.map((it) => `<button type="button" class="lt-alert-item" data-goal-id="${it.id}"><span>${escapeHtml(it.title)}</span><span>${escapeHtml(it.reason)}</span></button>`).join("")}
+    </div>
+    <div class="lt-star">
+      <div class="lt-star-lab">★ North star</div>
+      <div class="lt-star-text">${star.text ? escapeHtml(star.text) : "Not written yet"}</div>
+      ${star.note ? `<div class="lt-star-note">${escapeHtml(star.note)}</div>` : ""}
+    </div>
+    <div class="lt-cols">
+      <div class="lt-col">${left.map((c) => c.html).join("")}</div>
+      ${right.length ? `<div class="lt-col">${right.map((c) => c.html).join("")}</div>` : ""}
+    </div>
+    <div class="lt-foot">To add or reorganize goals, ask the AI in chat · Numbers update from your records</div>`;
+}
+
+document.getElementById("life-tree").addEventListener("click", async (e) => {
+  // 「手当てが必要」の一覧 → その目標の行(枝なら枝のカード)へ移動して一瞬光らせる
+  const item = e.target.closest(".lt-alert-item");
+  if (item) {
+    const target = document.querySelector(`#life-tree .lt-row[data-goal-id="${item.dataset.goalId}"], #life-tree .lt-branch[data-goal-id="${item.dataset.goalId}"]`);
+    if (target) {
+      target.scrollIntoView({ behavior: "smooth", block: "center" });
+      target.classList.remove("lt-flash");
+      void target.offsetWidth; // 同じ行を続けて押しても光り直すように
+      target.classList.add("lt-flash");
+    }
+    return;
+  }
+  // 自動の数字を持たない達成型の子の目標をタップ → 達成/未達成を切り替える(この画面でできる唯一の変更)
+  const row = e.target.closest(".lt-row.clickable");
+  if (!row || !lifeTree) return;
+  const goal = lifeTree.goals.find((g) => g.id === Number(row.dataset.goalId));
+  if (!goal) return;
+  const toDone = goal.status === "active";
+  if (!confirm(toDone ? `Mark "${goal.title}" as achieved?` : `Mark "${goal.title}" as not achieved?`)) return;
+  try {
+    await api(`/api/life-goals/${goal.id}`, { method: "PUT", body: JSON.stringify({ status: toDone ? "done" : "active" }) });
+  } catch (err) {
+    console.error("life goal update failed:", err);
+    alert("Couldn't save. Check your connection and try again.");
+    return;
+  }
+  await loadLifeTree();
+});
+
 document.querySelectorAll(".side-subs .side-sub-btn").forEach((b) => {
   b.addEventListener("click", () => {
     const parentTabId = b.closest(".side-subs").dataset.parent;
     switchTab(parentTabId);
     if (parentTabId === "tab-study") switchStudySubtab(b.dataset.sub);
+    else if (parentTabId === "tab-todo") switchTodoSubtab(b.dataset.sub);
     else switchMoodSubtab(b.dataset.sub);
   });
 });
@@ -7740,15 +8057,16 @@ function moodPickerForDigitKeys() {
   return null;
 }
 
-// [ / ] でStudy・Moodの中のタブを前後に切り替える(端まで行ったら反対側へ回る)
+// [ / ] でToDo・Study・Moodの中のタブを前後に切り替える(端まで行ったら反対側へ回る)
 function cycleSubtab(delta) {
   const tab = activeTabId();
-  const box = { "tab-study": "study-subtabs", "tab-mood": "mood-subtabs" }[tab];
+  const box = { "tab-study": "study-subtabs", "tab-mood": "mood-subtabs", "tab-todo": "todo-subtabs" }[tab];
   if (!box) return false;
   const btns = [...document.querySelectorAll(`#${box} .period-btn`)];
   const i = Math.max(0, btns.findIndex((b) => b.classList.contains("active")));
   const next = btns[(i + delta + btns.length) % btns.length];
   if (tab === "tab-study") switchStudySubtab(next.dataset.sub);
+  else if (tab === "tab-todo") switchTodoSubtab(next.dataset.sub);
   else switchMoodSubtab(next.dataset.sub);
   return true;
 }
@@ -8101,6 +8419,9 @@ if ("serviceWorker" in navigator) {
   navigator.serviceWorker.addEventListener("message", (event) => {
     if (event.data && event.data.type === "navigate" && event.data.url && event.data.url.includes("#bedtime")) {
       openBedtimePanel();
+    }
+    if (event.data && event.data.type === "navigate" && event.data.url && event.data.url.includes("#tree")) {
+      openLifeTree();
     }
   });
 }

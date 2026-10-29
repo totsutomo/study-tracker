@@ -2725,7 +2725,8 @@ body:has(#tab-calendar.active) {
   }
 
   #study-subtabs,
-  #mood-subtabs {
+  #mood-subtabs,
+  #todo-subtabs {
     display: none;
   }
 
@@ -4320,4 +4321,334 @@ body.quick-open #tabbar {
 .mood-chart-detail {
   font-size: 12px;
   margin: 4px 0 0;
+}
+
+/* ---------- 人生ツリー(ToDo › Tree、2026-10-30) ---------- */
+.todo-subpanel.hidden {
+  display: none;
+}
+
+/* 人生ツリーの警告色。計画が崩れると一気にやる気をなくしやすいので、危険色の赤ではなく琥珀色にする */
+:root {
+  --lt-warn: #e0b25a;
+  --lt-warn-dim: rgba(217, 164, 65, 0.13);
+  --lt-warn-border: rgba(217, 164, 65, 0.5);
+}
+
+/* 「Tree」の横の数字。手当てが必要な時だけ出す */
+.tree-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 17px;
+  height: 17px;
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: var(--lt-warn);
+  color: #1b1f28;
+  font-size: 10.5px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+/* ToDoの行の「A 一橋」ラベル。枝の記号ごとに色を変える */
+.goal-chip {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 4px;
+  padding: 2px 7px;
+  border: 1px solid var(--neutral-flag);
+  border-radius: 999px;
+  background: var(--neutral-flag-dim);
+  color: #aab3c2;
+  font-size: 10.5px;
+  font-weight: 700;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.goal-chip[data-code="A"], .lt-tag[data-code="A"] { color: #9db8f7; border-color: rgba(79, 124, 219, 0.6); background: rgba(79, 124, 219, 0.16); }
+.goal-chip[data-code="B"], .lt-tag[data-code="B"] { color: #86d3aa; border-color: rgba(74, 156, 114, 0.6); background: rgba(74, 156, 114, 0.16); }
+.goal-chip[data-code="C"], .lt-tag[data-code="C"] { color: #c9a3f0; border-color: rgba(160, 110, 220, 0.55); background: rgba(160, 110, 220, 0.15); }
+.goal-chip[data-code="D"], .lt-tag[data-code="D"] { color: #e3c27e; border-color: rgba(217, 164, 65, 0.55); background: rgba(217, 164, 65, 0.14); }
+
+.lt {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.lt-alert {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--card);
+  font-size: 13px;
+}
+
+.lt-alert.warn {
+  border-color: var(--lt-warn-border);
+  background: var(--lt-warn-dim);
+}
+
+.lt-alert.warn b {
+  color: var(--lt-warn);
+}
+
+.lt-alert-head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 4px 10px;
+}
+
+.lt-alert-head span {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+/* 手当てが必要な中身の1行。タップでその目標へ移動する */
+.lt-alert-item {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 2px 10px;
+  width: 100%;
+  padding: 6px 0 0;
+  border: none;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.lt-alert-item span:last-child {
+  color: var(--lt-warn);
+}
+
+/* スマホは名前と理由が1行に収まったり折り返したりでそろわないので、理由は常に2行目に置く */
+@media (max-width: 767px) {
+  .lt-alert-item {
+    flex-direction: column;
+  }
+}
+
+.lt-star {
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: linear-gradient(135deg, rgba(79, 124, 219, 0.2), rgba(74, 156, 114, 0.12));
+}
+
+.lt-star-lab {
+  color: var(--text-muted);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+}
+
+.lt-star-text {
+  margin-top: 5px;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.lt-star-note {
+  margin-top: 4px;
+  color: var(--text-muted);
+  font-size: 11.5px;
+}
+
+.lt-cols {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.lt-col {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.lt-branch {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--card);
+  box-shadow: var(--shadow-card);
+}
+
+.lt-branch.warn {
+  border-color: var(--lt-warn-border);
+}
+
+/* 手当て一覧から飛んできた行を一瞬だけ光らせる */
+.lt-flash {
+  animation: lt-flash 1.4s ease-out;
+}
+
+@keyframes lt-flash {
+  0%, 30% { background: var(--lt-warn-dim); }
+  100% { background: transparent; }
+}
+
+.lt-branch.closed {
+  opacity: 0.6;
+}
+
+.lt-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 11px 12px;
+  font-size: 14.5px;
+  font-weight: 700;
+}
+
+.lt-tag {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: 1px solid var(--neutral-flag);
+  border-radius: 6px;
+  background: var(--neutral-flag-dim);
+  color: #aab3c2;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.lt-pill {
+  flex: none;
+  margin-left: auto;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: var(--neutral-flag-dim);
+  color: #aab3c2;
+  font-size: 10.5px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.lt-pill.main { background: var(--accent-dim); color: #9db8f7; }
+.lt-pill.explore { background: rgba(160, 110, 220, 0.18); color: #c9a3f0; }
+
+.lt-rows {
+  margin: 0;
+  padding: 0 12px;
+  list-style: none;
+}
+
+.lt-row {
+  padding: 9px 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.lt-row.nested {
+  padding-left: 14px;
+}
+
+.lt-row.clickable {
+  cursor: pointer;
+}
+
+.lt-row.done .lt-line > span:first-child {
+  color: var(--text-muted);
+  text-decoration: line-through;
+}
+
+.lt-line {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 13.5px;
+}
+
+.lt-val {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.lt-bar {
+  height: 5px;
+  margin-top: 7px;
+  overflow: hidden;
+  border-radius: 3px;
+  background: var(--card-hover);
+}
+
+.lt-bar i {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  background: var(--accent);
+}
+
+.lt-sub {
+  margin-top: 5px;
+  color: var(--text-muted);
+  font-size: 11.5px;
+}
+
+.lt-sub.warn {
+  color: var(--lt-warn);
+}
+
+.lt-auto {
+  margin-left: 4px;
+  padding: 0 4px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 10px;
+}
+
+.lt-keeps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 0 12px 11px;
+}
+
+.lt-keeps span {
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 12px;
+}
+
+.lt-foot-line {
+  padding: 8px 12px 11px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  color: var(--text-muted);
+  font-size: 11.5px;
+}
+
+.lt-foot-line.warn {
+  color: var(--lt-warn);
+}
+
+.lt-foot {
+  padding: 2px 0 10px;
+  color: var(--text-muted);
+  font-size: 12px;
+  text-align: center;
+}
+
+/* PCは2列(左右の高さがそろうよう、枝の並び順のまま前半/後半に分ける。app.jsのsplitBranches) */
+@media (min-width: 900px) {
+  .lt-cols {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    align-items: start;
+  }
 }

@@ -2,6 +2,7 @@ import calendar
 import csv
 import hashlib
 import html
+import http.client
 import io
 import json
 import os
@@ -167,6 +168,7 @@ class TodoCreate(BaseModel):
     notify_offset_minutes: int | None = None  # None = no notification, 0 = at due time, N = N minutes before
     note: str | None = None
     show_on_calendar: bool | None = None  # None = 自動(単発ならTrue・繰り返しならFalse)
+    life_goal_id: int | None = None  # 人生ツリーの目標(life_goals.id)。None = 目標側のtodo_matchで自動判定
 
 
 def default_show_on_calendar(recurrence: str | None) -> int:
@@ -192,6 +194,7 @@ class TodoUpdate(BaseModel):
     notify_offset_minutes: int | None = None
     note: str | None = None
     show_on_calendar: bool | None = None  # None = 今の値のまま(この項目を知らない古い呼び出し元向け)
+    # 人生ツリーの紐付け(life_goal_id)はここでは変えない。PUT /api/todos/{id}/life-goal で変える
 
 
 class CategoryCreate(BaseModel):
@@ -566,10 +569,11 @@ def create_todo(todo: TodoCreate):
     conn = get_connection()
     cur = conn.execute(
         "INSERT INTO todos (title, category, priority, due_date, due_time, recurrence, notify_offset_minutes, note, "
-        "show_on_calendar) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "show_on_calendar, life_goal_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (todo.title, todo.category, todo.priority, todo.due_date, todo.due_time, todo.recurrence,
          todo.notify_offset_minutes if todo.due_time else None, todo.note,
-         default_show_on_calendar(todo.recurrence) if todo.show_on_calendar is None else int(todo.show_on_calendar)),
+         default_show_on_calendar(todo.recurrence) if todo.show_on_calendar is None else int(todo.show_on_calendar),
+         todo.life_goal_id),
     )
     conn.commit()
     new_id = cur.lastrowid
@@ -631,13 +635,13 @@ def toggle_todo(todo_id: int):
     conn = get_connection()
     row = conn.execute(
         "SELECT done, title, category, priority, due_date, due_time, recurrence, notify_offset_minutes, note, "
-        "show_on_calendar FROM todos WHERE id = ?",
+        "show_on_calendar, life_goal_id FROM todos WHERE id = ?",
         (todo_id,),
     ).fetchone()
     if row is None:
         conn.close()
         raise HTTPException(status_code=404, detail="todo not found")
-    done, title, category, priority, due_date, due_time, recurrence, notify_offset_minutes, note, show_on_calendar = row
+    done, title, category, priority, due_date, due_time, recurrence, notify_offset_minutes, note, show_on_calendar, goal_id = row
     new_done = 0 if done else 1
     completed_at = "datetime('now')" if new_done else "NULL"
     # done/skippedは同時に立たない状態にする(完了させたら「スキップ扱い」は解除する)
@@ -651,9 +655,9 @@ def toggle_todo(todo_id: int):
         if next_due is not None:
             conn.execute(
                 "INSERT INTO todos (title, category, priority, due_date, due_time, recurrence, notify_offset_minutes, note, "
-                "show_on_calendar) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "show_on_calendar, life_goal_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (title, category, priority, next_due.isoformat(), due_time, recurrence, notify_offset_minutes, note,
-                 default_show_on_calendar(recurrence) if show_on_calendar is None else show_on_calendar),
+                 default_show_on_calendar(recurrence) if show_on_calendar is None else show_on_calendar, goal_id),
             )
     conn.commit()
     conn.close()
@@ -667,13 +671,13 @@ def skip_todo(todo_id: int, reason: str | None = None):
     conn = get_connection()
     row = conn.execute(
         "SELECT skipped, title, category, priority, due_date, due_time, recurrence, notify_offset_minutes, note, "
-        "show_on_calendar FROM todos WHERE id = ?",
+        "show_on_calendar, life_goal_id FROM todos WHERE id = ?",
         (todo_id,),
     ).fetchone()
     if row is None:
         conn.close()
         raise HTTPException(status_code=404, detail="todo not found")
-    skipped, title, category, priority, due_date, due_time, recurrence, notify_offset_minutes, note, show_on_calendar = row
+    skipped, title, category, priority, due_date, due_time, recurrence, notify_offset_minutes, note, show_on_calendar, goal_id = row
     new_skipped = 0 if skipped else 1
     skipped_at = "datetime('now')" if new_skipped else "NULL"
     # done/skippedは同時に立たない状態にする(スキップしたら「完了扱い」は解除する)
@@ -689,9 +693,9 @@ def skip_todo(todo_id: int, reason: str | None = None):
         if next_due is not None:
             conn.execute(
                 "INSERT INTO todos (title, category, priority, due_date, due_time, recurrence, notify_offset_minutes, note, "
-                "show_on_calendar) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "show_on_calendar, life_goal_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (title, category, priority, next_due.isoformat(), due_time, recurrence, notify_offset_minutes, note,
-                 default_show_on_calendar(recurrence) if show_on_calendar is None else show_on_calendar),
+                 default_show_on_calendar(recurrence) if show_on_calendar is None else show_on_calendar, goal_id),
             )
     conn.commit()
     conn.close()
@@ -702,6 +706,425 @@ def skip_todo(todo_id: int, reason: str | None = None):
 def delete_todo(todo_id: int):
     conn = get_connection()
     conn.execute("DELETE FROM todos WHERE id = ?", (todo_id,))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+class TodoGoalUpdate(BaseModel):
+    life_goal_id: int | None = None  # None = 明示の紐付けを外す(目標側のtodo_matchで自動判定に戻る)
+
+
+@app.put("/api/todos/{todo_id}/life-goal")
+def update_todo_goal(todo_id: int, payload: TodoGoalUpdate):
+    conn = get_connection()
+    if conn.execute("SELECT id FROM todos WHERE id = ?", (todo_id,)).fetchone() is None:
+        conn.close()
+        raise HTTPException(status_code=404, detail="todo not found")
+    if payload.life_goal_id is not None and conn.execute("SELECT id FROM life_goals WHERE id = ?", (payload.life_goal_id,)).fetchone() is None:
+        conn.close()
+        raise HTTPException(status_code=404, detail="goal not found")
+    conn.execute("UPDATE todos SET life_goal_id = ? WHERE id = ?", (payload.life_goal_id, todo_id))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+# ---------- life tree (人生ツリー, 2026-10-30) ----------
+# 目標の階層(life_goalsテーブル)。とっつーは週1回ToDoタブの「Tree」で見るだけで、目標の追加・組み替えは
+# チャットでAIがこのAPIから行う。現在値は自動で取れるものをCompassの記録・Drillから毎回計算し、
+# 手当てが必要なもの(枝の下にToDoが無い・記録が止まっている・急に減った・期限切れ)を数えて
+# 「Tree」の横に赤い数字で出す(あまり開かない画面なので、用がある時だけ目に入るようにする)。
+
+GOAL_KINDS = ("achieve", "maintain", "explore", "avoid")
+GOAL_STATUSES = ("active", "done", "dropped")
+LIFE_TREE_STALE_DAYS = 14  # 自動の数字がこの日数より長く動いていなければ「止まっている」
+LIFE_TREE_DROP_RATIO = 0.7  # 直近28日の時間が、その前の28日のこの割合を下回ったら「減っている」
+LIFE_TREE_REVIEW_TITLE = "人生ツリー点検"  # このタイトルで始まるToDoの通知は、タップでTreeを開く
+# auto_sourceに書ける値。minutes_28dは科目名(world/math/English/kobun等)、drill_booksはDrillの本の
+# タイトルの一部をカンマ区切りで続ける(例: "drill_books:数学Ⅱ,数学B,数学C")
+LIFE_TREE_AUTO_SOURCES = {
+    "world_episode": "完了した「世界史<番号>」ToDoの最大の番号",
+    "writing_avg5": "一橋ライティングの直近5回のoverall平均",
+    "minutes_28d:": "その科目の直近28日の勉強時間(h)。前の28日と比べる",
+    "drill_books:": "Drillで1回以上解いた問題数(本ごとの合計。EXERCISE・統計を含む概算)",
+}
+DRILL_OVERVIEW_CACHE_SECONDS = 600
+DRILL_OVERVIEW_FAILURE_SECONDS = 60
+_drill_overview_cache: dict[str, tuple[float, dict | None]] = {}
+GOAL_DEADLINE_RE = re.compile(r"^\d{4}-\d{2}(-\d{2})?$")
+GOAL_CODE_RE = re.compile(r"^[A-Z0-9]{1,3}$")
+GOAL_NOT_NULL_FIELDS = ("title", "kind", "status", "sort_order", "is_main")
+
+
+def _validate_auto_source(value: str | None) -> None:
+    if not value:
+        return
+    for key in LIFE_TREE_AUTO_SOURCES:
+        if value == key and not key.endswith(":"):
+            return
+        if key.endswith(":") and value.startswith(key) and value[len(key):].strip():  # ":"の後ろが空はだめ
+            return
+    raise HTTPException(status_code=422, detail=f"auto_source must be one of {list(LIFE_TREE_AUTO_SOURCES)}")
+
+
+class GoalCreate(BaseModel):
+    title: str
+    parent_id: int | None = None
+    code: str | None = None  # 枝の記号(A〜E)。ToDoの行のラベルに使う
+    label: str | None = None  # ラベルの短い名前(例: "一橋")
+    kind: str = "achieve"
+    is_main: bool = False
+    deadline: str | None = None  # "2028-02"や"2026-11-30"。YYYY-MM-DDの時だけ期限切れを判定する
+    target_value: float | None = None
+    current_value: float | None = None  # 手で入れる現在値(auto_sourceがある時はそちらが優先)
+    unit: str | None = None
+    auto_source: str | None = None
+    todo_match: str | None = None
+    note: str | None = None
+    status: str = "active"
+    snooze_until: str | None = None  # "YYYY-MM-DD"。この日まで(と、下の目標も)「手当てが必要」に数えない
+    sort_order: int = 0
+
+
+class GoalUpdate(BaseModel):
+    # 送った項目だけ変える(AIが「現在値だけ直す」「親だけ付け替える」をしやすいように)
+    title: str | None = None
+    parent_id: int | None = None
+    code: str | None = None
+    label: str | None = None
+    kind: str | None = None
+    is_main: bool | None = None
+    deadline: str | None = None
+    target_value: float | None = None
+    current_value: float | None = None
+    unit: str | None = None
+    auto_source: str | None = None
+    todo_match: str | None = None
+    note: str | None = None
+    status: str | None = None
+    snooze_until: str | None = None
+    sort_order: int | None = None
+
+
+class NorthStarUpdate(BaseModel):
+    text: str | None = None
+    note: str | None = None
+
+
+def _todo_match_rules(text: str | None) -> list[tuple[str, str]]:
+    rules = []
+    for part in (text or "").split(","):
+        key, _, value = part.partition(":")
+        if key.strip() in ("category", "title") and value.strip():
+            rules.append((key.strip(), value.strip()))
+    return rules
+
+
+def match_todo_goal(todo: dict, goal_rules: list[tuple[int, list[tuple[str, str]]]], goal_ids: set[int]) -> int | None:
+    """ToDoがどの目標の分か。明示のlife_goal_idが最優先、次にタイトルの一部一致、最後にカテゴリー一致。
+    app.jsのmatchTodoGoal()と同じ規則(ToDoの行のラベルはそちらで出す)。"""
+    if todo.get("life_goal_id") in goal_ids:
+        return todo["life_goal_id"]
+    for kind in ("title", "category"):
+        for goal_id, rules in goal_rules:
+            for rule_kind, value in rules:
+                if rule_kind != kind:
+                    continue
+                if kind == "title" and value in (todo.get("title") or ""):
+                    return goal_id
+                if kind == "category" and todo.get("category") == value:
+                    return goal_id
+    return None
+
+
+def _drill_overview() -> dict | None:
+    today = nz_today().isoformat()
+    now = time.time()
+    cached = _drill_overview_cache.get(today)
+    if cached and now - cached[0] <= (DRILL_OVERVIEW_CACHE_SECONDS if cached[1] is not None else DRILL_OVERVIEW_FAILURE_SECONDS):
+        return cached[1]
+    try:
+        with urllib.request.urlopen(f"{DRILL_API_ORIGIN}/api/stats/overview?date={today}", timeout=8) as res:
+            value = json.loads(res.read().decode("utf-8"))
+        if not isinstance(value, dict):
+            value = None
+    except (OSError, ValueError, http.client.HTTPException):  # URLError・タイムアウト・接続リセットはOSErrorの仲間
+        value = None  # Drillが落ちていても人生ツリー全体は出す(数学の数字だけ空になる)
+    _drill_overview_cache.clear()
+    _drill_overview_cache[today] = (now, value)
+    return value
+
+
+def _utc_text_to_nz_date(text: str | None) -> str | None:
+    """completed_at等(SQLiteのdatetime('now')=UTC)を、NZの日付"YYYY-MM-DD"にする。"""
+    if not text:
+        return None
+    try:
+        return datetime.fromisoformat(text).replace(tzinfo=timezone.utc).astimezone(NZ_TZ).date().isoformat()
+    except ValueError:
+        return text[:10]
+
+
+def _life_tree_auto_values(conn, sources: set[str], done_rows: list[tuple]) -> dict[str, dict]:
+    """auto_sourceごとの現在値。使われている種類の分だけ問い合わせる(NZ→東京Tursoは1往復約0.3秒のため)。
+    done_rowsは完了した「世界史…」「人生ツリー点検…」ToDoの(title, completed_at)。"""
+    out: dict[str, dict] = {}
+    if "world_episode" in sources:
+        best = None
+        for title, completed_at in done_rows:
+            m = re.fullmatch(r"世界史\s*(\d+)", (title or "").strip())
+            if m and (best is None or int(m.group(1)) > best[0]):
+                best = (int(m.group(1)), completed_at)
+        if best:
+            out["world_episode"] = {"value": best[0], "last_activity": _utc_text_to_nz_date(best[1])}
+    if "writing_avg5" in sources:
+        rows = conn.execute(
+            "SELECT date, overall FROM hitotsubashi_writing_scores ORDER BY date DESC, session DESC LIMIT 5"
+        ).fetchall()
+        if rows:
+            out["writing_avg5"] = {"value": round(sum(r[1] for r in rows) / len(rows), 1), "last_activity": rows[0][0]}
+    minute_sources = [s for s in sources if s.startswith("minutes_28d:")]
+    if minute_sources:
+        current_start = nz_day_bound(offset_days=-27)
+        rows = conn.execute(
+            "SELECT subject, SUM(CASE WHEN logged_at >= ? THEN minutes ELSE 0 END), "
+            "SUM(CASE WHEN logged_at < ? THEN minutes ELSE 0 END) "
+            "FROM study_logs WHERE logged_at >= ? GROUP BY subject",
+            (current_start, current_start, nz_day_bound(offset_days=-55)),
+        ).fetchall()
+        totals: dict[str, list[int]] = {}
+        for subject, cur_min, prev_min in rows:
+            t = totals.setdefault(SUBJECT_ALIASES.get(subject, subject), [0, 0])
+            t[0] += cur_min or 0
+            t[1] += prev_min or 0
+        for source in minute_sources:
+            cur_min, prev_min = totals.get(source.split(":", 1)[1].strip(), [0, 0])
+            out[source] = {"value": round(cur_min / 60, 1), "prev_value": round(prev_min / 60, 1)}
+    drill_sources = [s for s in sources if s.startswith("drill_books:")]
+    if drill_sources:
+        overview = _drill_overview()
+        for source in drill_sources:
+            if overview is None:
+                continue
+            names = [n.strip() for n in source.split(":", 1)[1].split(",") if n.strip()]
+            out[source] = {"value": sum(
+                b.get("attempted_problems") or 0 for b in overview.get("books", [])
+                if any(n in (b.get("title") or "") for n in names)
+            )}
+    return out
+
+
+def _life_tree_attention(goal: dict, is_branch: bool, today: date) -> list[str]:
+    # 「手当てが必要」の理由。本人を責める言い方にならないよう、事実(最後の記録日・前の期間の数字)だけを書く
+    if goal["status"] != "active" or goal["kind"] == "avoid" or goal["paused"]:
+        return []
+    reasons = []
+    if is_branch and goal["kind"] in ("achieve", "explore") and goal["open_todos"] == 0:
+        reasons.append("No open todos")
+    if goal.get("last_activity"):
+        try:
+            last = date.fromisoformat(goal["last_activity"])
+            idle = (today - last).days
+        except ValueError:
+            idle = 0
+        if idle > LIFE_TREE_STALE_DAYS:
+            reasons.append(f"Last entry {last.month}/{last.day} ({idle} days ago)")
+    prev, value = goal.get("prev_value"), goal.get("value")
+    if prev and value is not None and prev >= 1 and value < prev * LIFE_TREE_DROP_RATIO:
+        reasons.append(f"Last 28 days: {value:g}h (prev {prev:g}h)")
+    if goal.get("deadline") and len(goal["deadline"]) == 10:
+        try:
+            deadline = date.fromisoformat(goal["deadline"])
+            if deadline < today:
+                reasons.append(f"Past deadline ({deadline.month}/{deadline.day})")
+        except ValueError:
+            pass
+    return reasons
+
+
+@app.get("/api/life-tree")
+def get_life_tree():
+    today = nz_today()
+    conn = get_connection()
+    goals = rows_to_dicts(conn.execute("SELECT * FROM life_goals ORDER BY sort_order, id"))
+    north = dict(conn.execute(
+        "SELECT key, value FROM settings WHERE key IN ('life_tree_north_star', 'life_tree_north_star_note')"
+    ).fetchall())
+    open_todos = rows_to_dicts(conn.execute(
+        "SELECT id, title, category, life_goal_id, due_date, due_time FROM todos "
+        "WHERE done = 0 AND COALESCE(skipped, 0) = 0 AND (due_date IS NULL OR due_date >= ?)",
+        (today.isoformat(),),
+    ))
+    done_rows = conn.execute(
+        "SELECT title, completed_at FROM todos WHERE done = 1 AND (title LIKE '世界史%' OR title LIKE ?)",
+        (LIFE_TREE_REVIEW_TITLE + "%",),
+    ).fetchall()
+    auto = _life_tree_auto_values(conn, {g["auto_source"] for g in goals if g["auto_source"]}, done_rows)
+    conn.close()
+    last_review = max(
+        (_utc_text_to_nz_date(c) for t, c in done_rows if (t or "").startswith(LIFE_TREE_REVIEW_TITLE) and c),
+        default=None,
+    )
+
+    by_id = {g["id"]: g for g in goals}
+    active_ids = {g["id"] for g in goals if g["status"] == "active"}
+    goal_rules = [(g["id"], _todo_match_rules(g["todo_match"])) for g in goals if g["id"] in active_ids]
+    direct_counts: dict[int, int] = {}
+    for todo in open_todos:
+        goal_id = match_todo_goal(todo, goal_rules, active_ids)
+        if goal_id is not None:
+            direct_counts[goal_id] = direct_counts.get(goal_id, 0) + 1
+    for g in goals:
+        g["open_todos"] = 0
+    for goal_id, count in direct_counts.items():
+        seen = set()
+        node = by_id.get(goal_id)
+        while node is not None and node["id"] not in seen:  # 親をたどって枝まで足す(循環していても止まる)
+            seen.add(node["id"])
+            node["open_todos"] += count
+            node = by_id.get(node["parent_id"])
+
+    def snoozed(goal: dict) -> bool:
+        return bool(goal["snooze_until"]) and goal["snooze_until"] > today.isoformat()
+
+    attention_count = 0
+    for g in goals:
+        node, seen, g["paused"] = g, set(), False
+        while node is not None and node["id"] not in seen:
+            seen.add(node["id"])
+            if snoozed(node):
+                g["paused"] = True
+                break
+            node = by_id.get(node["parent_id"])
+        computed = auto.get(g["auto_source"]) if g["auto_source"] else None
+        g["value"] = computed["value"] if computed else g["current_value"]
+        g["prev_value"] = computed.get("prev_value") if computed else None
+        g["last_activity"] = computed.get("last_activity") if computed else None
+        g["attention"] = _life_tree_attention(g, g["parent_id"] not in by_id, today)
+        attention_count += len(g["attention"])
+
+    review = sorted(
+        (t for t in open_todos if (t["title"] or "").startswith(LIFE_TREE_REVIEW_TITLE) and t["due_date"]),
+        key=lambda t: (t["due_date"], t["due_time"] or ""),
+    )
+    return {
+        "north_star": {"text": north.get("life_tree_north_star"), "note": north.get("life_tree_north_star_note")},
+        "next_review": {"date": review[0]["due_date"], "time": review[0]["due_time"]} if review else None,
+        "last_review": last_review,
+        "attention_count": attention_count,
+        "goals": goals,
+    }
+
+
+def _check_goal_fields(conn, fields: dict, goal_id: int | None = None) -> None:
+    if "kind" in fields and fields["kind"] not in GOAL_KINDS:
+        raise HTTPException(status_code=422, detail=f"kind must be one of {GOAL_KINDS}")
+    if "status" in fields and fields["status"] not in GOAL_STATUSES:
+        raise HTTPException(status_code=422, detail=f"status must be one of {GOAL_STATUSES}")
+    if "auto_source" in fields:
+        _validate_auto_source(fields["auto_source"])
+    if fields.get("deadline") and not GOAL_DEADLINE_RE.match(fields["deadline"]):
+        raise HTTPException(status_code=422, detail="deadline must be YYYY-MM or YYYY-MM-DD")
+    if fields.get("snooze_until") and not re.match(r"^\d{4}-\d{2}-\d{2}$", fields["snooze_until"]):
+        raise HTTPException(status_code=422, detail="snooze_until must be YYYY-MM-DD")
+    if fields.get("code") and not GOAL_CODE_RE.match(fields["code"]):
+        raise HTTPException(status_code=422, detail="code must be 1-3 uppercase letters/digits (e.g. A)")
+    for part in (fields.get("todo_match") or "").split(","):
+        if not part.strip():
+            continue
+        key, sep, value = part.partition(":")
+        if not sep or key.strip() not in ("category", "title") or not value.strip():
+            raise HTTPException(status_code=422, detail=f"todo_match part '{part.strip()}' must be category:<name> or title:<text>")
+    parent_id = fields.get("parent_id")
+    if parent_id is None:
+        return
+    parents = dict(conn.execute("SELECT id, parent_id FROM life_goals").fetchall())
+    if parent_id not in parents:
+        raise HTTPException(status_code=404, detail="parent goal not found")
+    node = parent_id
+    while node is not None:  # 自分の子孫の下へは移せない(循環を防ぐ)
+        if node == goal_id:
+            raise HTTPException(status_code=422, detail="parent_id would create a cycle")
+        node = parents.get(node)
+
+
+@app.post("/api/life-goals")
+def create_goal(goal: GoalCreate):
+    fields = goal.model_dump()
+    conn = get_connection()
+    try:
+        _check_goal_fields(conn, fields)
+    except HTTPException:
+        conn.close()
+        raise
+    fields["is_main"] = int(fields["is_main"])
+    cols = list(fields)
+    cur = conn.execute(
+        f"INSERT INTO life_goals ({', '.join(cols)}) VALUES ({', '.join('?' for _ in cols)})",
+        tuple(fields[c] for c in cols),
+    )
+    conn.commit()
+    new_id = cur.lastrowid
+    conn.close()
+    return {"id": new_id}
+
+
+@app.put("/api/life-goals/{goal_id}")
+def update_goal(goal_id: int, goal: GoalUpdate):
+    fields = goal.model_dump(exclude_unset=True)
+    if not fields:
+        raise HTTPException(status_code=422, detail="nothing to update")
+    nulls = [c for c in GOAL_NOT_NULL_FIELDS if c in fields and fields[c] is None]
+    if nulls:
+        raise HTTPException(status_code=422, detail=f"{', '.join(nulls)} cannot be null")
+    conn = get_connection()
+    if conn.execute("SELECT id FROM life_goals WHERE id = ?", (goal_id,)).fetchone() is None:
+        conn.close()
+        raise HTTPException(status_code=404, detail="goal not found")
+    try:
+        _check_goal_fields(conn, fields, goal_id)
+    except HTTPException:
+        conn.close()
+        raise
+    if "is_main" in fields:
+        fields["is_main"] = int(bool(fields["is_main"]))
+    conn.execute(
+        f"UPDATE life_goals SET {', '.join(f'{c} = ?' for c in fields)}, updated_at = datetime('now') WHERE id = ?",
+        (*fields.values(), goal_id),
+    )
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+@app.delete("/api/life-goals/{goal_id}")
+def delete_goal(goal_id: int):
+    conn = get_connection()
+    row = conn.execute("SELECT parent_id FROM life_goals WHERE id = ?", (goal_id,)).fetchone()
+    if row is None:
+        conn.close()
+        raise HTTPException(status_code=404, detail="goal not found")
+    # 子の目標は1つ上へ繰り上げ、明示で紐付いていたToDoは自動判定に戻す(どちらも消さない)
+    conn.execute("UPDATE life_goals SET parent_id = ? WHERE parent_id = ?", (row[0], goal_id))
+    conn.execute("UPDATE todos SET life_goal_id = NULL WHERE life_goal_id = ?", (goal_id,))
+    conn.execute("DELETE FROM life_goals WHERE id = ?", (goal_id,))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+@app.put("/api/life-tree/north-star")
+def update_north_star(payload: NorthStarUpdate):
+    conn = get_connection()
+    for key, value in (("life_tree_north_star", payload.text), ("life_tree_north_star_note", payload.note)):
+        if value is None:
+            conn.execute("DELETE FROM settings WHERE key = ?", (key,))
+        else:
+            conn.execute(
+                "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                (key, value),
+            )
     conn.commit()
     conn.close()
     return {"ok": True}
@@ -3894,11 +4317,15 @@ def push_check(token: str | None = None):
         due_dt = datetime.fromisoformat(f"{todo['due_date']}T{todo['due_time']}")
         notify_at = due_dt - timedelta(minutes=todo["notify_offset_minutes"])
         if notify_at <= now:
-            sent = _send_push_to_all(conn, {
+            payload = {
                 "title": "Task due",
                 "body": todo["title"],
                 "tag": f"todo-{todo['id']}",
-            })
+            }
+            # 週1回の人生ツリー点検は、タップでToDoタブのTreeを直接開く(あまり開かない画面なので入口まで運ぶ)
+            if (todo["title"] or "").startswith(LIFE_TREE_REVIEW_TITLE):
+                payload["url"] = "/#tree"
+            sent = _send_push_to_all(conn, payload)
             sent_count += sent
             if sent > 0:
                 conn.execute("UPDATE todos SET notified_at = datetime('now') WHERE id = ?", (todo["id"],))
@@ -4148,9 +4575,13 @@ def export_data():
     todos = rows_to_dicts(
         conn.execute(
             "SELECT id, title, category, priority, done, created_at, completed_at, "
-            "due_date, due_time, recurrence, note, skipped, skipped_at FROM todos ORDER BY id"
+            "due_date, due_time, recurrence, note, skipped, skipped_at, life_goal_id FROM todos ORDER BY id"
         )
     )
+    life_goals = rows_to_dicts(conn.execute("SELECT * FROM life_goals ORDER BY id"))
+    life_tree_settings = rows_to_dicts(conn.execute(
+        "SELECT key, value FROM settings WHERE key IN ('life_tree_north_star', 'life_tree_north_star_note')"
+    ))
     study_logs = rows_to_dicts(
         conn.execute(
             "SELECT id, subject, minutes, note, logged_at, start_trigger FROM study_logs ORDER BY id"
@@ -4162,6 +4593,8 @@ def export_data():
     with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
         zf.writestr("todos.csv", _rows_to_csv_bytes(todos))
         zf.writestr("study_logs.csv", _rows_to_csv_bytes(study_logs))
+        zf.writestr("life_goals.csv", _rows_to_csv_bytes(life_goals))
+        zf.writestr("life_tree_settings.csv", _rows_to_csv_bytes(life_tree_settings))
     zip_buf.seek(0)
 
     filename = f"compass-export-{datetime.now().strftime('%Y%m%d')}.zip"
