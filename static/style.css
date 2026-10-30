@@ -159,7 +159,11 @@ body {
   align-items: stretch;
   background: var(--card);
   border-bottom: 1px solid var(--border);
-  --hud-mono: "Cascadia Mono", "SF Mono", ui-monospace, Consolas, "Roboto Mono", monospace;
+  /* スクロールしても画面上端に残す(2026-10-31)。親の.app-main-colが縦に伸びているのでstickyが効く */
+  position: sticky;
+  top: env(safe-area-inset-top, 0px);
+  z-index: 20; /* 本文のカードより上、ボトムシート(30)・⚡オーバーレイ(26)より下 */
+  --hud-mono:"Cascadia Mono", "SF Mono", ui-monospace, Consolas, "Roboto Mono", monospace;
 }
 
 /* 中身が全部非表示の日は帯ごと消す */
