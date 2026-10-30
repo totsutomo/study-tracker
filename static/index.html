@@ -89,6 +89,7 @@
     <button type="button" class="side-sub-btn active" data-sub="mood">Mood</button>
     <button type="button" class="side-sub-btn" data-sub="slacking">Slacking</button>
     <button type="button" class="side-sub-btn" data-sub="sleep">Sleep</button>
+    <button type="button" class="side-sub-btn" data-sub="workout">Workout</button>
   </div>
 </nav>
 <div class="app-main-col">
@@ -518,6 +519,7 @@
       <button type="button" class="period-btn active" data-sub="mood">Mood</button>
       <button type="button" class="period-btn" data-sub="slacking">Slacking</button>
       <button type="button" class="period-btn" data-sub="sleep">Sleep</button>
+      <button type="button" class="period-btn" data-sub="workout">Workout</button>
     </div>
 
     <div class="mood-subpanel" data-sub="mood">
@@ -623,6 +625,32 @@
     <p class="meta">While you're asleep, your phone stays locked until this time.</p>
     <h3 id="sleep-log-header">History</h3>
     <ul id="sleep-log-list" class="list"></ul>
+    </div>
+    </div>
+    </div>
+    <!-- Workout(2026-10-31): ワークアウトアプリの記録を読むだけの画面。記録の正本はあちら(workout-three-delta.vercel.app)。
+         運動しなかった翌日はScreen予算が2割減る(main.pyの_workout_penalty)ので、その予告もここに出す -->
+    <div class="mood-subpanel hidden" data-sub="workout">
+    <div id="wo-status" class="wo-status hidden"></div>
+    <div class="stats-header wo-stats">
+      <div class="stat-cell"><span class="stat-label">Total days</span><span class="stat-value" id="wo-stat-total"></span></div>
+      <div class="stat-cell"><span class="stat-label">Last 7 days</span><span class="stat-value" id="wo-stat-week"></span></div>
+      <div class="stat-cell"><span class="stat-label">Last workout</span><span class="stat-value" id="wo-stat-last"></span></div>
+    </div>
+    <div class="wo-grid">
+    <div class="wo-col">
+    <div class="goal-progress-card">
+      <div class="goal-progress-row"><span>Last 28 days</span><span class="meta wo-legend"><i class="wo-dot wo-full"></i>full <i class="wo-dot wo-mini"></i>mini</span></div>
+      <div id="wo-cal" class="wo-cal"></div>
+    </div>
+    <div class="goal-progress-card wo-body-card">
+      <div class="goal-progress-row"><span>Body</span><span class="meta">monthly</span></div>
+      <div id="wo-body"></div>
+    </div>
+    </div>
+    <div class="goal-progress-card">
+      <div class="goal-progress-row"><span>Reps per workout</span><span class="meta">last 14 workouts</span></div>
+      <div id="wo-reps"></div>
     </div>
     </div>
     </div>

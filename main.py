@@ -743,27 +743,82 @@ WORKOUT_API_ORIGIN = os.environ.get("WORKOUT_API_ORIGIN", "https://workout-three
 WORKOUT_READ_TOKEN = os.environ.get("WORKOUT_READ_TOKEN")  # ワークアウトのREAD_TOKENSの「tom:」より後ろ
 WORKOUT_CACHE_SECONDS = 60
 WORKOUT_TIMEOUT_S = 4  # 起動直後に呼ぶので、Drill(15秒)より短くして画面を待たせない
-_workout_cache: dict = {"at": 0.0, "dates": None}
+WORKOUT_FAIL_RETRY_SECONDS = 30  # 読めなかった直後は再試行を待たせる(端末の予算確認が毎回4秒待たされないように)
+_workout_cache: dict = {"at": 0.0, "summary": None, "failed_at": 0.0}
+
+# 運動しなかった翌日のスマホ予算ペナルティ(2026-10-31)。
+# 「昨日の運動が0日、かつ直近7日の運動日数が4日未満」のときだけ、翌日の予算合計を2割減らす。
+# 週4日できていれば休んでも罰なし(ワークアウトの成功基準は週3〜4日)。今日やれば明日は元に戻る。
+# 最小版(2分)も運動日に数える。ワークアウトを読めない間・最初の運動記録がまだ無い間は減らさない。
+WORKOUT_PENALTY_FACTOR = 0.8
+WORKOUT_PENALTY_WEEK_TARGET = 4
 
 
-def _workout_dates(fresh: bool) -> set[str] | None:
-    """ワークアウトで運動した日(新しい方から最大60日)。読めなかった時はNone。
-    Noneは「わからない」であって「やらなかった」ではない(教訓251)。呼ぶ側はスキップも済みにもしない"""
+def _workout_summary(fresh: bool) -> dict | None:
+    """ワークアウトの/api/summary(累計・運動日・回数・体の記録)。読めなかった時はNone。
+    Noneは「わからない」であって「やらなかった」ではない(教訓251)。呼ぶ側はスキップも済みも罰もしない"""
+    if not WORKOUT_READ_TOKEN:
+        return None
     now = time.time()
-    if not fresh and _workout_cache["dates"] is not None and now - _workout_cache["at"] <= WORKOUT_CACHE_SECONDS:
-        return _workout_cache["dates"]
+    if not fresh and _workout_cache["summary"] is not None and now - _workout_cache["at"] <= WORKOUT_CACHE_SECONDS:
+        return _workout_cache["summary"]
+    if not fresh and now - _workout_cache["failed_at"] <= WORKOUT_FAIL_RETRY_SECONDS:
+        return None
     req = urllib.request.Request(
         f"{WORKOUT_API_ORIGIN}/api/summary", headers={"Authorization": f"Bearer {WORKOUT_READ_TOKEN}"}
     )
     try:
         with urllib.request.urlopen(req, timeout=WORKOUT_TIMEOUT_S) as res:
             value = json.loads(res.read().decode("utf-8"))
-        dates = {d for d in value["recent_dates"] if isinstance(d, str)}
+        recent = [d for d in value["recent_dates"] if isinstance(d, str)]
+        summary = {
+            "total_days": int(value["total_days"]),
+            "last_date": value.get("last_date"),
+            "recent_dates": recent,
+            "days": [d for d in value.get("days", []) if isinstance(d, dict)],
+            "body": [b for b in value.get("body", []) if isinstance(b, dict)],
+        }
     except (urllib.error.URLError, TimeoutError, ValueError, KeyError, TypeError, http.client.HTTPException) as e:
         print(f"[workout] summary unreachable: {e}")
+        _workout_cache["failed_at"] = now
         return None
-    _workout_cache.update(at=now, dates=dates)
-    return dates
+    _workout_cache.update(at=now, summary=summary, failed_at=0.0)
+    return summary
+
+
+def _workout_dates(fresh: bool) -> set[str] | None:
+    """ワークアウトで運動した日(新しい方から最大60日)。読めなかった時はNone"""
+    summary = _workout_summary(fresh)
+    return None if summary is None else set(summary["recent_dates"])
+
+
+def _workout_first_date(summary: dict) -> str | None:
+    """最初に運動した日。直近60日より前に始めていた場合は、十分古い日付を返す(罰は有効)"""
+    if summary["total_days"] > len(summary["recent_dates"]):
+        return "0000-00-00"
+    return min(summary["recent_dates"]) if summary["recent_dates"] else None
+
+
+def _workout_penalty(summary: dict | None, date_str: str, assume_skipped: str | None = None) -> dict:
+    """予算日date_strの予算にワークアウトの罰がかかるか。applied=Trueなら予算が2割減る(reasonは理由)。
+    assume_skipped: その日は運動しなかったものとして数える(「今日やらないと明日どうなるか」の予告用)"""
+    if summary is None:
+        return {"applied": False, "reason": "unknown"}
+    first = _workout_first_date(summary)
+    dates = set(summary["recent_dates"])
+    if assume_skipped:
+        dates.discard(assume_skipped)
+    day = date.fromisoformat(date_str)
+    yesterday = (day - timedelta(days=1)).isoformat()
+    week_days = sum(1 for i in range(1, 8) if (day - timedelta(days=i)).isoformat() in dates)
+    base = {"week_days": week_days, "week_target": WORKOUT_PENALTY_WEEK_TARGET, "factor": WORKOUT_PENALTY_FACTOR}
+    if first is None or first > yesterday:
+        return {**base, "applied": False, "reason": "not_started"}
+    if yesterday in dates:
+        return {**base, "applied": False, "reason": "worked_out"}
+    if week_days >= WORKOUT_PENALTY_WEEK_TARGET:
+        return {**base, "applied": False, "reason": "weekly_ok"}
+    return {**base, "applied": True, "reason": "missed"}
 
 
 @app.post("/api/workout/sync")
@@ -800,6 +855,31 @@ def workout_sync(fresh: bool = False):
     conn.commit()
     conn.close()
     return {"configured": True, "ok": True, "done_ids": done_ids}
+
+
+@app.get("/api/workout/summary")
+def workout_summary(date: str, fresh: bool = False):
+    """Compassの「Workout」カード用。dateは予算日(3時区切り、screen-budgetと同じ)。
+    penalty_today: 今日の予算にかかっている罰。penalty_if_skip_today: 今日運動しなかった場合の明日の罰。
+    ok=False: ワークアウトに確かめられなかった(未設定ならconfigured=False)"""
+    if not WORKOUT_READ_TOKEN:
+        return {"configured": False, "ok": False}
+    summary = _workout_summary(fresh)
+    if summary is None:
+        return {"configured": True, "ok": False}
+    try:
+        today = datetime.strptime(date, "%Y-%m-%d").date()
+    except ValueError:
+        raise HTTPException(status_code=400, detail="date must be YYYY-MM-DD")
+    tomorrow = (today + timedelta(days=1)).isoformat()
+    return {
+        "configured": True,
+        "ok": True,
+        **summary,
+        "today_done": date in summary["recent_dates"],
+        "penalty_today": _workout_penalty(summary, date),
+        "penalty_if_skip_today": _workout_penalty(summary, tomorrow, assume_skipped=date),
+    }
 
 
 class TodoGoalUpdate(BaseModel):
@@ -3281,6 +3361,10 @@ def _compute_screen_budget_status(conn, date: str) -> dict:
     study_bonus = round(study_minutes * params["study_ratio"])
     todo_bonus = round(params["todo_bonus_max"] * todo_rate)
     budget = min(params["baseline_minutes"] + study_bonus + todo_bonus, params["daily_cap"])
+    workout_penalty = _workout_penalty(_workout_summary(False), date)
+    if workout_penalty["applied"]:
+        workout_penalty["minutes_removed"] = budget - round(budget * WORKOUT_PENALTY_FACTOR)
+        budget -= workout_penalty["minutes_removed"]
     consumed_by_device = {device: minutes for device, minutes in by_device_rows}
     consumed = sum(consumed_by_device.values())
 
@@ -3307,6 +3391,7 @@ def _compute_screen_budget_status(conn, date: str) -> dict:
             "todo_bonus_minutes": todo_bonus,
             "daily_cap": params["daily_cap"],
             "capped": (params["baseline_minutes"] + study_bonus + todo_bonus) > params["daily_cap"],
+            "workout_penalty": workout_penalty,
         },
         "study_packages": params["study_packages"],
         "discarded_sessions": {"today": discarded_today, "last_7_days": discarded_7d},

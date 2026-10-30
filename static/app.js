@@ -3265,8 +3265,12 @@ function renderScreenBudget(s) {
 
   // 帯の中では幅が限られるので端末別の内訳はツールチップ(title)に回す
   label.innerHTML = remaining > 0 ? `${remaining}<small> min left</small>` : "Used up";
+  // ワークアウトをしなかった翌日は予算が2割減る(2026-10-31)。理由を帯に出す
+  const woPenalty = s.breakdown?.workout_penalty;
+  if (woPenalty?.applied) label.innerHTML += `<small> · -20% no workout</small>`;
   document.getElementById("screen-budget-banner-ratio").textContent = `${s.consumed_minutes}/${s.budget_minutes}`;
   banner.title = `Screen time today${deviceText}`;
+  if (woPenalty?.applied) banner.title += `\nBudget cut by ${woPenalty.minutes_removed} min: no workout yesterday and under ${woPenalty.week_target} days in the last 7`;
   fill.style.width = `${Math.min(100, Math.max(0, (s.consumed_minutes / s.budget_minutes) * 100))}%`;
 
   // 記録されずに終わったセッション(Discard・放置)を直近7日分だけ出す(2026-10-14)。
@@ -3283,6 +3287,120 @@ function renderScreenBudget(s) {
   banner.classList.remove("hidden");
   banner.classList.toggle("exhausted", remaining <= 0);
   banner.classList.toggle("low", remaining > 0 && remaining <= s.budget_minutes * 0.2);
+}
+
+// ---------- Workout (2026-10-31) ----------
+// ワークアウトアプリの記録を読むだけ(正本はあちら)。/api/workout/summaryがCompass側で
+// 「今日やらないと明日の予算が下がるか」まで計算して返す。罰のルールはmain.pyの_workout_penaltyが正
+const WORKOUT_EXERCISE_LABEL = {
+  squat: "Squat",
+  knee_pushup: "Knee push-up",
+  glute_bridge: "Hip lift",
+  plank: "Plank (sec)",
+  pushup: "Push-up",
+  lunge: "Lunge",
+  calf_raise: "Calf raise",
+};
+const WORKOUT_CAL_DAYS = 28;
+
+async function loadWorkout() {
+  try {
+    await apiCached(`/api/workout/summary?date=${screenBudgetDateStr()}`, renderWorkout);
+  } catch (e) {
+    // 一時的な通信失敗は前回の表示を維持する
+  }
+}
+
+function addDaysStr(dateStr, delta) {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, d + delta)).toISOString().slice(0, 10);
+}
+
+function workoutStatusText(w) {
+  if (!w.configured) return { cls: "", html: "Workout isn't linked yet: the read key hasn't been set on the server." };
+  if (!w.ok) return { cls: "", html: "Couldn't reach the Workout app. That is not the same as no workout; the budget isn't cut while it's unreachable." };
+  const skip = w.penalty_if_skip_today;
+  if (w.today_done) return { cls: "ok", html: "<b>Done today.</b> Tomorrow's Screen budget is not affected." };
+  if (w.penalty_today?.reason === "not_started" && skip.reason === "not_started") {
+    return { cls: "", html: "No workout recorded yet. The Screen budget penalty starts the day after your first workout (the 2-min mini counts)." };
+  }
+  if (skip.applied) {
+    return { cls: "warn", html: `<b>Do a workout today</b> (the 2-min mini counts), otherwise tomorrow's Screen budget drops 20%.<br><span class="meta">It applies when you did 0 yesterday and fewer than ${skip.week_target} days in the last 7.</span>` };
+  }
+  return { cls: "ok", html: `<b>No workout yet today.</b> Tomorrow's budget is safe either way (${skip.week_days}/${skip.week_target} days in the last 7), but a workout keeps it that way.` };
+}
+
+function workoutTrendHtml(days) {
+  // days: 新しい順。直近14回の運動日を古い→新しいで棒にする。種目ごとに最大値で高さをそろえる
+  const recent = days.slice(0, 14).reverse();
+  const ids = [];
+  recent.forEach((d) => Object.keys(d.totals || {}).forEach((id) => { if (!ids.includes(id)) ids.push(id); }));
+  if (!ids.length) return `<p class="meta">No reps recorded yet.</p>`;
+  return ids
+    .map((id) => {
+      const vals = recent.map((d) => d.totals?.[id] || 0);
+      const max = Math.max(...vals, 1);
+      const latest = [...vals].reverse().find((v) => v > 0) ?? 0;
+      const bars = vals.map((v) => `<i style="height:${Math.max(v ? 8 : 2, Math.round((v / max) * 36))}px" class="${v ? "" : "empty"}"></i>`).join("");
+      return `<div class="wo-rep-row"><span class="wo-rep-name">${escapeHtml(WORKOUT_EXERCISE_LABEL[id] || id)}</span><span class="wo-rep-bars">${bars}</span><span class="wo-rep-latest">${latest}</span></div>`;
+    })
+    .join("");
+}
+
+function workoutBodyHtml(body) {
+  if (!body?.length) return `<p class="meta">No body records yet. Add one in the Workout app (about once a month).</p>`;
+  const asc = [...body].reverse();
+  const line = (key, label, unit) => {
+    const pts = asc.filter((b) => typeof b[key] === "number");
+    if (!pts.length) return "";
+    const first = pts[0][key];
+    const last = pts.at(-1)[key];
+    let svg = "";
+    if (pts.length >= 2) {
+      const min = Math.min(...pts.map((p) => p[key]));
+      const max = Math.max(...pts.map((p) => p[key]));
+      const span = max - min || 1;
+      const points = pts.map((p, i) => `${(i / (pts.length - 1)) * 200 + 4},${34 - ((p[key] - min) / span) * 28}`).join(" ");
+      svg = `<svg viewBox="0 0 208 40" class="wo-spark"><polyline fill="none" stroke="var(--accent)" stroke-width="2" points="${points}"/></svg>`;
+    }
+    const diff = pts.length >= 2 ? ` <span class="meta">(${last - first > 0 ? "+" : ""}${(last - first).toFixed(1)})</span>` : "";
+    return `<div class="wo-body-row"><span class="wo-rep-name">${label}</span>${svg}<span class="wo-body-val">${last} ${unit}${diff}</span></div>`;
+  };
+  return line("weight", "Weight", "kg") + line("waist", "Waist", "cm") + `<p class="meta">Latest: ${escapeHtml(body[0].date)}</p>`;
+}
+
+function renderWorkout(w) {
+  if (!w) return;
+  const status = document.getElementById("wo-status");
+  const st = workoutStatusText(w);
+  status.className = `wo-status ${st.cls}`;
+  status.innerHTML = st.html;
+  const stats = ["wo-stat-total", "wo-stat-week", "wo-stat-last"].map((id) => document.getElementById(id));
+  if (!w.ok) {
+    stats.forEach((el) => (el.textContent = "–"));
+    ["wo-cal", "wo-reps", "wo-body"].forEach((id) => (document.getElementById(id).innerHTML = ""));
+    return;
+  }
+  const today = screenBudgetDateStr();
+  const done = new Set(w.recent_dates);
+  const byDate = Object.fromEntries((w.days || []).map((d) => [d.date, d]));
+  let week = 0;
+  for (let i = 0; i < 7; i++) if (done.has(addDaysStr(today, -i))) week++;
+  stats[0].textContent = w.total_days;
+  stats[1].textContent = `${week} / 4`;
+  const gap = w.last_date ? Math.round((Date.parse(today) - Date.parse(w.last_date)) / 86400000) : null;
+  stats[2].textContent = gap === null ? "–" : gap <= 0 ? "Today" : gap === 1 ? "Yesterday" : `${gap} days ago`;
+
+  // 草: 28日を7列(週)×4行の小さな四角で
+  let cal = "";
+  for (let i = WORKOUT_CAL_DAYS - 1; i >= 0; i--) {
+    const d = addDaysStr(today, -i);
+    const rec = byDate[d];
+    cal += `<i class="${rec ? (rec.mode === "full" ? "wo-full" : "wo-mini") : ""}" title="${d}${rec ? ` · ${rec.mode}` : ""}"></i>`;
+  }
+  document.getElementById("wo-cal").innerHTML = cal;
+  document.getElementById("wo-reps").innerHTML = workoutTrendHtml(w.days || []);
+  document.getElementById("wo-body").innerHTML = workoutBodyHtml(w.body);
 }
 
 // ---------- mood (2026-10-03 ボタン再設計) ----------
@@ -7449,6 +7567,7 @@ async function hydrateFromCache() {
     loadHourlyChart(),
     loadGoalProgress(),
     loadScreenBudget(),
+    loadWorkout(),
     loadScoresTab(),
     loadStudyDrivers(),
     loadActivationActive(),
@@ -7515,6 +7634,7 @@ function switchMoodSubtab(sub) {
   document.querySelectorAll("#mood-subtabs .period-btn").forEach((b) => b.classList.toggle("active", b.dataset.sub === sub));
   syncSideSubs("tab-mood", sub, document.querySelector(`#mood-subtabs .period-btn[data-sub="${sub}"]`)?.textContent);
   document.querySelectorAll(".mood-subpanel").forEach((p) => p.classList.toggle("hidden", p.dataset.sub !== sub));
+  if (sub === "workout") loadWorkout();
   try {
     localStorage.setItem("moodSubtab", sub);
   } catch {

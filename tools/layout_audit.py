@@ -31,6 +31,7 @@ VIEWS = [
     ("tab-mood", '.side-sub-btn[data-sub="mood"]', "Mood/Mood"),
     ("tab-mood", '.side-sub-btn[data-sub="slacking"]', "Mood/Slacking"),
     ("tab-mood", '.side-sub-btn[data-sub="sleep"]', "Mood/Sleep"),
+    ("tab-mood", '.side-sub-btn[data-sub="workout"]', "Mood/Workout"),  # 2026-10-31
 ]
 
 # 列の長さがそろわないのが自然な画面(数値は表示するがNGにはしない)
