@@ -448,6 +448,14 @@ function computeReschedule(t, kind) {
 // toggle_todo/skip_todo参照)。楽観的に即時反映し、繰り返しToDoを完了/スキップした時だけ
 // (次回分が1件増えるため)裏でloadTodos()を呼んで拾う。それ以外は再取得しない。
 async function toggleTodoDone(t) {
+  // ワークアウトのToDoは記録から自動で済みになる。チェック欄・スワイプ・Xのどれからでも、手では切り替えずに
+  // ワークアウトを開く(手で付けると、ワークアウト側の累計日数とずれるため)
+  if (isWorkoutTodo(t)) {
+    renderTodos(); // スワイプで横に動かした行を元に戻す
+    if (t.done) showToast("Checked automatically from your Workout log");
+    else openWorkoutApp();
+    return;
+  }
   const prev = { done: t.done, completed_at: t.completed_at, skipped: t.skipped, skipped_at: t.skipped_at };
   await optimistic(
     () => {
@@ -568,7 +576,8 @@ async function rescheduleTodo(t, kind) {
 }
 
 function canReschedule(t) {
-  return !t.done && !t.skipped && t.due_date && (isOverdue(t) || t.due_date === todayStr());
+  // 毎日のワークアウトToDoは後ろ倒ししない(時刻を付けるとその時刻で期限切れになり、明日へ送ると今日の分が消える)
+  return !t.done && !t.skipped && t.due_date && (isOverdue(t) || t.due_date === todayStr()) && !isWorkoutTodo(t);
 }
 
 function renderTodoItem(t, list) {
@@ -608,7 +617,7 @@ function renderTodoItem(t, list) {
         <span class="todo-card-dot" style="background:${dotColor}"></span>
         <div class="todo-card-main">
           <span class="todo-card-title" title="${escapeHtml(t.title)}">${priorityLabel}${escapeHtml(t.title)}${noteMark}</span>
-          <span class="todo-card-meta">${t.category || ""} ${dueLabel}${recurLabel}${t.skipped ? " · Skipped" : ""}${countsAsStudyTodo(t) ? "" : " · Not counted"}${lifeGoalChip(t)}</span>
+          <span class="todo-card-meta">${t.category || ""} ${dueLabel}${recurLabel}${t.skipped ? " · Skipped" : ""}${countsAsStudyTodo(t) ? "" : " · Not counted"}${isWorkoutTodo(t) && !t.done && !t.skipped ? " · Auto-checked by Workout" : ""}${lifeGoalChip(t)}</span>
         </div>
         <div class="todo-card-actions">
           ${showReschedule ? `
@@ -618,7 +627,7 @@ function renderTodoItem(t, list) {
               <button type="button" class="reschedule-btn" data-kind="tomorrow">Tomorrow</button>
             </div>
           ` : ""}
-          ${!t.done && !t.skipped && t.category ? `<button class="play-btn" title="Start recording">${ICONS.play}</button>` : ""}
+          ${!t.done && !t.skipped && t.category && !isWorkoutTodo(t) ? `<button class="play-btn" title="Start recording">${ICONS.play}</button>` : ""}
           ${!t.done ? `<button class="skip-btn" title="${t.skipped ? "Unskip" : "Skip (don't carry over, keep record)"}">${ICONS.skip}</button>` : ""}
           <button class="delete-btn" title="Delete">${ICONS.trash}</button>
         </div>
@@ -742,7 +751,8 @@ function renderTodos() {
     groupsEl.innerHTML = "<p class='meta'>No matching tasks</p>";
   }
 
-  const deferCandidates = [...groups.overdue, ...groups.today].filter((t) => t.priority !== "high");
+  // 毎日のワークアウトToDoは明日へ送らない(送ると、このボタンが他のToDoが無い日も毎日出てしまう)
+  const deferCandidates = [...groups.overdue, ...groups.today].filter((t) => t.priority !== "high" && !isWorkoutTodo(t));
   const deferBtn = document.getElementById("defer-today-btn");
   deferBtn.classList.toggle("hidden", deferCandidates.length === 0);
   deferBtn.onclick = async () => {
@@ -771,18 +781,66 @@ async function loadTodos() {
   renderTodos();
 }
 
+// ---- ワークアウト連携(2026-10-30) ----
+// 毎日の「ワークアウト(2分〜)」ToDoは、ワークアウトアプリの記録で自動で済みになる(main.pyのworkout_sync)。
+// 計画: Vault アプリ開発/Compass/2026-10-30_CompassのToDoにワークアウトを出す計画.md
+const WORKOUT_TODO_TITLE = "ワークアウト(2分〜)"; // main.pyのWORKOUT_TODO_TITLEと同じ
+const WORKOUT_APP_URL = "https://workout-three-delta.vercel.app/";
+function isWorkoutTodo(t) {
+  return t.title === WORKOUT_TODO_TITLE;
+}
+function openWorkoutApp() {
+  window.open(WORKOUT_APP_URL, "_blank", "noopener");
+}
+
+// 未完了のワークアウトToDoがあれば、ワークアウトの記録と照らして済みにする。済みになった分があれば
+// 次回分の行も増えているので取り直す。戻り値はサーバーの応答(通信できなければnull)
+async function syncWorkoutTodos({ fresh = false } = {}) {
+  if (!allTodos.some((t) => t.id != null && isWorkoutTodo(t) && !t.done && !t.skipped)) return null;
+  let r;
+  try {
+    r = await api(`/api/workout/sync${fresh ? "?fresh=1" : ""}`, { method: "POST" });
+  } catch (err) {
+    console.error("workout sync failed:", err);
+    return null;
+  }
+  if (r.done_ids.length) {
+    await loadTodos();
+    loadLifeTree().catch(() => {});
+  }
+  return r;
+}
+
+// 画面に戻ってきた時は、1分のキャッシュを使わずにすぐ確かめる。ワークアウトをホーム画面のアイコンから
+// 直接開いてやった場合も、戻った直後に済みにするため(未完了のワークアウトToDoがある時だけ通信する)
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") syncWorkoutTodos({ fresh: true });
+});
+
 // 期限(due_date/due_time)を過ぎても未完了・未スキップのまま残っているToDoは、次にアプリを
 // 開いた時に警告した上で自動的にスキップ扱いにする(いつまでも一覧に残り続けて埋もれるのを防ぐ)。
 // isOverdue()は既にdone/skippedを除外しているので、ここでの対象はまだ手つかずの期限切れのみ。
+// ワークアウトのToDoは例外: 警告を出さずに黙ってスキップする(休んだ翌日に失敗を見せない)。また、
+// オフラインで記録して後から同期された日を「やらなかった」にしないよう、スキップの前にキャッシュなしで
+// ワークアウトに確かめ直し、確かめられなかった時は今回はスキップしない(次に開いた時にもう一度)。
 // 戻り値はスキップした件数(呼び出し元が他の表示を取り直すかの判断に使う)
 async function autoSkipOverdueTodos() {
-  const overdue = allTodos.filter((t) => t.id != null && !t.done && !t.skipped && isOverdue(t));
+  const overdueOf = () => allTodos.filter((t) => t.id != null && !t.done && !t.skipped && isOverdue(t));
+  let quiet = [];
+  if (overdueOf().some(isWorkoutTodo)) {
+    const r = await syncWorkoutTodos({ fresh: true }); // 記録があった日の分は、ここで済みになって一覧から外れる
+    if (r && (r.ok || !r.configured)) quiet = overdueOf().filter(isWorkoutTodo);
+  }
+  const loud = overdueOf().filter((t) => !isWorkoutTodo(t));
+  const overdue = [...loud, ...quiet];
   if (overdue.length === 0) return 0;
-  alert(
-    overdue.length === 1
-      ? `期限切れのためスキップしました:\n・${overdue[0].title}`
-      : `期限切れのため${overdue.length}件をスキップしました:\n${overdue.map((t) => `・${t.title}`).join("\n")}`
-  );
+  if (loud.length) {
+    alert(
+      loud.length === 1
+        ? `期限切れのためスキップしました:\n・${loud[0].title}`
+        : `期限切れのため${loud.length}件をスキップしました:\n${loud.map((t) => `・${t.title}`).join("\n")}`
+    );
+  }
   let anyRecurring = false;
   await Promise.allSettled(
     overdue.map((t) =>
@@ -6383,6 +6441,13 @@ function renderCalDayDetail() {
     `;
     li.querySelector("input").addEventListener("click", async (e) => {
       e.stopPropagation();
+      // ワークアウトのToDoは、ここでも手では済みにしない(toggleTodoDoneと同じ扱い)
+      if (isWorkoutTodo(t)) {
+        e.preventDefault();
+        if (t.done) showToast("Checked automatically from your Workout log");
+        else openWorkoutApp();
+        return;
+      }
       const checkbox = e.currentTarget;
       const prevDone = t.done;
       t.done = t.done ? 0 : 1;
@@ -7417,6 +7482,7 @@ async function hydrateFromCache() {
   if (await autoSkipOverdueTodos()) {
     background.then(() => loadCalendar());
   }
+  syncWorkoutTodos(); // 今日のワークアウトToDo(期限切れの分は上で確かめ済み)
 
   const backgroundResults = await background;
   backgroundResults.filter((r) => r.status === "rejected").forEach((r) => console.error("init load failed:", r.reason));

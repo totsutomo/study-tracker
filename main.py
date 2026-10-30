@@ -650,18 +650,33 @@ def toggle_todo(todo_id: int):
         f"UPDATE todos SET done = ?, completed_at = {completed_at}{skipped_clause} WHERE id = ?",
         (new_done, todo_id),
     )
-    if new_done and recurrence:
-        next_due = next_due_after_close(due_date, recurrence)
-        if next_due is not None:
-            conn.execute(
-                "INSERT INTO todos (title, category, priority, due_date, due_time, recurrence, notify_offset_minutes, note, "
-                "show_on_calendar, life_goal_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (title, category, priority, next_due.isoformat(), due_time, recurrence, notify_offset_minutes, note,
-                 default_show_on_calendar(recurrence) if show_on_calendar is None else show_on_calendar, goal_id),
-            )
+    if new_done:
+        _insert_next_occurrence(conn, row[1:])
     conn.commit()
     conn.close()
     return {"id": todo_id, "done": bool(new_done)}
+
+
+# toggle_todo/skip_todo/workout_syncのSELECTと同じ並び(done/skippedの次から)
+_NEXT_OCCURRENCE_COLUMNS = (
+    "title, category, priority, due_date, due_time, recurrence, notify_offset_minutes, note, show_on_calendar, life_goal_id"
+)
+
+
+def _insert_next_occurrence(conn, fields) -> None:
+    """繰り返しToDoを閉じた(完了/スキップ)時に、次回分の1件を作る。繰り返しでなければ何もしない"""
+    title, category, priority, due_date, due_time, recurrence, notify_offset_minutes, note, show_on_calendar, goal_id = fields
+    if not recurrence:
+        return
+    next_due = next_due_after_close(due_date, recurrence)
+    if next_due is None:
+        return
+    conn.execute(
+        "INSERT INTO todos (title, category, priority, due_date, due_time, recurrence, notify_offset_minutes, note, "
+        "show_on_calendar, life_goal_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (title, category, priority, next_due.isoformat(), due_time, recurrence, notify_offset_minutes, note,
+         default_show_on_calendar(recurrence) if show_on_calendar is None else show_on_calendar, goal_id),
+    )
 
 
 @app.post("/api/todos/{todo_id}/skip")
@@ -677,26 +692,34 @@ def skip_todo(todo_id: int, reason: str | None = None):
     if row is None:
         conn.close()
         raise HTTPException(status_code=404, detail="todo not found")
-    skipped, title, category, priority, due_date, due_time, recurrence, notify_offset_minutes, note, show_on_calendar, goal_id = row
+    skipped = row[0]
+    if reason == "overdue":
+        # 期限切れの自動スキップは「まだ手つかずなら閉じる」だけにする(切り替えにしない)。切り替えのままだと、
+        # 2台で同時に開いた時に2回目がスキップを解除し、次に開いた時にまた閉じて翌日分が2件になる。
+        # ワークアウトの記録で済みになった直後のToDoを、済み→スキップに書き換えることも防ぐ(2026-10-30)
+        cur = conn.execute(
+            "UPDATE todos SET skipped = 1, skipped_at = datetime('now'), skip_reason = 'overdue' "
+            "WHERE id = ? AND done = 0 AND skipped = 0",
+            (todo_id,),
+        )
+        new_skipped = 1 if cur.rowcount != 0 else skipped
+        if cur.rowcount != 0:
+            _insert_next_occurrence(conn, row[1:])
+        conn.commit()
+        conn.close()
+        return {"id": todo_id, "skipped": bool(new_skipped)}
     new_skipped = 0 if skipped else 1
     skipped_at = "datetime('now')" if new_skipped else "NULL"
     # done/skippedは同時に立たない状態にする(スキップしたら「完了扱い」は解除する)
     done_clause = ", done = 0, completed_at = NULL" if new_skipped else ""
     conn.execute(
-        f"UPDATE todos SET skipped = ?, skipped_at = {skipped_at}, skip_reason = ?{done_clause} WHERE id = ?",
-        (new_skipped, reason if new_skipped else None, todo_id),
+        f"UPDATE todos SET skipped = ?, skipped_at = {skipped_at}, skip_reason = NULL{done_clause} WHERE id = ?",
+        (new_skipped, todo_id),
     )
     # 完了(toggle_todo)と同じ扱い: スキップも「この回は終わり」を意味するので、
     # 繰り返し予定なら次回分を生成する(このtodoを消さずに繰り越さない、というのが要件のため)
-    if new_skipped and recurrence:
-        next_due = next_due_after_close(due_date, recurrence)
-        if next_due is not None:
-            conn.execute(
-                "INSERT INTO todos (title, category, priority, due_date, due_time, recurrence, notify_offset_minutes, note, "
-                "show_on_calendar, life_goal_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (title, category, priority, next_due.isoformat(), due_time, recurrence, notify_offset_minutes, note,
-                 default_show_on_calendar(recurrence) if show_on_calendar is None else show_on_calendar, goal_id),
-            )
+    if new_skipped:
+        _insert_next_occurrence(conn, row[1:])
     conn.commit()
     conn.close()
     return {"id": todo_id, "skipped": bool(new_skipped)}
@@ -709,6 +732,74 @@ def delete_todo(todo_id: int):
     conn.commit()
     conn.close()
     return {"ok": True}
+
+
+# ---------- ワークアウト連携(2026-10-30) ----------
+# 毎日の繰り返しToDo「ワークアウト(2分〜)」を、ワークアウトアプリ(Vercel)の記録で自動で済みにする。
+# 記録の正本はワークアウト側なので、画面からは手で済みにさせない(app.jsのisWorkoutTodo)。
+# 計画: Vault アプリ開発/Compass/2026-10-30_CompassのToDoにワークアウトを出す計画.md
+WORKOUT_TODO_TITLE = "ワークアウト(2分〜)"  # app.jsのWORKOUT_TODO_TITLEと同じ
+WORKOUT_API_ORIGIN = os.environ.get("WORKOUT_API_ORIGIN", "https://workout-three-delta.vercel.app")
+WORKOUT_READ_TOKEN = os.environ.get("WORKOUT_READ_TOKEN")  # ワークアウトのREAD_TOKENSの「tom:」より後ろ
+WORKOUT_CACHE_SECONDS = 60
+WORKOUT_TIMEOUT_S = 4  # 起動直後に呼ぶので、Drill(15秒)より短くして画面を待たせない
+_workout_cache: dict = {"at": 0.0, "dates": None}
+
+
+def _workout_dates(fresh: bool) -> set[str] | None:
+    """ワークアウトで運動した日(新しい方から最大60日)。読めなかった時はNone。
+    Noneは「わからない」であって「やらなかった」ではない(教訓251)。呼ぶ側はスキップも済みにもしない"""
+    now = time.time()
+    if not fresh and _workout_cache["dates"] is not None and now - _workout_cache["at"] <= WORKOUT_CACHE_SECONDS:
+        return _workout_cache["dates"]
+    req = urllib.request.Request(
+        f"{WORKOUT_API_ORIGIN}/api/summary", headers={"Authorization": f"Bearer {WORKOUT_READ_TOKEN}"}
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=WORKOUT_TIMEOUT_S) as res:
+            value = json.loads(res.read().decode("utf-8"))
+        dates = {d for d in value["recent_dates"] if isinstance(d, str)}
+    except (urllib.error.URLError, TimeoutError, ValueError, KeyError, TypeError, http.client.HTTPException) as e:
+        print(f"[workout] summary unreachable: {e}")
+        return None
+    _workout_cache.update(at=now, dates=dates)
+    return dates
+
+
+@app.post("/api/workout/sync")
+def workout_sync(fresh: bool = False):
+    """未完了のワークアウトToDoのうち、期限日にワークアウトの記録がある分を済みにする(今日に限らない。
+    前日分が翌朝に同期された場合も拾う)。
+    configured=False: 鍵が未設定で連携していない。ok=False: ワークアウトに確かめられなかった。
+    画面はok=Falseの間、ワークアウトToDoの期限切れ自動スキップを保留する"""
+    if not WORKOUT_READ_TOKEN:
+        return {"configured": False, "ok": False, "done_ids": []}
+    dates = _workout_dates(fresh)
+    if dates is None:
+        return {"configured": True, "ok": False, "done_ids": []}
+    conn = get_connection()
+    rows = conn.execute(
+        f"SELECT id, {_NEXT_OCCURRENCE_COLUMNS} FROM todos "
+        "WHERE title = ? AND done = 0 AND skipped = 0 AND due_date IS NOT NULL",
+        (WORKOUT_TODO_TITLE,),
+    ).fetchall()
+    done_ids = []
+    for row in rows:
+        todo_id, due_date = row[0], row[4]
+        if due_date not in dates:
+            continue
+        # 「まだ未完了なら」の条件付き。2台から同時に呼ばれても、済みにして次回分を作るのは片方だけ
+        cur = conn.execute(
+            "UPDATE todos SET done = 1, completed_at = datetime('now') WHERE id = ? AND done = 0 AND skipped = 0",
+            (todo_id,),
+        )
+        if cur.rowcount == 0:
+            continue
+        _insert_next_occurrence(conn, row[1:])
+        done_ids.append(todo_id)
+    conn.commit()
+    conn.close()
+    return {"configured": True, "ok": True, "done_ids": done_ids}
 
 
 class TodoGoalUpdate(BaseModel):
