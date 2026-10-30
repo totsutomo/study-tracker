@@ -7526,6 +7526,38 @@ document.querySelectorAll("#mood-subtabs .period-btn").forEach((b) => {
   b.addEventListener("click", () => switchMoodSubtab(b.dataset.sub));
 });
 
+// 週次フィードバック(2026-10-30): 日曜にPCのGeminiが書いて送ってくる。最新週を大きく、過去分は折りたたみ
+function wfHtml(text) {
+  return escapeHtml(text.replaceAll("\r\n", "\n"))
+    .split(/\n{2,}/)
+    .map((p) => `<p>${p.replaceAll("\n", "<br>")}</p>`)
+    .join("");
+}
+
+async function loadWeeklyFeedback() {
+  const body = document.getElementById("wf-body");
+  let rows;
+  try {
+    rows = await api("/api/weekly-feedback?limit=8");
+  } catch (err) {
+    body.innerHTML = `<p class="meta">Couldn't load this card.</p>`;
+    throw err;
+  }
+  if (!rows.length) {
+    document.getElementById("wf-week").textContent = "";
+    body.innerHTML = '<p class="meta">Nothing yet. The first one arrives on Sunday.</p>';
+    document.getElementById("wf-older").classList.add("hidden");
+    return;
+  }
+  const [latest, ...older] = rows;
+  document.getElementById("wf-week").textContent = `· week of ${latest.week_of}`;
+  body.innerHTML = (latest.summary ? `<p><b>${escapeHtml(latest.summary)}</b></p>` : "") + wfHtml(latest.body);
+  document.getElementById("wf-older").classList.toggle("hidden", !older.length);
+  document.getElementById("wf-older-list").innerHTML = older
+    .map((r) => `<details class="wf-item"><summary>${escapeHtml(r.week_of)}${r.summary ? " · " + escapeHtml(r.summary) : ""}</summary>${wfHtml(r.body)}</details>`)
+    .join("");
+}
+
 // Study: Log / Scores(2026-10-02、Scoresタブを統合)。Scoresはたまに見るだけなので覚えずに毎回Logから
 function switchStudySubtab(sub) {
   document.querySelectorAll("#study-subtabs .period-btn").forEach((b) => b.classList.toggle("active", b.dataset.sub === sub));
@@ -7533,6 +7565,7 @@ function switchStudySubtab(sub) {
   document.querySelectorAll(".study-subpanel").forEach((p) => p.classList.toggle("hidden", p.dataset.sub !== sub));
   // Insightsはたまに見るだけなので、開いた時に読み込む(起動時の通信を増やさない)
   if (sub === "insights") loadInsightsMatrix().catch((err) => console.error("insights load failed:", err));
+  if (sub === "insights") loadWeeklyFeedback().catch((err) => console.error("weekly feedback load failed:", err));
 }
 
 document.querySelectorAll("#study-subtabs .period-btn").forEach((b) => {

@@ -257,6 +257,16 @@ CREATE TABLE IF NOT EXISTS life_goals (
     updated_at TEXT DEFAULT (datetime('now'))
 );
 
+
+-- 週次フィードバック(2026-10-30): 毎週日曜にPCのGemini(agy)が、Compassの実績と目標のズレを書いて送ってくる。
+-- week_ofはその週の月曜(NZ)。同じ週を送り直したら上書きする
+CREATE TABLE IF NOT EXISTS weekly_feedback (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    week_of TEXT NOT NULL UNIQUE,
+    summary TEXT,
+    body TEXT NOT NULL,
+    created_at TEXT DEFAULT (datetime('now'))
+);
 """
 
 DEFAULT_CATEGORIES = ("英語", "数学", "世界史", "その他")

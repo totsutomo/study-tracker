@@ -1034,6 +1034,42 @@ def _life_tree_attention(goal: dict, is_branch: bool, today: date) -> list[str]:
     return reasons
 
 
+class WeeklyFeedbackIn(BaseModel):
+    week_of: str
+    summary: str | None = None
+    body: str
+
+
+@app.get("/api/weekly-feedback")
+def list_weekly_feedback(limit: int = 8):
+    conn = get_connection()
+    rows = rows_to_dicts(conn.execute(
+        "SELECT id, week_of, summary, body, created_at FROM weekly_feedback ORDER BY week_of DESC LIMIT ?",
+        (max(1, min(limit, 52)),),
+    ))
+    conn.close()
+    return rows
+
+
+@app.post("/api/weekly-feedback")
+def save_weekly_feedback(fb: WeeklyFeedbackIn):
+    try:
+        date.fromisoformat(fb.week_of)
+    except ValueError:
+        raise HTTPException(status_code=422, detail="week_of must be YYYY-MM-DD")
+    if not fb.body.strip():
+        raise HTTPException(status_code=422, detail="body is empty")
+    conn = get_connection()
+    conn.execute(
+        "INSERT INTO weekly_feedback (week_of, summary, body) VALUES (?, ?, ?) "
+        "ON CONFLICT(week_of) DO UPDATE SET summary = excluded.summary, body = excluded.body, created_at = datetime('now')",
+        (fb.week_of, fb.summary, fb.body.strip()),
+    )
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
 @app.get("/api/life-tree")
 def get_life_tree():
     today = nz_today()
