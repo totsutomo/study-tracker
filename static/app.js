@@ -3246,7 +3246,65 @@ async function loadScreenBudget() {
   } catch (e) {
     // ネットワーク一時失敗時は前回の表示を維持する(daily-min-banner等と同じ方針)
   }
+  loadEveningGate();
 }
+
+// ---------- evening gate skip (2026-11-04) ----------
+// 夜枠(初期19:45〜翌3:00)は、勉強セッションを始めないとYouTubeが開けず、Instagramは丸ごと止まる
+// (スマホのUtilityが判定)。崩れた夜の逃げ道として、その夜だけYouTubeを開けるスキップが週2回まで。
+let eveningGateState = null;
+let eveningSkipConfirmTimer = null;
+
+async function loadEveningGate() {
+  try {
+    eveningGateState = await api("/api/evening-gate");
+  } catch {
+    return; // 取れなければ前回の表示のまま
+  }
+  renderEveningGate();
+}
+
+function renderEveningGate() {
+  const btn = document.getElementById("screen-budget-banner-skip");
+  const g = eveningGateState;
+  if (!g || !g.enabled) {
+    btn.classList.add("hidden");
+    return;
+  }
+  btn.classList.remove("hidden", "confirm");
+  clearTimeout(eveningSkipConfirmTimer);
+  if (g.skipped_today) {
+    btn.textContent = `Evening gate skipped tonight (${g.week_left} left this week)`;
+    btn.disabled = true;
+  } else if (g.week_left <= 0) {
+    btn.textContent = "Evening gate: no skips left this week";
+    btn.disabled = true;
+  } else {
+    btn.textContent = `Skip tonight's YouTube gate (${g.week_left} left)`;
+    btn.disabled = false;
+  }
+}
+
+document.getElementById("screen-budget-banner-skip").addEventListener("click", async (e) => {
+  const btn = e.currentTarget;
+  if (!btn.classList.contains("confirm")) {
+    btn.classList.add("confirm");
+    btn.textContent = "Tap again to skip (Instagram stays off)";
+    eveningSkipConfirmTimer = setTimeout(renderEveningGate, 4000);
+    return;
+  }
+  clearTimeout(eveningSkipConfirmTimer);
+  btn.disabled = true;
+  try {
+    eveningGateState = await api("/api/evening-gate/skip", { method: "POST" }, 0);
+    showToast("Skipped tonight's YouTube gate");
+  } catch {
+    showToast("Could not skip. No skips left this week?");
+    await loadEveningGate();
+    return;
+  }
+  renderEveningGate();
+});
 
 function renderScreenBudget(s) {
   const banner = document.getElementById("screen-budget-banner");

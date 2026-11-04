@@ -3319,6 +3319,77 @@ def _evening_gate_active_now(conn) -> bool:
     return _in_evening_window(now.hour * 60 + now.minute, _read_screen_budget_params(conn))
 
 
+# 夜のゲートのスキップ権(2026-11-04): 崩れた夜の逃げ道。その予算日(3時区切り)だけYouTubeを
+# セッションなしで開ける(Instagramは止まったまま)。週(月〜日)に2回まで。回数は数字を
+# 変えて再デプロイしないと変えられない(美緒の承認フローには載せていない)
+EVENING_GATE_SKIPS_PER_WEEK = 2
+
+
+def _budget_day_now() -> date:
+    return (nz_now() - timedelta(hours=SCREEN_BUDGET_DAY_START_HOUR)).date()
+
+
+def _read_evening_skips(conn) -> list[str]:
+    row = conn.execute("SELECT value FROM settings WHERE key = 'evening_gate_skips'").fetchone()
+    try:
+        return list(json.loads(row[0])) if row and row[0] else []
+    except (json.JSONDecodeError, TypeError):
+        return []
+
+
+def _evening_gate_state(conn) -> dict:
+    today = _budget_day_now()
+    week_start = today - timedelta(days=today.weekday())
+    skips = _read_evening_skips(conn)
+    used = sum(1 for d in skips if week_start.isoformat() <= d <= (week_start + timedelta(days=6)).isoformat())
+    params = _read_screen_budget_params(conn)
+    return {
+        "enabled": bool(params["evening_gate_enabled"]),
+        "active": _evening_gate_active_now(conn),
+        "skipped_today": today.isoformat() in skips,
+        "week_used": used,
+        "week_limit": EVENING_GATE_SKIPS_PER_WEEK,
+        "week_left": max(0, EVENING_GATE_SKIPS_PER_WEEK - used),
+    }
+
+
+@app.get("/api/evening-gate")
+def get_evening_gate():
+    conn = get_connection()
+    _apply_due_screen_budget_changes(conn)
+    result = _evening_gate_state(conn)
+    conn.close()
+    return result
+
+
+@app.post("/api/evening-gate/skip")
+def skip_evening_gate():
+    conn = get_connection()
+    _apply_due_screen_budget_changes(conn)
+    state = _evening_gate_state(conn)
+    if not state["enabled"]:
+        conn.close()
+        raise HTTPException(status_code=400, detail="evening gate is off")
+    if state["skipped_today"]:
+        conn.close()
+        return state  # 押し直しても回数は減らない
+    if state["week_left"] <= 0:
+        conn.close()
+        raise HTTPException(status_code=409, detail="no skips left this week")
+    today = _budget_day_now().isoformat()
+    keep_from = (_budget_day_now() - timedelta(days=60)).isoformat()
+    skips = [d for d in _read_evening_skips(conn) if d >= keep_from] + [today]
+    conn.execute(
+        "INSERT INTO settings (key, value) VALUES ('evening_gate_skips', ?) "
+        "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        (json.dumps(skips),),
+    )
+    conn.commit()
+    state = _evening_gate_state(conn)
+    conn.close()
+    return state
+
+
 def _apply_due_screen_budget_changes(conn):
     """猶予時間を過ぎたscreen_budget_paramsのpending_changesを、Compass自身の設定へ反映する。
     mode/limit等と違い適用先がJpBlocker/FocusGuardのローカル設定ではないため、デバイス側の
@@ -4449,6 +4520,8 @@ def focus_session_status(token: str | None = None):
     # 夜のゲート(2026-11-04): 夜枠の間はtrue。YouTubeはセッション中だけ、Instagramは丸ごと止める
     _apply_due_screen_budget_changes(conn)
     result["evening_gate_active"] = _evening_gate_active_now(conn)
+    # スキップ権を使った夜は、YouTubeだけセッションなしで開ける(Instagramは止まったまま)
+    result["evening_gate_youtube_open"] = _evening_gate_state(conn)["skipped_today"]
     conn.close()
     return result
 

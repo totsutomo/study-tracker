@@ -425,6 +425,32 @@ body {
   display: none;
 }
 
+.hud-skip {
+  padding: 0;
+  border: 0;
+  background: none;
+  font-size: 10.5px;
+  color: var(--muted, #888);
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.hud-skip.hidden {
+  display: none;
+}
+
+.hud-skip:disabled {
+  cursor: default;
+  opacity: 0.7;
+}
+
+.hud-skip.confirm {
+  color: #e05050;
+}
+
 /* もう一方のデバイス(スマホ/PC)で今フォーカスタイマーが動いている時のFYI表示。
    気付いてもらう必要はあるので、帯の右端に緑の丸いバッジ+パルスで出す
    (勉強中=ポジティブな状態としてaccent-secondaryの緑を使用)。 */
