@@ -425,6 +425,22 @@ body {
   display: none;
 }
 
+.hud-gate {
+  font-size: 10.5px;
+  color: var(--muted, #888);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.hud-gate.hidden {
+  display: none;
+}
+
+.hud-gate.unlocked {
+  color: var(--accent-secondary, #4a9c72);
+}
+
 .hud-skip {
   padding: 0;
   border: 0;

@@ -3251,7 +3251,8 @@ async function loadScreenBudget() {
 
 // ---------- evening gate skip (2026-11-04) ----------
 // 夜枠(初期19:45〜翌3:00)は、勉強セッションを始めないとYouTubeもInstagramも開けない
-// (スマホのUtilityが判定)。崩れた夜の逃げ道として、その夜だけセッションなしで両方開けるスキップが週2回まで。
+// (スマホのUtilityが判定)。夜枠に保存した勉強が合計20分(設定)に届くと、その夜は両方開く。
+// 崩れた夜の逃げ道として、その夜だけセッションなしで両方開けるスキップが週2回まで。
 let eveningGateState = null;
 let eveningSkipConfirmTimer = null;
 
@@ -3266,11 +3267,19 @@ async function loadEveningGate() {
 
 function renderEveningGate() {
   const btn = document.getElementById("screen-budget-banner-skip");
+  const gateEl = document.getElementById("screen-budget-banner-gate");
   const g = eveningGateState;
   if (!g || !g.enabled) {
     btn.classList.add("hidden");
+    gateEl.classList.add("hidden");
     return;
   }
+  // 夜枠に保存した勉強が規定の分数に届くと、その夜はYouTube/Instagramが開く
+  gateEl.classList.remove("hidden");
+  gateEl.classList.toggle("unlocked", g.unlocked);
+  gateEl.textContent = g.unlocked
+    ? `Evening unlocked (${g.evening_study_minutes}/${g.unlock_minutes} min)`
+    : `Evening study ${g.evening_study_minutes}/${g.unlock_minutes} min to unlock`;
   btn.classList.remove("hidden", "confirm");
   clearTimeout(eveningSkipConfirmTimer);
   if (g.skipped_today) {

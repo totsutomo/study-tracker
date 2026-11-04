@@ -3217,6 +3217,7 @@ SCREEN_BUDGET_DEFAULTS = {
     "evening_gate_start": "19:45",
     "evening_gate_end": "03:00",
     "evening_ratio_factor": 0.5,
+    "evening_unlock_minutes": 20,  # 夜枠に保存した勉強がこの合計分に届いたら、その夜はYouTube/Instagramを開ける
 }
 # 集計除外(ノーカウント)対象のアプリ。ランチャー除外と同じ思想で、「勉強のためのスマホ利用」が
 # 予算を消費してしまう本末転倒を防ぐ。2026-09-14時点の初期値は主要な単機能アプリのみ実機未検証で
@@ -3265,6 +3266,7 @@ def _read_screen_budget_params(conn) -> dict:
         "evening_gate_start": d.get("screen_budget_evening_gate_start") or SCREEN_BUDGET_DEFAULTS["evening_gate_start"],
         "evening_gate_end": d.get("screen_budget_evening_gate_end") or SCREEN_BUDGET_DEFAULTS["evening_gate_end"],
         "evening_ratio_factor": float(d.get("screen_budget_evening_ratio_factor", SCREEN_BUDGET_DEFAULTS["evening_ratio_factor"])),
+        "evening_unlock_minutes": int(d.get("screen_budget_evening_unlock_minutes", SCREEN_BUDGET_DEFAULTS["evening_unlock_minutes"])),
         "study_packages": study_packages,
     }
 
@@ -3279,6 +3281,7 @@ def _write_screen_budget_params(conn, params: dict):
         "evening_gate_start": "screen_budget_evening_gate_start",
         "evening_gate_end": "screen_budget_evening_gate_end",
         "evening_ratio_factor": "screen_budget_evening_ratio_factor",
+        "evening_unlock_minutes": "screen_budget_evening_unlock_minutes",
     }
     for field, key in key_map.items():
         if params.get(field) is None:
@@ -3337,16 +3340,36 @@ def _read_evening_skips(conn) -> list[str]:
         return []
 
 
+def _evening_study_minutes(conn, budget_date: str, params: dict) -> int:
+    """予算日の夜枠に保存された勉強の合計分(予算のごほうびと同じく、タイマー・連携アプリの記録だけ)。"""
+    rows = conn.execute(
+        "SELECT minutes, logged_at FROM study_logs "
+        "WHERE (timed = 1 OR start_trigger IS NOT NULL) "
+        "AND datetime(logged_at) >= datetime(?, ?) AND datetime(logged_at) < datetime(?, ?)",
+        (budget_date, f"+{SCREEN_BUDGET_DAY_START_HOUR} hours", budget_date, f"+{24 + SCREEN_BUDGET_DAY_START_HOUR} hours"),
+    ).fetchall()
+    total = 0
+    for m, logged_at in rows:
+        t = datetime.fromisoformat(logged_at)
+        if _in_evening_window(t.hour * 60 + t.minute, params):
+            total += m
+    return total
+
+
 def _evening_gate_state(conn) -> dict:
     today = _budget_day_now()
     week_start = today - timedelta(days=today.weekday())
     skips = _read_evening_skips(conn)
     used = sum(1 for d in skips if week_start.isoformat() <= d <= (week_start + timedelta(days=6)).isoformat())
     params = _read_screen_budget_params(conn)
+    evening_minutes = _evening_study_minutes(conn, today.isoformat(), params)
     return {
         "enabled": bool(params["evening_gate_enabled"]),
         "active": _evening_gate_active_now(conn),
         "skipped_today": today.isoformat() in skips,
+        "evening_study_minutes": evening_minutes,
+        "unlock_minutes": params["evening_unlock_minutes"],
+        "unlocked": evening_minutes >= params["evening_unlock_minutes"],
         "week_used": used,
         "week_limit": EVENING_GATE_SKIPS_PER_WEEK,
         "week_left": max(0, EVENING_GATE_SKIPS_PER_WEEK - used),
@@ -4520,8 +4543,10 @@ def focus_session_status(token: str | None = None):
     # 夜のゲート(2026-11-04): 夜枠の間はtrue。YouTubeはセッション中だけ、Instagramは丸ごと止める
     _apply_due_screen_budget_changes(conn)
     result["evening_gate_active"] = _evening_gate_active_now(conn)
-    # スキップ権を使った夜は、YouTubeもInstagramもセッションなしで開ける(キー名は初期の名残)
-    result["evening_gate_youtube_open"] = _evening_gate_state(conn)["skipped_today"]
+    # スキップ権を使った夜、または夜枠に保存した勉強が規定の分数に届いた夜は、YouTubeもInstagramも
+    # セッションなしで開ける(キー名は初期の名残)
+    gate = _evening_gate_state(conn)
+    result["evening_gate_youtube_open"] = gate["skipped_today"] or gate["unlocked"]
     conn.close()
     return result
 
