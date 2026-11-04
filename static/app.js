@@ -3255,6 +3255,12 @@ async function loadScreenBudget() {
 // 崩れた夜の逃げ道として、その夜だけセッションなしで両方開けるスキップが週2回まで。
 let eveningGateState = null;
 let eveningSkipConfirmTimer = null;
+const EVENING_GATE_SHOW_FROM_MIN = 19 * 60 + 30;
+const EVENING_GATE_SHOW_UNTIL_MIN = 3 * 60;
+// 19:30をまたいだ時に出る・3:00で消えるよう、1分ごとに描き直す(確認中の「Tap again」は消さない)
+setInterval(() => {
+  if (!document.getElementById("screen-budget-banner-skip").classList.contains("confirm")) renderEveningGate();
+}, 60 * 1000);
 
 async function loadEveningGate() {
   try {
@@ -3269,7 +3275,11 @@ function renderEveningGate() {
   const btn = document.getElementById("screen-budget-banner-skip");
   const gateEl = document.getElementById("screen-budget-banner-gate");
   const g = eveningGateState;
-  if (!g || !g.enabled) {
+  // 幅を取るので、夜枠の少し前(19:30)から夜枠の終わりまでだけ出す。
+  // スキップを使った夜・20分に届いた夜(解除済み)は出さない(2026-11-05)
+  const minuteOfDay = new Date().getHours() * 60 + new Date().getMinutes();
+  const inShowWindow = minuteOfDay >= EVENING_GATE_SHOW_FROM_MIN || minuteOfDay < EVENING_GATE_SHOW_UNTIL_MIN;
+  if (!g || !g.enabled || !inShowWindow || g.skipped_today || g.unlocked) {
     btn.classList.add("hidden");
     gateEl.classList.add("hidden");
     return;
