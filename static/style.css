@@ -3239,6 +3239,61 @@ kbd {
   max-width: 130px;
 }
 
+/* ---------- morning overview (2026-11-04) ---------- */
+.mo-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+  height: 110px;
+  margin: 8px 0 4px;
+}
+
+.mo-bar {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  height: 100%;
+  font-size: 11px;
+  color: var(--muted, #888);
+}
+
+.mo-bar-fill {
+  width: 100%;
+  max-width: 34px;
+  border-radius: 4px 4px 0 0;
+  background: var(--accent);
+  min-height: 2px;
+}
+
+.mo-bar-fill.low {
+  background: #e5555c;
+}
+
+.mo-bar span {
+  margin-top: 3px;
+}
+
+.mo-stats {
+  list-style: none;
+  margin: 12px 0 16px;
+  padding: 0;
+  font-size: 14px;
+}
+
+.mo-stats li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.mo-stats li:last-child {
+  border-bottom: 0;
+}
+
 /* ---------- ToDo tab: today panel (2026-09-27) ---------- */
 .todo-today {
   display: none; /* スマホでは一覧が長くなるだけなので出さない(上部の帯で足りる) */

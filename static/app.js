@@ -5350,6 +5350,27 @@ function updateWakeSleptLabel() {
 document.getElementById("wake-time-input").addEventListener("input", updateWakeSleptLabel);
 document.getElementById("wake-bed-input").addEventListener("input", updateWakeSleptLabel);
 
+// 直近10日の「本寝」(昼寝・異常値を除く)の平均就寝時刻を5分単位のHH:MMで返す。記録が無ければ23:00
+const DEFAULT_BEDTIME = "23:00";
+async function averageBedtimeLast10Days() {
+  try {
+    const logs = await api("/api/sleep-logs?limit=30");
+    const since = `${addDaysToDate(todayStr(), -10)} 00:00:00`;
+    const mins = logs
+      .filter((l) => l.kind === "main" && l.bedtime_at >= since)
+      .map((l) => {
+        const m = Number(l.bedtime_at.slice(11, 13)) * 60 + Number(l.bedtime_at.slice(14, 16));
+        return m < 12 * 60 ? m + 24 * 60 : m; // 深夜0〜11時台は「24時以降」として夜の側に寄せて平均する
+      });
+    if (!mins.length) return DEFAULT_BEDTIME;
+    const avg = Math.round(mins.reduce((a, b) => a + b, 0) / mins.length / 5) * 5;
+    const wrapped = avg % (24 * 60);
+    return `${String(Math.floor(wrapped / 60)).padStart(2, "0")}:${String(wrapped % 60).padStart(2, "0")}`;
+  } catch {
+    return DEFAULT_BEDTIME;
+  }
+}
+
 function openWakeMoodPanel(log = null, mode = "recorded") {
   const panel = document.getElementById("wake-mood-panel");
   const backdrop = document.getElementById("wake-mood-backdrop");
@@ -5360,7 +5381,16 @@ function openWakeMoodPanel(log = null, mode = "recorded") {
   note.classList.toggle("hidden", mode !== "backfill");
   note.textContent = mode === "backfill" ? "No sleep log for last night. When did you go to bed?" : "";
   document.getElementById("wake-bed-row").classList.toggle("hidden", mode !== "backfill");
-  if (mode === "backfill") document.getElementById("wake-bed-input").value = "23:00";
+  if (mode === "backfill") {
+    const bedInput = document.getElementById("wake-bed-input");
+    bedInput.value = DEFAULT_BEDTIME; // 平均が取れるまでの仮値。取れたら差し替える
+    averageBedtimeLast10Days().then((hm) => {
+      if (wakePanelMode === "backfill" && bedInput.value === DEFAULT_BEDTIME) {
+        bedInput.value = hm;
+        updateWakeSleptLabel();
+      }
+    });
+  }
   document.getElementById("wake-time-row").classList.toggle("hidden", !wakePanelLog);
   if (wakePanelLog) {
     document.getElementById("wake-time-input").value = wakePanelLog.wake_at.slice(11, 16);
@@ -5373,6 +5403,8 @@ function openWakeMoodPanel(log = null, mode = "recorded") {
 function closeWakeMoodPanel() {
   document.getElementById("wake-mood-panel").classList.add("hidden");
   document.getElementById("wake-mood-backdrop").classList.add("hidden");
+  // Good morningを閉じたら、続けて朝の概況を出す(その日まだ見ていなければ)
+  maybeShowMorningOverview().catch((err) => console.error("morning overview failed:", err));
 }
 
 // ×や背景で閉じた時。「pending」は起床をまだ記録していないので、しばらくは自動で出し直さない
@@ -5425,7 +5457,115 @@ async function maybeShowMorningPanel() {
 
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState !== "visible" || !isMorningNow()) return;
-  loadSleepActive().then(maybeShowMorningPanel).catch(() => {});
+  loadSleepActive()
+    .then(maybeShowMorningPanel)
+    .then(maybeShowMorningOverview)
+    .catch(() => {});
+});
+
+// ---------- morning overview (2026-11-04) ----------
+// 朝いちばんにアプリを開いたら、ToDoより先に「直近7日の勉強の推移・サボり・未達ToDo」を必ず見せる。
+// 1日1回。閉じるボタンは3秒間押せず、背景タップでも閉じない(目に入れるのが目的)
+const MORNING_OVERVIEW_SHOWN_KEY = "morningOverviewShownDate";
+const MORNING_OVERVIEW_LOCK_SEC = 3;
+let morningOverviewOpening = false;
+
+function morningOverviewShownToday() {
+  try {
+    return localStorage.getItem(MORNING_OVERVIEW_SHOWN_KEY) === todayStr();
+  } catch {
+    return false;
+  }
+}
+
+async function maybeShowMorningOverview() {
+  if (morningOverviewOpening || !isMorningNow() || morningOverviewShownToday()) return;
+  if (sleepActiveLog || timerSubject || visiblePanels().length) return;
+  morningOverviewOpening = true;
+  try {
+    const html = await buildMorningOverviewHtml();
+    if (timerSubject || visiblePanels().length) return; // 取得中に別のパネルが開いたら出さない
+    document.getElementById("morning-overview-body").innerHTML = html;
+    document.getElementById("morning-overview-panel").classList.remove("hidden");
+    document.getElementById("morning-overview-backdrop").classList.remove("hidden");
+    try {
+      localStorage.setItem(MORNING_OVERVIEW_SHOWN_KEY, todayStr());
+    } catch {
+      // 保存できない環境では、開くたびに朝の間は出る
+    }
+    const ok = document.getElementById("morning-overview-ok");
+    let left = MORNING_OVERVIEW_LOCK_SEC;
+    ok.disabled = true;
+    ok.textContent = `Got it (${left})`;
+    const timer = setInterval(() => {
+      left -= 1;
+      if (left > 0) {
+        ok.textContent = `Got it (${left})`;
+        return;
+      }
+      clearInterval(timer);
+      ok.textContent = "Got it";
+      ok.disabled = false;
+    }, 1000);
+  } finally {
+    morningOverviewOpening = false;
+  }
+}
+
+async function buildMorningOverviewHtml() {
+  const today = todayStr();
+  const from = addDaysToDate(today, -7); // 昨日までの7日(今日は朝なのでほぼ0)
+  const [daily, activations, todos, settings] = await Promise.all([
+    api("/api/study-logs/daily?days=15"),
+    api("/api/activation-logs?limit=100"),
+    api("/api/todos"),
+    api("/api/settings").catch(() => ({})),
+  ]);
+  const minimum = settings.daily_minimum_minutes || 0;
+  const perDay = {};
+  daily.forEach((r) => {
+    perDay[r.d] = (perDay[r.d] || 0) + r.total_minutes;
+  });
+  const days = [];
+  for (let i = 7; i >= 1; i--) days.push(addDaysToDate(today, -i));
+  const mins = days.map((d) => perDay[d] || 0);
+  const prevTotal = [...Array(7).keys()].reduce((s, i) => s + (perDay[addDaysToDate(today, -8 - i)] || 0), 0);
+  const total = mins.reduce((a, b) => a + b, 0);
+  const max = Math.max(60, ...mins);
+  const weekday = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  const bars = days
+    .map((d, i) => {
+      const low = minimum && mins[i] < minimum;
+      return `<div class="mo-bar"><div class="mo-bar-fill${low ? " low" : ""}" style="height:${Math.round((mins[i] / max) * 90)}px"></div><span>${weekday[new Date(`${d}T00:00:00`).getDay()]}</span></div>`;
+    })
+    .join("");
+  const zeroDays = mins.filter((m) => m === 0).length;
+  const lowDays = minimum ? mins.filter((m) => m < minimum).length : null;
+  const diff = total - prevTotal;
+  const slacks = activations.filter((a) => a.triggered_at.slice(0, 10) >= from && a.triggered_at.slice(0, 10) < today);
+  const slackMinutes = slacks.reduce((s, a) => {
+    if (!a.returned_at) return s;
+    return s + Math.max(0, Math.round((new Date(a.returned_at.replace(" ", "T")) - new Date(a.triggered_at.replace(" ", "T"))) / 60000));
+  }, 0);
+  const pastTodos = todos.filter((t) => t.due_date && t.due_date >= from && t.due_date < today);
+  const missed = pastTodos.filter((t) => !t.done && !t.skipped).length;
+  const skipped = pastTodos.filter((t) => t.skipped).length;
+  const fmt = (m) => (m >= 60 ? `${Math.floor(m / 60)}h ${m % 60}m` : `${m}m`);
+  const rows = [
+    ["Studied (7 days)", `${fmt(total)} (${diff >= 0 ? "+" : "-"}${fmt(Math.abs(diff))} vs the week before)`],
+    ["Days under your minimum", lowDays === null ? "-" : `${lowDays} of 7${zeroDays ? ` (${zeroDays} with zero)` : ""}`],
+    ["Slacking logs", `${slacks.length}${slackMinutes ? ` (${fmt(slackMinutes)} away)` : ""}`],
+    ["ToDos missed / skipped", `${missed} / ${skipped}`],
+  ];
+  return (
+    `<div class="mo-bars">${bars}</div>` +
+    `<ul class="mo-stats">${rows.map(([k, v]) => `<li><span>${escapeHtml(k)}</span><strong>${escapeHtml(v)}</strong></li>`).join("")}</ul>`
+  );
+}
+
+document.getElementById("morning-overview-ok").addEventListener("click", () => {
+  document.getElementById("morning-overview-panel").classList.add("hidden");
+  document.getElementById("morning-overview-backdrop").classList.add("hidden");
 });
 
 async function wakeUp() {
@@ -5885,6 +6025,8 @@ document.getElementById("wake-mood-save").addEventListener("click", async () => 
   closeWakeMoodPanel();
   if (mode !== "recorded") {
     await saveMorningSleep(mode, log, correctedWake, bed);
+    // 起床の保存で「寝ている」状態が解けたあとに、朝の概況を出す
+    maybeShowMorningOverview().catch((err) => console.error("morning overview failed:", err));
   } else if (log && correctedWake) {
     const corrected = toLocalTimestamp(correctedWake);
     if (corrected.slice(0, 16) !== log.wake_at.slice(0, 16)) {
@@ -7617,7 +7759,9 @@ async function hydrateFromCache() {
     history.replaceState(history.state, "", location.pathname + location.search);
     openLifeTree();
   }
-  maybeShowMorningPanel().catch((err) => console.error("morning prompt failed:", err));
+  maybeShowMorningPanel()
+    .then(maybeShowMorningOverview)
+    .catch((err) => console.error("morning prompt failed:", err));
 })();
 
 // ---------- mood tab sub-tabs (2026-09-27) ----------
