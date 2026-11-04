@@ -3376,6 +3376,42 @@ def _evening_gate_state(conn) -> dict:
     }
 
 
+# 朝のゲート(2026-11-05): 朝(5:00〜12:00)に今日の起床記録(Good morningパネルの就寝時刻入力)が
+# 入るまで、JpBlockerがCompass以外のアプリを開けなくする。パネルを出す朝の時間帯(クライアントの
+# MORNING_START_HOUR〜)と同じ5時から始め、12時で自動的に外れる(記録できない日にスマホが丸一日
+# 使えなくなるのを防ぐ)。寝ている最中(睡眠ロック中・寝てから3時間未満)はパネルが出ないので対象外
+MORNING_GATE_START_HOUR = 5
+MORNING_GATE_END_HOUR = 12
+MORNING_GATE_MIN_SLEEP_HOURS = 3  # クライアントのmaybeShowMorningPanelと同じ「寝てすぐは聞かない」
+
+
+def _morning_gate_active(conn, now: datetime) -> bool:
+    """nowはNZのnaive時刻。今日の起床記録がまだ無く、パネルで入力できる状態ならTrue。"""
+    if not (MORNING_GATE_START_HOUR <= now.hour < MORNING_GATE_END_HOUR):
+        return False
+    today = now.date().isoformat()
+    if conn.execute("SELECT 1 FROM sleep_logs WHERE datetime(wake_at) >= datetime(?) LIMIT 1", (today,)).fetchone():
+        return False
+    open_log = conn.execute(
+        "SELECT bedtime_at FROM sleep_logs WHERE wake_at IS NULL ORDER BY bedtime_at DESC LIMIT 1"
+    ).fetchone()
+    if open_log:
+        bedtime = datetime.fromisoformat(open_log[0][:19].replace(" ", "T"))
+        if now - bedtime < timedelta(hours=MORNING_GATE_MIN_SLEEP_HOURS):
+            return False
+        if _sleep_lock_until(conn):
+            return False
+    return True
+
+
+@app.get("/api/morning-gate")
+def get_morning_gate():
+    conn = get_connection()
+    active = _morning_gate_active(conn, nz_now_naive())
+    conn.close()
+    return {"active": active, "end_hour": MORNING_GATE_END_HOUR}
+
+
 @app.get("/api/evening-gate")
 def get_evening_gate():
     conn = get_connection()
@@ -4547,6 +4583,8 @@ def focus_session_status(token: str | None = None):
     # セッションなしで開ける(キー名は初期の名残)
     gate = _evening_gate_state(conn)
     result["evening_gate_youtube_open"] = gate["skipped_today"] or gate["unlocked"]
+    # 朝のゲート(2026-11-05): 今日の起床記録が入るまでCompass以外を開けない(通信エラー時はfalse=止めない側)
+    result["morning_gate_active"] = _morning_gate_active(conn, nz_now_naive())
     conn.close()
     return result
 

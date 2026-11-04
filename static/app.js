@@ -5476,8 +5476,11 @@ function closeWakeMoodPanel() {
 
 // ×や背景で閉じた時。「pending」は起床をまだ記録していないので、しばらくは自動で出し直さない
 function dismissWakeMoodPanel() {
-  if (wakePanelMode === "pending") morningPromptSnoozeUntil = Date.now() + 20 * 60 * 1000;
+  if (wakePanelMode === "pending" && !morningGateActive) morningPromptSnoozeUntil = Date.now() + 20 * 60 * 1000;
   closeWakeMoodPanel();
+  if (morningGateActive && wakePanelMode !== "recorded") {
+    showToast("Other apps stay locked until you log last night's sleep");
+  }
 }
 
 // ---------- morning auto prompt (2026-10-02) ----------
@@ -5493,8 +5496,18 @@ function isMorningNow() {
   return h >= MORNING_START_HOUR && h < MORNING_END_HOUR;
 }
 
+// 朝のゲート(2026-11-05): 入力するまでスマホのCompass以外が開けない間は、パネルを閉じても
+// 次に開いた時に必ず出し直す(スヌーズ・1日1回の制限・「記録済み」判定を無視する)
+let morningGateActive = false;
+
 async function maybeShowMorningPanel() {
-  if (!isMorningNow() || Date.now() < morningPromptSnoozeUntil) return;
+  if (!isMorningNow()) return;
+  try {
+    morningGateActive = (await api("/api/morning-gate")).active;
+  } catch {
+    morningGateActive = false;
+  }
+  if (!morningGateActive && Date.now() < morningPromptSnoozeUntil) return;
   if (timerSubject || visiblePanels().length) return;
   if (sleepActiveLog) {
     if (!sleepActiveLog.id) return; // 就寝の保存中
@@ -5505,14 +5518,16 @@ async function maybeShowMorningPanel() {
     return;
   }
   const today = todayStr();
-  try {
-    if (localStorage.getItem(BACKFILL_ASKED_KEY) === today) return;
-  } catch {
-    // 保存できない環境では毎回確認になるが、記録済みなら下の判定で出ない
+  if (!morningGateActive) {
+    try {
+      if (localStorage.getItem(BACKFILL_ASKED_KEY) === today) return;
+    } catch {
+      // 保存できない環境では毎回確認になるが、記録済みなら下の判定で出ない
+    }
+    const [latest] = await api("/api/sleep-logs?limit=1");
+    const coveredSince = `${addDaysToDate(today, -1)} 18:00:00`;
+    if (latest && (latest.bedtime_at >= coveredSince || (latest.wake_at && latest.wake_at >= `${today} 00:00:00`))) return;
   }
-  const [latest] = await api("/api/sleep-logs?limit=1");
-  const coveredSince = `${addDaysToDate(today, -1)} 18:00:00`;
-  if (latest && (latest.bedtime_at >= coveredSince || (latest.wake_at && latest.wake_at >= `${today} 00:00:00`))) return;
   if (timerSubject || visiblePanels().length) return;
   try {
     localStorage.setItem(BACKFILL_ASKED_KEY, today);
@@ -6092,6 +6107,7 @@ document.getElementById("wake-mood-save").addEventListener("click", async () => 
   closeWakeMoodPanel();
   if (mode !== "recorded") {
     await saveMorningSleep(mode, log, correctedWake, bed);
+    morningGateActive = false;
     // 起床の保存で「寝ている」状態が解けたあとに、朝の概況を出す
     maybeShowMorningOverview().catch((err) => console.error("morning overview failed:", err));
   } else if (log && correctedWake) {
