@@ -3319,8 +3319,8 @@ def _evening_gate_active_now(conn) -> bool:
     return _in_evening_window(now.hour * 60 + now.minute, _read_screen_budget_params(conn))
 
 
-# 夜のゲートのスキップ権(2026-11-04): 崩れた夜の逃げ道。その予算日(3時区切り)だけYouTubeを
-# セッションなしで開ける(Instagramは止まったまま)。週(月〜日)に2回まで。回数は数字を
+# 夜のゲートのスキップ権(2026-11-04): 崩れた夜の逃げ道。その予算日(3時区切り)だけYouTubeも
+# Instagramもセッションなしで開ける。週(月〜日)に2回まで。回数は数字を
 # 変えて再デプロイしないと変えられない(美緒の承認フローには載せていない)
 EVENING_GATE_SKIPS_PER_WEEK = 2
 
@@ -4520,7 +4520,7 @@ def focus_session_status(token: str | None = None):
     # 夜のゲート(2026-11-04): 夜枠の間はtrue。YouTubeはセッション中だけ、Instagramは丸ごと止める
     _apply_due_screen_budget_changes(conn)
     result["evening_gate_active"] = _evening_gate_active_now(conn)
-    # スキップ権を使った夜は、YouTubeだけセッションなしで開ける(Instagramは止まったまま)
+    # スキップ権を使った夜は、YouTubeもInstagramもセッションなしで開ける(キー名は初期の名残)
     result["evening_gate_youtube_open"] = _evening_gate_state(conn)["skipped_today"]
     conn.close()
     return result

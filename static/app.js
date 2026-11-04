@@ -3250,8 +3250,8 @@ async function loadScreenBudget() {
 }
 
 // ---------- evening gate skip (2026-11-04) ----------
-// 夜枠(初期19:45〜翌3:00)は、勉強セッションを始めないとYouTubeが開けず、Instagramは丸ごと止まる
-// (スマホのUtilityが判定)。崩れた夜の逃げ道として、その夜だけYouTubeを開けるスキップが週2回まで。
+// 夜枠(初期19:45〜翌3:00)は、勉強セッションを始めないとYouTubeもInstagramも開けない
+// (スマホのUtilityが判定)。崩れた夜の逃げ道として、その夜だけセッションなしで両方開けるスキップが週2回まで。
 let eveningGateState = null;
 let eveningSkipConfirmTimer = null;
 
@@ -3289,7 +3289,7 @@ document.getElementById("screen-budget-banner-skip").addEventListener("click", a
   const btn = e.currentTarget;
   if (!btn.classList.contains("confirm")) {
     btn.classList.add("confirm");
-    btn.textContent = "Tap again to skip (Instagram stays off)";
+    btn.textContent = "Tap again to skip";
     eveningSkipConfirmTimer = setTimeout(renderEveningGate, 4000);
     return;
   }
