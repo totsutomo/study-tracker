@@ -1987,13 +1987,14 @@ body:has(#tab-calendar.active) {
 }
 
 .cal-day {
+  --cal-pad: 2px; /* 複数日の帯が隣のマスとつながる分(.cal-band.join-*)。paddingと同じ値にする */
   min-width: 0; /* 長い予定名がgrid-template-columnsの自動最小サイズを押し広げてグリッドが
                    横にはみ出すのを防ぐ(grid/flexの既定min-width:autoを明示的に無効化) */
   min-height: 0;
   overflow: hidden;
   border-right: 1px solid var(--cal-line);
   border-bottom: 1px solid var(--cal-line);
-  padding: 0 2px;
+  padding: 0 var(--cal-pad);
   display: flex;
   flex-direction: column;
   cursor: pointer;
@@ -2326,6 +2327,21 @@ body:has(#tab-calendar.active) {
 
 .add-panel.is-allday .start-row .allday-toggle {
   margin-left: 0;
+}
+
+/* 終日のときだけ出す欄(複数日の終了日) */
+.add-panel .allday-only {
+  display: none;
+}
+
+.add-panel.is-allday .allday-only {
+  display: block;
+}
+
+.add-panel.is-task .allday-only,
+.add-panel.is-task .color-swatches,
+.add-panel.is-task .event-only-label {
+  display: none;
 }
 
 .add-panel.is-task .allday-toggle,
@@ -2971,7 +2987,7 @@ body:has(#tab-calendar.active) {
   }
 
   .cal-day {
-    padding: 0 6px;
+    --cal-pad: 6px;
   }
 
   .cal-day-head {
@@ -4795,3 +4811,112 @@ body.quick-open #tabbar {
 .wo-spark { flex: 1; height: 40px; max-width: 220px; }
 .wo-body-val { flex: 0 0 auto; font-weight: 700; font-variant-numeric: tabular-nums; }
 .wo-grid .goal-progress-card { margin: 0; }
+
+
+/* 複数日の予定: 前後の日とつながる側は角と枠を取り、マスの余白の分だけ隣へ伸ばす(2026-11-05) */
+.cal-band.join-left {
+  margin-left: calc(-1 * var(--cal-pad));
+  border-left-width: 0;
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
+
+.cal-band.join-right {
+  margin-right: calc(-1 * var(--cal-pad));
+  border-right-width: 0;
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+/* カテゴリの選択(色の丸つき)。元のselectは値の入れ物として残し、見えなくする */
+.cat-select-hidden {
+  display: none;
+}
+
+.cat-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.cat-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.cat-chip.active {
+  border-color: var(--text);
+  background: color-mix(in srgb, var(--text) 12%, transparent);
+}
+
+.cat-chip i,
+.cat-color-dot,
+.color-swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+.color-swatches,
+.cat-color-pop {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.color-swatch {
+  width: 26px;
+  height: 26px;
+  border: 2px solid transparent;
+  padding: 0;
+  cursor: pointer;
+}
+
+.color-swatch.active {
+  border-color: var(--text);
+}
+
+.color-swatch-auto {
+  width: auto;
+  height: 26px;
+  border-radius: 13px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+}
+
+.color-swatch-auto.active {
+  border-color: var(--text);
+}
+
+.cat-color-dot {
+  width: 22px;
+  height: 22px;
+  border: 2px solid var(--border);
+  padding: 0;
+  cursor: pointer;
+}
+
+.cat-color-pop {
+  flex-basis: 100%;
+  padding: 6px 0 2px;
+}
+
+#category-list li {
+  flex-wrap: wrap;
+}

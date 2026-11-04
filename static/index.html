@@ -680,7 +680,7 @@
         </div>
         <button type="button" id="cal-copy-week-btn" class="secondary copyweek-trigger-btn hidden">Copy last week's schedule</button>
         <div class="cal-weekday-row" id="cal-weekday-row">
-          <span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span class="sat">Sat</span><span class="sun">Sun</span>
+          <span class="sun">Sun</span><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span class="sat">Sat</span>
         </div>
         <div id="cal-grid" class="cal-grid"></div>
 
@@ -748,10 +748,15 @@
       <details class="more-options" id="event-more-options">
         <summary id="event-more-summary">More options</summary>
         <div class="more-options-body">
-          <select id="event-category">
+          <select id="event-category" class="cat-select-hidden">
             <option value="">Category: None</option>
           </select>
+          <div class="cat-chips" id="event-category-chips"></div>
           <div class="event-only">
+            <label class="field-label allday-only" for="event-end-date">To (end date, multi-day)</label>
+            <input type="date" id="event-end-date" class="allday-only">
+            <label class="field-label">Color (this event only)</label>
+            <div class="color-swatches" id="event-color-swatches"></div>
             <label class="field-label timed-only" for="event-end-time">End</label>
             <input type="time" id="event-end-time" class="timed-only" required>
             <select id="event-notify" class="timed-only">
@@ -804,13 +809,18 @@
     </div>
     <form id="event-detail-form" class="add-form">
       <input type="text" id="event-detail-title" placeholder="Event title" required>
-      <select id="event-detail-category">
+      <select id="event-detail-category" class="cat-select-hidden">
         <option value="">Category: None</option>
       </select>
+      <div class="cat-chips" id="event-detail-category-chips"></div>
       <div class="form-row">
         <input type="date" id="event-detail-date" required>
       </div>
       <label class="checkbox-label"><input type="checkbox" id="event-detail-allday"> All day</label>
+      <label class="field-label allday-only" for="event-detail-end-date">To (end date, multi-day)</label>
+      <input type="date" id="event-detail-end-date" class="allday-only">
+      <label class="field-label">Color (this event only)</label>
+      <div class="color-swatches" id="event-detail-color-swatches"></div>
       <div class="form-row timed-only">
         <input type="time" id="event-detail-start-time" required>
         <input type="time" id="event-detail-end-time" required>

@@ -466,6 +466,12 @@ def _migrate(conn):
         conn.execute("ALTER TABLE events ADD COLUMN last_notified_occurrence TEXT")
     if "note" not in event_cols:
         conn.execute("ALTER TABLE events ADD COLUMN note TEXT")
+    # 複数日の予定(2026-11-05): 終日の予定だけ、dateからend_date(含む)までを1つの予定として扱う。
+    # colorはその予定だけカテゴリ色を上書きする(NULL=カテゴリの色)
+    if "end_date" not in event_cols:
+        conn.execute("ALTER TABLE events ADD COLUMN end_date TEXT")
+    if "color" not in event_cols:
+        conn.execute("ALTER TABLE events ADD COLUMN color TEXT")
 
     activation_cols = [row[1] for row in conn.execute("PRAGMA table_info(activation_logs)").fetchall()]
     if "mood" not in activation_cols:
@@ -625,6 +631,16 @@ def _migrate(conn):
     # 玉ねぎを買う等の生活ToDoが勉強の達成率に混ざらないようにする。列を足した初回だけ、
     # 生活・雑務用のother(旧名その他)をオフにする(以後のオン/オフは設定画面で切り替える)
     cat_cols = [row[1] for row in conn.execute("PRAGMA table_info(categories)").fetchall()]
+    # カテゴリの色を固定する(2026-11-05)。それまでは並び順(id順)で7色を自動で割り当てていたので、
+    # 列を足した初回だけ今見えている色をそのまま保存する(見た目が変わらないように)
+    if "color" not in cat_cols:
+        conn.execute("ALTER TABLE categories ADD COLUMN color TEXT")
+    # 色が未設定のカテゴリ(初回の移行・初期カテゴリ)に、id順の今の自動配色を保存する。何度走っても同じ結果
+    for i, (cat_id, color) in enumerate(conn.execute("SELECT id, color FROM categories ORDER BY id ASC").fetchall()):
+        if not color:
+            conn.execute(
+                "UPDATE categories SET color = ? WHERE id = ?", (CATEGORY_COLOR_PALETTE[i % len(CATEGORY_COLOR_PALETTE)], cat_id)
+            )
     if "counts_as_study" not in cat_cols:
         conn.execute("ALTER TABLE categories ADD COLUMN counts_as_study INTEGER NOT NULL DEFAULT 1")
         conn.execute("UPDATE categories SET counts_as_study = 0 WHERE name IN ('other', 'その他')")
@@ -649,6 +665,10 @@ def _migrate(conn):
     )
 
     conn.commit()
+
+
+# static/app.jsのCATEGORY_COLOR_PALETTEと同じ並び(順番を変えると既存カテゴリの色が変わる)
+CATEGORY_COLOR_PALETTE = ["#3987e5", "#d95926", "#199e70", "#c98500", "#d55181", "#9085e9", "#e66767"]
 
 
 def _seed_categories(conn):

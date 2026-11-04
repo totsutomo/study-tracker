@@ -921,7 +921,7 @@ function renderTodaySchedule(events) {
     ${events.map((e, i) => `
       <button type="button" class="today-event" data-i="${i}">
         <span class="today-event-time">${e.start_time || "All day"}</span>
-        <i style="background:${colorFor(e.category)}"></i>
+        <i style="background:${eventColor(e)}"></i>
         <span class="today-event-title">${escapeHtml(e.title)}</span>
       </button>`).join("") || `<p class="today-empty">No events today</p>`}
     <button type="button" class="link-btn" id="today-add-event">+ Add event</button>
@@ -1087,6 +1087,11 @@ function colorFor(subjectName) {
   return categoryColorMap[subjectName] || "#6b7280";
 }
 
+// 予定の色: その予定だけの上書き(events.color)があればそれ、なければカテゴリの色
+function eventColor(ev) {
+  return ev.color || colorFor(ev.category || "");
+}
+
 // preferCache: 起動時用。前回のカテゴリーが端末に残っていればそれで即描画して返り、
 // 最新の取得は裏で続ける(起動処理全体がこの1往復を待たされないように、2026-09-28)。
 // カテゴリーを編集した直後など、最新を確実に反映したい呼び出し元は従来通りawaitで待てる。
@@ -1114,9 +1119,10 @@ function countsAsStudyTodo(t) {
 function applyCategories(cats) {
   allCategories = cats;
 
+  // 色はカテゴリごとに保存した固定色(2026-11-05〜)。未設定の古いキャッシュだけ、従来の並び順の自動配色
   categoryColorMap = {};
   cats.forEach((c, i) => {
-    categoryColorMap[c.name] = CATEGORY_COLOR_PALETTE[i % CATEGORY_COLOR_PALETTE.length];
+    categoryColorMap[c.name] = c.color || CATEGORY_COLOR_PALETTE[i % CATEGORY_COLOR_PALETTE.length];
   });
 
   renderQuickSubjects(cats);
@@ -1149,6 +1155,7 @@ function applyCategories(cats) {
 function renderCategoryItem(cat, list) {
   const li = document.createElement("li");
   li.innerHTML = `
+    <button type="button" class="cat-color-dot" style="background:${colorFor(cat.name)}" title="Color" aria-label="Change color"></button>
     <input type="text" class="category-name-input" value="${escapeHtml(cat.name)}">
     <label class="checkbox-label" title="このカテゴリのToDoをスマホ利用時間・ToDo達成率の計算に含める">
       <input type="checkbox" class="category-study-toggle" ${cat.counts_as_study ? "checked" : ""}> Study
@@ -1156,6 +1163,43 @@ function renderCategoryItem(cat, list) {
     <button class="delete-btn" title="Delete">×</button>
   `;
   const input = li.querySelector(".category-name-input");
+  const colorDot = li.querySelector(".cat-color-dot");
+  colorDot.addEventListener("click", () => {
+    const open = li.querySelector(".cat-color-pop");
+    if (open) {
+      open.remove();
+      return;
+    }
+    const pop = document.createElement("div");
+    pop.className = "cat-color-pop";
+    pop.innerHTML = CATEGORY_COLOR_PALETTE.map(
+      (c) => `<button type="button" class="color-swatch${colorFor(cat.name) === c ? " active" : ""}" data-color="${c}" style="background:${c}" aria-label="${c}"></button>`,
+    ).join("");
+    pop.querySelectorAll("button").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const prev = cat.color;
+        const color = btn.dataset.color;
+        cat.color = color;
+        categoryColorMap[cat.name] = color;
+        colorDot.style.background = color;
+        pop.remove();
+        renderCategoryChips("event-category");
+        renderCategoryChips("event-detail-category");
+        renderQuickSubjects(allCategories);
+        renderCalendarView();
+        try {
+          await api(`/api/categories/${cat.id}`, { method: "PUT", body: JSON.stringify({ color }) });
+        } catch (err) {
+          cat.color = prev;
+          if (prev) categoryColorMap[cat.name] = prev;
+          colorDot.style.background = colorFor(cat.name);
+          renderCalendarView();
+          showToast("色の変更に失敗しました。もう一度お試しください");
+        }
+      });
+    });
+    li.appendChild(pop);
+  });
   const studyToggle = li.querySelector(".category-study-toggle");
   studyToggle.addEventListener("change", async () => {
     const prev = cat.counts_as_study;
@@ -6143,12 +6187,63 @@ function populateEventCategorySelect(cats) {
       `<option value="">Category: None</option>` +
       cats.map((c) => `<option value="${escapeHtml(c.name)}">${escapeHtml(c.name)}</option>`).join("");
     if (cats.some((c) => c.name === previous)) select.value = previous;
+    renderCategoryChips(id);
+  });
+}
+
+// カテゴリを色の丸つきのチップで選ぶ(2026-11-05)。選ぶとカテゴリの色が自動で付くので、色の対応を覚えなくてよい。
+// 元のselectは値の入れ物として残し、チップを押すとそのselectの値を変える
+function renderCategoryChips(selectId) {
+  const select = document.getElementById(selectId);
+  const box = document.getElementById(`${selectId}-chips`);
+  if (!select || !box) return;
+  const items = [{ name: "", label: "None", color: "var(--border)" }, ...allCategories.map((c) => ({ name: c.name, label: c.name, color: colorFor(c.name) }))];
+  box.innerHTML = items
+    .map(
+      (it) =>
+        `<button type="button" class="cat-chip${select.value === it.name ? " active" : ""}" data-name="${escapeHtml(it.name)}"><i style="background:${it.color}"></i>${escapeHtml(it.label)}</button>`,
+    )
+    .join("");
+  box.querySelectorAll(".cat-chip").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      select.value = btn.dataset.name;
+      select.dispatchEvent(new Event("change"));
+    });
+  });
+}
+
+["event-category", "event-detail-category"].forEach((id) => {
+  document.getElementById(id).addEventListener("change", () => {
+    renderCategoryChips(id);
+    refreshColorSwatches(id === "event-category" ? "event" : "detail");
+  });
+});
+
+// この予定だけの色(上書き)。先頭の「Auto」はカテゴリの色に従う(上書きなし)
+const eventColorOverride = { event: null, detail: null };
+
+function refreshColorSwatches(which) {
+  const box = document.getElementById(which === "event" ? "event-color-swatches" : "event-detail-color-swatches");
+  const catSelect = document.getElementById(which === "event" ? "event-category" : "event-detail-category");
+  if (!box) return;
+  const current = eventColorOverride[which];
+  const autoColor = colorFor(catSelect.value);
+  box.innerHTML =
+    `<button type="button" class="color-swatch-auto${current ? "" : " active"}" data-color="">Auto <i class="color-swatch" style="background:${autoColor};width:12px;height:12px;vertical-align:-1px"></i></button>` +
+    CATEGORY_COLOR_PALETTE.map(
+      (c) => `<button type="button" class="color-swatch${current === c ? " active" : ""}" data-color="${c}" style="background:${c}" aria-label="${c}"></button>`,
+    ).join("");
+  box.querySelectorAll("button").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      eventColorOverride[which] = btn.dataset.color || null;
+      refreshColorSwatches(which);
+    });
   });
 }
 
 let calYear, calMonth; // calMonth is 1-based
 let calViewMode = "month"; // "month" | "week"
-let calWeekStart = null; // ISO date (Monday), used when calViewMode === "week"
+let calWeekStart = null; // ISO date (Sunday、日曜始まり), used when calViewMode === "week"
 // カレンダーを開いた瞬間に「今日の予定」が見えるよう、常に今日をデフォルト選択にしておく。
 let selectedCalDate = todayStr();
 let calEventsCache = [];
@@ -6170,7 +6265,7 @@ async function refreshIfDayChanged() {
     selectedCalDate = nowToday;
     calYear = now.getFullYear();
     calMonth = now.getMonth() + 1;
-    if (calViewMode === "week") calWeekStart = mondayOf(nowToday);
+    if (calViewMode === "week") calWeekStart = calWeekStartOf(nowToday);
   }
   loadGoalProgress();
   loadTodos();
@@ -6214,10 +6309,10 @@ function addDaysToDate(dateStr, delta) {
   return formatLocalDate(d);
 }
 
-function mondayOf(dateStr) {
+// カレンダーの週の頭(日曜始まり、2026-11-05に月曜始まりから変更。Study等の週集計は月曜始まりのまま)
+function calWeekStartOf(dateStr) {
   const d = new Date(dateStr + "T00:00:00");
-  const dow = (d.getDay() + 6) % 7; // 0 = Monday
-  return addDaysToDate(dateStr, -dow);
+  return addDaysToDate(dateStr, -d.getDay());
 }
 
 const CAL_WEEKDAY_EN = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -6463,10 +6558,24 @@ function calCellBands(dateStr, capacity, withTime) {
   const items = [
     ...calEventsCache
       .filter((e) => e.occurrence_date === dateStr)
-      .sort((a, b) => (a.start_time || "").localeCompare(b.start_time || ""))
+      // 複数日の予定を先頭に固定して、日をまたいでも同じ高さに並ぶようにする(開始日→id順)
+      .sort((a, b) => {
+        const am = a.end_date ? 0 : 1;
+        const bm = b.end_date ? 0 : 1;
+        if (am !== bm) return am - bm;
+        if (am === 0) return a.date.localeCompare(b.date) || (a.id || 0) - (b.id || 0);
+        return (a.start_time || "").localeCompare(b.start_time || "");
+      })
       .map((e) => {
         const time = withTime && e.start_time ? `<b>${e.start_time}</b> ` : "";
-        return `<span class="cal-band" style="--c:${colorFor(e.category || "")}">${time}${escapeHtml(e.title)}</span>`;
+        // 複数日の予定は、同じ週の前後の日とつながる側の枠を取り、つながった所では名前を繰り返さない。
+        // 日曜(週の頭)・土曜(週の終わり)で一度切って、次の行でまた名前を出す
+        const dow = new Date(`${dateStr}T00:00:00`).getDay();
+        const joinLeft = !!e.end_date && dateStr > e.date && dow !== 0;
+        const joinRight = !!e.end_date && dateStr < e.end_date && dow !== 6;
+        const cls = `cal-band${joinLeft ? " join-left" : ""}${joinRight ? " join-right" : ""}`;
+        const label = joinLeft ? "&nbsp;" : `${time}${escapeHtml(e.title)}`;
+        return `<span class="${cls}" style="--c:${eventColor(e)}">${label}</span>`;
       }),
     ...calGridTodos(dateStr).map(
       (t) => `<span class="cal-band cal-band-todo${t.done ? " done" : ""}"><i class="cal-band-box"></i>${escapeHtml(t.title)}</span>`,
@@ -6480,7 +6589,7 @@ function calCellBands(dateStr, capacity, withTime) {
 function renderCalGrid() {
   const grid = document.getElementById("cal-grid");
   const firstOfMonth = new Date(calYear, calMonth - 1, 1);
-  const firstWeekday = (firstOfMonth.getDay() + 6) % 7; // 0 = Monday
+  const firstWeekday = firstOfMonth.getDay(); // 0 = Sunday(日曜始まり)
   const totalDays = daysInMonth(calYear, calMonth);
   const prevMonthDays = daysInMonth(calMonth === 1 ? calYear - 1 : calYear, calMonth === 1 ? 12 : calMonth - 1);
 
@@ -6515,8 +6624,8 @@ function renderCalGrid() {
       const minAchievedMark = minReached ? `<span class="cal-min-mark" title="Minimum reached">${ICONS.check}</span>` : "";
       const classes = ["cal-day"];
       const weekdayCol = i % 7;
-      if (weekdayCol === 5) classes.push("sat");
-      if (weekdayCol === 6) classes.push("sun");
+      if (weekdayCol === 6) classes.push("sat");
+      if (weekdayCol === 0) classes.push("sun");
       if (c.date === today) classes.push("today");
       if (c.date === selectedCalDate) classes.push("selected");
       return `
@@ -6613,7 +6722,7 @@ function renderWeekTimeGrid() {
   columns.style.height = `${totalHeight}px`;
 
   const today = todayStr();
-  const weekdayNames = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+  const weekdayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
   const days = Array.from({ length: 7 }, (_, i) => addDaysToDate(calWeekStart, i));
 
   header.innerHTML =
@@ -6621,8 +6730,8 @@ function renderWeekTimeGrid() {
     days
       .map((d, i) => {
         const classes = ["cal-week-daycol"];
-        if (i === 5) classes.push("sat");
-        if (i === 6) classes.push("sun");
+        if (i === 6) classes.push("sat");
+        if (i === 0) classes.push("sun");
         if (d === today) classes.push("today");
         if (d === selectedCalDate) classes.push("selected");
         return `
@@ -6651,7 +6760,7 @@ function renderWeekTimeGrid() {
           const height = Math.max(((end - start) / 60) * CAL_HOUR_HEIGHT - 2, 16);
           const width = 100 / totalCols;
           const left = col * width;
-          const color = colorFor(ev.category || "");
+          const color = eventColor(ev);
           return `
             <div class="cal-event-block" data-id="${ev.id}"
                  style="top:${top}px;height:${height}px;left:calc(${left}% + 2px);width:calc(${width}% - 4px);background:${color}3d;border-left-color:${color}">
@@ -6712,7 +6821,7 @@ function renderWeekAllDayLane(days) {
     `<span class="cal-week-allday-label">All day</span>` +
     byDay
       .map((list) => `<div class="cal-week-allday-cell">${list
-        .map((ev) => `<button type="button" class="cal-week-allday-item" data-id="${ev.id}" style="--c:${colorFor(ev.category || "")}">${escapeHtml(ev.title)}</button>`)
+        .map((ev) => `<button type="button" class="cal-week-allday-item" data-id="${ev.id}" style="--c:${eventColor(ev)}">${escapeHtml(ev.title)}</button>`)
         .join("")}</div>`)
       .join("");
   lane.querySelectorAll(".cal-week-allday-item").forEach((el) => {
@@ -6767,7 +6876,7 @@ function renderCalDayDetail() {
     const noteMark = ev.note ? ` ${ICONS.note}` : "";
     li.innerHTML = `
       ${ev.start_time ? `<span class="cal-event-row-time">${ev.start_time}</span>` : `<span class="cal-event-row-time allday">All day</span>`}
-      <span class="cal-event-row-bar" style="background:${colorFor(ev.category || "")}"></span>
+      <span class="cal-event-row-bar" style="background:${eventColor(ev)}"></span>
       <span class="cal-event-row-title">${escapeHtml(ev.title)}${ev.recurrence ? ` ${ICONS.repeat}` : ""}${noteMark}</span>
       <span class="cal-event-row-chevron" aria-hidden="true">›</span>
     `;
@@ -6885,7 +6994,7 @@ document.getElementById("cal-today-btn").addEventListener("click", () => {
   const d = new Date(today + "T00:00:00");
   calYear = d.getFullYear();
   calMonth = d.getMonth() + 1;
-  calWeekStart = mondayOf(today);
+  calWeekStart = calWeekStartOf(today);
   selectedCalDate = today;
   loadCalendar({ refreshTodayPanel: false });
 });
@@ -6935,7 +7044,7 @@ document.querySelectorAll("#cal-view-toggle .cal-view-btn").forEach((btn) => {
     calViewMode = mode;
     document.querySelectorAll("#cal-view-toggle .cal-view-btn").forEach((b) => b.classList.toggle("active", b === btn));
     if (calViewMode === "week") {
-      calWeekStart = mondayOf(selectedCalDate || todayStr());
+      calWeekStart = calWeekStartOf(selectedCalDate || todayStr());
     } else {
       const anchor = new Date(calWeekStart + "T00:00:00");
       calYear = anchor.getFullYear();
@@ -6994,6 +7103,9 @@ function openEventAddPanel({ date = null, kind = "event" } = {}) {
   document.getElementById("event-more-options").open = false;
   eventEndTouched = false;
   document.getElementById("event-date").value = date || selectedCalDate || todayStr();
+  eventColorOverride.event = null;
+  renderCategoryChips("event-category");
+  refreshColorSwatches("event");
   setEventAllDay(false);
   setAddKind(kind);
   eventAddPanel.classList.remove("hidden");
@@ -7173,7 +7285,13 @@ function expandEventForMonth(ev, key) {
   const monthStart = isoDate(y, m, 1);
   const monthEnd = isoDate(y, m, daysInMonth(y, m));
   if (!ev.recurrence) {
-    return ev.date >= monthStart && ev.date <= monthEnd ? [{ ...ev, occurrence_date: ev.date }] : [];
+    // 複数日の予定(終日のみ)は、サーバー(main.py list_events)と同じくその月に入る日ごとに展開する
+    const last = ev.end_date && ev.end_date > ev.date ? ev.end_date : ev.date;
+    const out = [];
+    for (let d = ev.date > monthStart ? ev.date : monthStart; d <= (last < monthEnd ? last : monthEnd); d = addDaysToDate(d, 1)) {
+      out.push({ ...ev, occurrence_date: d });
+    }
+    return out;
   }
   const days = new Set(ev.recurrence.split(","));
   const rangeStart = ev.date > monthStart ? ev.date : monthStart;
@@ -7270,6 +7388,9 @@ guardedSubmit(document.getElementById("event-form"), async (e) => {
   const note = document.getElementById("event-note").value.trim() || null;
   if (!title || !evDate || (!allDay && (!startTime || !endTime))) return;
   const recurrence = selectedEventRecurrenceDays.size ? [...selectedEventRecurrenceDays].join(",") : null;
+  // 複数日にできるのは「終日で繰り返しなし」だけ(サーバーも同じ条件で判定する)
+  const endDateInput = document.getElementById("event-end-date").value;
+  const end_date = allDay && !recurrence && endDateInput > evDate ? endDateInput : null;
   const payload = {
     title,
     category,
@@ -7280,8 +7401,11 @@ guardedSubmit(document.getElementById("event-form"), async (e) => {
     recurrence_until: recurrence ? recurrenceUntilInput : null,
     notify_offset_minutes,
     note,
+    end_date,
+    color: eventColorOverride.event,
   };
   e.target.reset();
+  eventColorOverride.event = null;
   setEventRecurrenceDays([]);
   setEventAllDay(false);
   closeEventAddPanel();
@@ -7541,6 +7665,10 @@ function openEventDetail(ev) {
   document.getElementById("event-detail-title").value = ev.title;
   document.getElementById("event-detail-category").value = ev.category || "";
   document.getElementById("event-detail-date").value = ev.date;
+  document.getElementById("event-detail-end-date").value = ev.end_date || "";
+  eventColorOverride.detail = ev.color || null;
+  renderCategoryChips("event-detail-category");
+  refreshColorSwatches("detail");
   const allDay = !ev.start_time;
   document.getElementById("event-detail-allday").checked = allDay;
   setEventDetailAllDay(allDay);
@@ -7620,6 +7748,8 @@ guardedSubmit(document.getElementById("event-detail-form"), async (e) => {
   const note = document.getElementById("event-detail-note").value.trim() || null;
   if (!title || !evDate || (!allDay && (!startTime || !endTime))) return;
   const recurrence = selectedEventDetailRecurrenceDays.size ? [...selectedEventDetailRecurrenceDays].join(",") : null;
+  const endDateInput = document.getElementById("event-detail-end-date").value;
+  const end_date = allDay && !recurrence && endDateInput > evDate ? endDateInput : null;
   const payload = {
     title,
     category,
@@ -7630,6 +7760,8 @@ guardedSubmit(document.getElementById("event-detail-form"), async (e) => {
     recurrence_until: recurrence ? recurrenceUntilInput : null,
     notify_offset_minutes,
     note,
+    end_date,
+    color: eventColorOverride.detail,
   };
   const eventId = currentDetailEventId;
   document.getElementById("event-detail-status").textContent = "Saved";
@@ -8688,7 +8820,7 @@ function moveCalSelection(delta) {
   const next = addDaysToDate(selectedCalDate || todayStr(), delta);
   const d = new Date(next + "T00:00:00");
   const outOfView = calViewMode === "week"
-    ? mondayOf(next) !== calWeekStart
+    ? calWeekStartOf(next) !== calWeekStart
     : d.getFullYear() !== calYear || d.getMonth() + 1 !== calMonth;
   if (!outOfView) {
     selectCalDate(next);
@@ -8696,7 +8828,7 @@ function moveCalSelection(delta) {
   }
   calYear = d.getFullYear();
   calMonth = d.getMonth() + 1;
-  calWeekStart = mondayOf(next);
+  calWeekStart = calWeekStartOf(next);
   selectedCalDate = next;
   loadCalendar({ refreshTodayPanel: false });
 }

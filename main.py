@@ -23,7 +23,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Streamin
 from pydantic import BaseModel
 from pywebpush import WebPushException, webpush
 
-from database import get_connection, init_db, row_to_dict, rows_to_dicts
+from database import CATEGORY_COLOR_PALETTE, get_connection, init_db, row_to_dict, rows_to_dicts
 
 app = FastAPI(title="Compass")
 
@@ -200,12 +200,14 @@ class TodoUpdate(BaseModel):
 class CategoryCreate(BaseModel):
     name: str
     counts_as_study: bool = True
+    color: str | None = None  # "#rrggbb"。省略すると、まだ使われていない色から順に割り当てる
 
 
 class CategoryUpdate(BaseModel):
     # どちらも省略可(名前変更と「勉強として数える」の切り替えは設定画面で別々に送られるため)
     name: str | None = None
     counts_as_study: bool | None = None
+    color: str | None = None
 
 
 class SettingsUpdate(BaseModel):
@@ -371,6 +373,8 @@ class EventCreate(BaseModel):
     recurrence_until: str | None = None  # "YYYY-MM-DD", only meaningful when recurrence is set
     notify_offset_minutes: int | None = None  # None = no notification, 0 = at start time, N = N minutes before
     note: str | None = None
+    end_date: str | None = None  # "YYYY-MM-DD"。終日で繰り返しなしの複数日予定だけ(dateからend_dateまで含む)
+    color: str | None = None  # "#rrggbb"。この予定だけカテゴリ色を上書き
 
 
 class EventUpdate(BaseModel):
@@ -383,6 +387,8 @@ class EventUpdate(BaseModel):
     recurrence_until: str | None = None
     notify_offset_minutes: int | None = None
     note: str | None = None
+    end_date: str | None = None
+    color: str | None = None
 
 
 class PushSubscribeIn(BaseModel):
@@ -1358,13 +1364,19 @@ def create_category(category: CategoryCreate):
     if existing is not None:
         conn.close()
         raise HTTPException(status_code=400, detail="category already exists")
+    color = _clean_color(category.color)
+    if color is None:
+        # まだどのカテゴリにも使われていない色から順に。全部使われていれば先頭から使い回す
+        used = {r[0] for r in conn.execute("SELECT color FROM categories WHERE color IS NOT NULL").fetchall()}
+        color = next((c for c in CATEGORY_COLOR_PALETTE if c not in used), CATEGORY_COLOR_PALETTE[0])
     cur = conn.execute(
-        "INSERT INTO categories (name, counts_as_study) VALUES (?, ?)", (name, int(category.counts_as_study))
+        "INSERT INTO categories (name, counts_as_study, color) VALUES (?, ?, ?)",
+        (name, int(category.counts_as_study), color),
     )
     conn.commit()
     new_id = cur.lastrowid
     conn.close()
-    return {"id": new_id, "name": name, "counts_as_study": int(category.counts_as_study)}
+    return {"id": new_id, "name": name, "counts_as_study": int(category.counts_as_study), "color": color}
 
 
 @app.put("/api/categories/{category_id}")
@@ -1373,11 +1385,12 @@ def update_category(category_id: int, category: CategoryUpdate):
     if category.name is not None and not name:
         raise HTTPException(status_code=400, detail="name is required")
     conn = get_connection()
-    row = conn.execute("SELECT name, counts_as_study FROM categories WHERE id = ?", (category_id,)).fetchone()
+    color = _clean_color(category.color)
+    row = conn.execute("SELECT name, counts_as_study, color FROM categories WHERE id = ?", (category_id,)).fetchone()
     if row is None:
         conn.close()
         raise HTTPException(status_code=404, detail="category not found")
-    old_name, counts_as_study = row
+    old_name, counts_as_study, old_color = row
     if name is not None and name != old_name:
         conn.execute("UPDATE categories SET name = ? WHERE id = ?", (name, category_id))
         conn.execute("UPDATE todos SET category = ? WHERE category = ?", (name, old_name))
@@ -1386,9 +1399,11 @@ def update_category(category_id: int, category: CategoryUpdate):
     if category.counts_as_study is not None:
         counts_as_study = int(category.counts_as_study)
         conn.execute("UPDATE categories SET counts_as_study = ? WHERE id = ?", (counts_as_study, category_id))
+    if color is not None:
+        conn.execute("UPDATE categories SET color = ? WHERE id = ?", (color, category_id))
     conn.commit()
     conn.close()
-    return {"id": category_id, "name": name or old_name, "counts_as_study": counts_as_study}
+    return {"id": category_id, "name": name or old_name, "counts_as_study": counts_as_study, "color": color or old_color}
 
 
 @app.delete("/api/categories/{category_id}")
@@ -4130,8 +4145,12 @@ def list_events(year: int, month: int):
     for row in rows:
         anchor = date.fromisoformat(row["date"])
         if not row["recurrence"]:
-            if month_start <= anchor <= month_end:
-                occurrences.append({**row, "occurrence_date": row["date"]})
+            # 複数日の予定(終日のみ)は、その月に入る日ごとに1件ずつ展開する(画面側が日ごとの帯を描く)
+            last = date.fromisoformat(row["end_date"]) if row.get("end_date") else anchor
+            d = max(anchor, month_start)
+            while d <= min(last, month_end):
+                occurrences.append({**row, "occurrence_date": d.isoformat()})
+                d += timedelta(days=1)
             continue
         days = set(row["recurrence"].split(","))
         until = date.fromisoformat(row["recurrence_until"]) if row["recurrence_until"] else None
@@ -4147,14 +4166,39 @@ def list_events(year: int, month: int):
     return occurrences
 
 
+HEX_COLOR_RE = re.compile(r"#[0-9a-fA-F]{6}")
+
+
+def _clean_color(value: str | None) -> str | None:
+    if value is None or value == "":
+        return None
+    if not HEX_COLOR_RE.fullmatch(value):
+        raise HTTPException(status_code=400, detail="color must be #rrggbb")
+    return value.lower()
+
+
+def _clean_event_end_date(event) -> str | None:
+    """複数日にできるのは「終日で繰り返しなし」の予定だけ。日付が逆・同日・条件外ならNone(単日)。"""
+    if not event.end_date or event.recurrence or event.start_time:
+        return None
+    try:
+        start = date.fromisoformat(event.date)
+        end = date.fromisoformat(event.end_date)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="invalid date")
+    return event.end_date if end > start else None
+
+
 @app.post("/api/events")
 def create_event(event: EventCreate):
+    end_date = _clean_event_end_date(event)
+    color = _clean_color(event.color)
     conn = get_connection()
     cur = conn.execute(
         "INSERT INTO events (title, category, date, start_time, end_time, recurrence, recurrence_until, "
-        "notify_offset_minutes, note) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "notify_offset_minutes, note, end_date, color) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (event.title, event.category, event.date, event.start_time, event.end_time,
-         event.recurrence, event.recurrence_until, event.notify_offset_minutes, event.note),
+         event.recurrence, event.recurrence_until, event.notify_offset_minutes, event.note, end_date, color),
     )
     conn.commit()
     new_id = cur.lastrowid
@@ -4164,6 +4208,8 @@ def create_event(event: EventCreate):
 
 @app.put("/api/events/{event_id}")
 def update_event(event_id: int, event: EventUpdate):
+    end_date = _clean_event_end_date(event)
+    color = _clean_color(event.color)
     conn = get_connection()
     row = conn.execute("SELECT id FROM events WHERE id = ?", (event_id,)).fetchone()
     if row is None:
@@ -4171,9 +4217,10 @@ def update_event(event_id: int, event: EventUpdate):
         raise HTTPException(status_code=404, detail="event not found")
     conn.execute(
         "UPDATE events SET title = ?, category = ?, date = ?, start_time = ?, end_time = ?, "
-        "recurrence = ?, recurrence_until = ?, notify_offset_minutes = ?, note = ? WHERE id = ?",
+        "recurrence = ?, recurrence_until = ?, notify_offset_minutes = ?, note = ?, end_date = ?, color = ? "
+        "WHERE id = ?",
         (event.title, event.category, event.date, event.start_time, event.end_time,
-         event.recurrence, event.recurrence_until, event.notify_offset_minutes, event.note, event_id),
+         event.recurrence, event.recurrence_until, event.notify_offset_minutes, event.note, end_date, color, event_id),
     )
     conn.commit()
     conn.close()
