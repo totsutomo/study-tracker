@@ -3211,6 +3211,12 @@ SCREEN_BUDGET_DEFAULTS = {
     "study_ratio": 0.75,       # 勉強1分につき何分ボーナスを与えるか
     "todo_bonus_max": 60,      # ToDo全件達成時の最大ボーナス(分)
     "daily_cap": 420,          # 1日の合計予算上限(分)
+    # 夜のゲート(2026-11-04): 夜枠はセッションを始めないとYouTubeが開けず、Instagramは丸ごと止まる。
+    # 夜枠のセッションは勉強ごほうび(study_ratio)に factor を掛けて目減りさせる(視聴でも増える抜け道の抑え)
+    "evening_gate_enabled": 1,
+    "evening_gate_start": "19:45",
+    "evening_gate_end": "03:00",
+    "evening_ratio_factor": 0.5,
 }
 # 集計除外(ノーカウント)対象のアプリ。ランチャー除外と同じ思想で、「勉強のためのスマホ利用」が
 # 予算を消費してしまう本末転倒を防ぐ。2026-09-14時点の初期値は主要な単機能アプリのみ実機未検証で
@@ -3255,6 +3261,10 @@ def _read_screen_budget_params(conn) -> dict:
         "study_ratio": float(d.get("screen_budget_study_ratio", SCREEN_BUDGET_DEFAULTS["study_ratio"])),
         "todo_bonus_max": int(d.get("screen_budget_todo_bonus_max", SCREEN_BUDGET_DEFAULTS["todo_bonus_max"])),
         "daily_cap": int(d.get("screen_budget_daily_cap", SCREEN_BUDGET_DEFAULTS["daily_cap"])),
+        "evening_gate_enabled": int(d.get("screen_budget_evening_gate_enabled", SCREEN_BUDGET_DEFAULTS["evening_gate_enabled"])),
+        "evening_gate_start": d.get("screen_budget_evening_gate_start") or SCREEN_BUDGET_DEFAULTS["evening_gate_start"],
+        "evening_gate_end": d.get("screen_budget_evening_gate_end") or SCREEN_BUDGET_DEFAULTS["evening_gate_end"],
+        "evening_ratio_factor": float(d.get("screen_budget_evening_ratio_factor", SCREEN_BUDGET_DEFAULTS["evening_ratio_factor"])),
         "study_packages": study_packages,
     }
 
@@ -3265,6 +3275,10 @@ def _write_screen_budget_params(conn, params: dict):
         "study_ratio": "screen_budget_study_ratio",
         "todo_bonus_max": "screen_budget_todo_bonus_max",
         "daily_cap": "screen_budget_daily_cap",
+        "evening_gate_enabled": "screen_budget_evening_gate_enabled",
+        "evening_gate_start": "screen_budget_evening_gate_start",
+        "evening_gate_end": "screen_budget_evening_gate_end",
+        "evening_ratio_factor": "screen_budget_evening_ratio_factor",
     }
     for field, key in key_map.items():
         if params.get(field) is None:
@@ -3280,6 +3294,29 @@ def _write_screen_budget_params(conn, params: dict):
             "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
             (json.dumps(params["study_packages"]),),
         )
+
+
+def _hm_to_minutes(value: str, fallback: str) -> int:
+    parsed = _parse_hhmm(value) or _parse_hhmm(fallback)
+    return parsed[0] * 60 + parsed[1]
+
+
+def _in_evening_window(minute_of_day: int, params: dict) -> bool:
+    """夜枠(start〜end、終わりが翌日にまたがる)に入っているか。無効なら常にFalse。"""
+    if not params["evening_gate_enabled"]:
+        return False
+    start = _hm_to_minutes(params["evening_gate_start"], SCREEN_BUDGET_DEFAULTS["evening_gate_start"])
+    end = _hm_to_minutes(params["evening_gate_end"], SCREEN_BUDGET_DEFAULTS["evening_gate_end"])
+    if start == end:
+        return False
+    if start < end:
+        return start <= minute_of_day < end
+    return minute_of_day >= start or minute_of_day < end
+
+
+def _evening_gate_active_now(conn) -> bool:
+    now = nz_now()
+    return _in_evening_window(now.hour * 60 + now.minute, _read_screen_budget_params(conn))
 
 
 def _apply_due_screen_budget_changes(conn):
@@ -3338,12 +3375,19 @@ def _compute_screen_budget_status(conn, date: str) -> dict:
     # 手動ログ入力(タイマーを使わず分数を直接入力)は実績を盛れてしまうため対象外にする。
     # timed=1がCompassタイマー、start_trigger付きはStack/vocab-app等の連携アプリの自動記録。
     # timed列ができる前(〜2026-10-05)のタイマー記録は、「きっかけ」を選んだものしか数えられない
-    study_minutes = conn.execute(
-        "SELECT COALESCE(SUM(minutes), 0) FROM study_logs "
+    study_rows = conn.execute(
+        "SELECT minutes, logged_at FROM study_logs "
         "WHERE (timed = 1 OR start_trigger IS NOT NULL) "
         "AND datetime(logged_at) >= datetime(?, ?) AND datetime(logged_at) < datetime(?, ?)",
         (date, f"+{SCREEN_BUDGET_DAY_START_HOUR} hours", date, f"+{24 + SCREEN_BUDGET_DAY_START_HOUR} hours"),
-    ).fetchone()[0]
+    ).fetchall()
+    study_minutes = sum(m for m, _ in study_rows)
+    # 夜枠の勉強は、記録した時刻(logged_at)が夜枠に入っているものを目減りさせる(2026-11-04)
+    evening_minutes = 0
+    for m, logged_at in study_rows:
+        t = datetime.fromisoformat(logged_at)
+        if _in_evening_window(t.hour * 60 + t.minute, params):
+            evening_minutes += m
 
     todo_row = conn.execute(
         f"SELECT COUNT(*), COALESCE(SUM(done), 0) FROM todos WHERE due_date = ? AND skipped = 0 AND {STUDY_TODO_FILTER}",
@@ -3358,7 +3402,10 @@ def _compute_screen_budget_status(conn, date: str) -> dict:
         "SELECT device, total_minutes FROM screen_time_logs WHERE date = ?", (date,)
     ).fetchall()
 
-    study_bonus = round(study_minutes * params["study_ratio"])
+    study_bonus = round(
+        (study_minutes - evening_minutes) * params["study_ratio"]
+        + evening_minutes * params["study_ratio"] * params["evening_ratio_factor"]
+    )
     todo_bonus = round(params["todo_bonus_max"] * todo_rate)
     budget = min(params["baseline_minutes"] + study_bonus + todo_bonus, params["daily_cap"])
     workout_penalty = _workout_penalty(_workout_summary(False), date)
@@ -3383,6 +3430,7 @@ def _compute_screen_budget_status(conn, date: str) -> dict:
         "breakdown": {
             "baseline_minutes": params["baseline_minutes"],
             "study_minutes": study_minutes,
+            "evening_study_minutes": evening_minutes,
             "study_ratio": params["study_ratio"],
             "study_bonus_minutes": study_bonus,
             "todo_total": todo_total,
@@ -4398,6 +4446,9 @@ def focus_session_status(token: str | None = None):
     result = _focus_session_status(conn)
     # JpBlockerは15秒ごとにここを見ているので、睡眠ロックも同じ問い合わせに相乗りさせる
     result["sleep_lock_remaining_sec"] = _sleep_lock_remaining_sec(conn)
+    # 夜のゲート(2026-11-04): 夜枠の間はtrue。YouTubeはセッション中だけ、Instagramは丸ごと止める
+    _apply_due_screen_budget_changes(conn)
+    result["evening_gate_active"] = _evening_gate_active_now(conn)
     conn.close()
     return result
 
