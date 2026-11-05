@@ -5830,8 +5830,22 @@ function wakeLoggedToday() {
   }
 }
 
+// 「今日の起床は記録済みか」の正本はサーバー。端末のメモだけだと、メモを付ける前に記録した分や
+// 別の端末で記録した分で、記録済みなのに帯が出てしまう。確かめられるまで帯は出さない
+let wakeCheckDone = false;
+async function refreshWakeLogged() {
+  try {
+    const [latest] = await api("/api/sleep-logs?limit=1");
+    if (latest && latest.wake_at && latest.wake_at >= `${todayStr()} 00:00:00`) markWakeLoggedToday();
+    wakeCheckDone = true;
+  } catch {
+    // 確かめられなかった時は帯を出さない(記録済みなのに出すより、出ない方がまし)
+  }
+  updateWakeStrip();
+}
+
 function updateWakeStrip() {
-  const show = sleepStateKnown && isMorningNow() && !sleepActiveLog && !wakeLoggedToday() && !timerSubject;
+  const show = wakeCheckDone && sleepStateKnown && isMorningNow() && !sleepActiveLog && !wakeLoggedToday() && !timerSubject;
   document.getElementById("wake-now").classList.toggle("hidden", !show);
   positionNowDock();
 }
@@ -5897,6 +5911,9 @@ const sleepFirstPaint = new Promise((resolve) => (resolveSleepFirstPaint = resol
 
 async function loadSleepActive() {
   const gen = sleepLocalGen;
+  // 起床・就寝をこの端末で記録した後の取り直しは、記録する前から飛んでいた通信と共有しない。
+  // 共有すると、記録前の古い返事(まだ寝ている)を受け取って「I'm up」の帯が復活する(2026-11-06)
+  if (gen > 0) inflightGets.delete(SLEEP_ACTIVE_PATH);
   await apiCached(SLEEP_ACTIVE_PATH, (log) => {
     if (gen !== sleepLocalGen) {
       cacheSleepActive();
@@ -6084,6 +6101,7 @@ async function maybeShowMorningPanel(prefetch = {}) {
 
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState !== "visible" || !isMorningNow()) return;
+  refreshWakeLogged();
   loadSleepActive()
     .then(maybeShowMorningPanel)
     .then(maybeShowMorningOverview)
@@ -8426,6 +8444,7 @@ async function hydrateFromCache() {
     ? { gate: api("/api/morning-gate"), latest: api("/api/sleep-logs?limit=1") }
     : {};
   Object.values(morningPrefetch).forEach((p) => p.catch(() => {})); // 使われなくても未処理エラーにしない
+  if (isMorningNow()) refreshWakeLogged();
   Promise.race([sleepFirstPaint, sleepLoad.catch(() => {})])
     .then(() => maybeShowMorningPanel(morningPrefetch))
     .then(maybeShowMorningOverview)
