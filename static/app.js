@@ -776,8 +776,20 @@ function renderTodos() {
   };
 }
 
-async function loadTodos() {
+// paintCache: 起動時だけtrue(2026-11-06)。前回の一覧を先に描く。期限切れは、このあと自動でスキップされるものなので
+// 描く時点で最初から「スキップ済み」として隠す(スキップされるまで一覧に残って見えるのを防ぐ)。
+// 起動以外(操作のあとの取り直し)で古いキャッシュを一瞬でも描くとちらつくので使わない
+async function loadTodos({ paintCache = false } = {}) {
+  let fresh = false;
+  if (paintCache) {
+    cacheGet("/api/todos").then((cached) => {
+      if (fresh || !Array.isArray(cached)) return;
+      allTodos = cached.map((t) => (!t.done && !t.skipped && isOverdue(t) && !isWorkoutTodo(t) ? { ...t, skipped: true } : t));
+      renderTodos();
+    });
+  }
   allTodos = await api("/api/todos");
+  fresh = true;
   renderTodos();
 }
 
@@ -824,43 +836,67 @@ document.addEventListener("visibilitychange", () => {
 // オフラインで記録して後から同期された日を「やらなかった」にしないよう、スキップの前にキャッシュなしで
 // ワークアウトに確かめ直し、確かめられなかった時は今回はスキップしない(次に開いた時にもう一度)。
 // 戻り値はスキップした件数(呼び出し元が他の表示を取り直すかの判断に使う)
+// 2026-11-06: 起動の待ち時間を減らすため、(1)alertで止めずトーストで知らせる (2)スキップは先に画面へ反映し、
+// サーバーへの送信は裏で行う(失敗した分は元に戻して次に開いた時に再試行) (3)ワークアウトの確かめ直し
+// (別アプリへの通信)はそれ以外のスキップの後ろに回す。呼び出し側はawaitしなくてよい
 async function autoSkipOverdueTodos() {
   const overdueOf = () => allTodos.filter((t) => t.id != null && !t.done && !t.skipped && isOverdue(t));
-  let quiet = [];
+  let anyRecurring = false;
+  let skippedCount = 0;
+
+  // 画面に先に反映→サーバーへ送る。送れなかった分は未スキップに戻す
+  const skipAll = async (list) => {
+    if (!list.length) return;
+    list.forEach((t) => {
+      t.skipped = true;
+      t.done = false;
+    });
+    renderTodos();
+    const results = await Promise.allSettled(
+      list.map((t) => api(`/api/todos/${t.id}/skip?reason=overdue`, { method: "POST" }))
+    );
+    // 送信中にloadTodosが一覧を取り直していると、list内のオブジェクトはもう画面の一覧のものではない
+    // (取り直しの返事が送信前の状態だと巻き戻る)。なのでidで今の一覧に結果を当て直す
+    const okIds = new Set();
+    const failedIds = new Set();
+    results.forEach((r, i) => {
+      if (r.status === "fulfilled") {
+        skippedCount++;
+        okIds.add(list[i].id);
+        if (list[i].recurrence) anyRecurring = true;
+      } else {
+        console.error("auto-skip failed:", r.reason);
+        failedIds.add(list[i].id);
+      }
+    });
+    allTodos.forEach((t) => {
+      if (okIds.has(t.id)) {
+        t.skipped = true;
+        t.done = false;
+      } else if (failedIds.has(t.id)) {
+        t.skipped = false;
+      }
+    });
+    renderTodos();
+  };
+
+  const loud = overdueOf().filter((t) => !isWorkoutTodo(t));
+  if (loud.length) {
+    const names = loud.map((t) => t.title);
+    showToast(`Skipped ${loud.length} overdue: ${names.slice(0, 2).join(", ")}${names.length > 2 ? ` +${names.length - 2}` : ""}`, null, 6000);
+  }
+  await skipAll(loud);
+
+  // ワークアウトは警告なしで黙ってスキップする。先に確かめ直し、確かめられなかった時は今回はスキップしない
   if (overdueOf().some(isWorkoutTodo)) {
     const r = await syncWorkoutTodos({ fresh: true }); // 記録があった日の分は、ここで済みになって一覧から外れる
-    if (r && (r.ok || !r.configured)) quiet = overdueOf().filter(isWorkoutTodo);
+    if (r && (r.ok || !r.configured)) await skipAll(overdueOf().filter(isWorkoutTodo));
   }
-  const loud = overdueOf().filter((t) => !isWorkoutTodo(t));
-  const overdue = [...loud, ...quiet];
-  if (overdue.length === 0) return 0;
-  if (loud.length) {
-    alert(
-      loud.length === 1
-        ? `期限切れのためスキップしました:\n・${loud[0].title}`
-        : `期限切れのため${loud.length}件をスキップしました:\n${loud.map((t) => `・${t.title}`).join("\n")}`
-    );
-  }
-  let anyRecurring = false;
-  await Promise.allSettled(
-    overdue.map((t) =>
-      api(`/api/todos/${t.id}/skip?reason=overdue`, { method: "POST" })
-        .then(() => {
-          t.skipped = true;
-          t.done = false;
-          if (t.recurrence) anyRecurring = true;
-        })
-        .catch((err) => console.error("auto-skip failed:", err))
-    )
-  );
+
   // 繰り返しToDoは/skip側で次回分の行がサーバーに追加生成されるため、その分を拾うために再取得する
-  if (anyRecurring) {
-    loadTodos();
-  } else {
-    renderTodos();
-  }
-  loadTodoStats();
-  return overdue.length;
+  if (anyRecurring) loadTodos();
+  if (skippedCount) loadTodoStats();
+  return skippedCount;
 }
 
 ["todo-search", "todo-filter-category", "todo-filter-today"].forEach((id) => {
@@ -5768,8 +5804,43 @@ function updateSleepBanner() {
   }
   document.getElementById("sleep-now-wake-btn").classList.toggle("hidden", locked);
   document.getElementById("sleep-lock-form").classList.toggle("hidden", locked);
+  updateWakeStrip();
+}
+
+// 朝の「起床を記録」帯(2026-11-06)。就寝を記録し忘れた朝は「I'm up」の帯が出ないので、
+// パネル(起動処理の終わりまで待つ)の代わりに、端末に残した記録だけで判断して先に出す。
+// 「今日はもう起床を記録した」は、記録した時・サーバーで確かめられた時にlocalStorageへ覚える
+const WAKE_LOGGED_KEY = "wakeLoggedDate";
+let sleepStateKnown = false; // 睡眠の状態を(キャッシュでも)一度でも受け取ったか。受け取る前に帯を出さない
+
+function markWakeLoggedToday() {
+  try {
+    localStorage.setItem(WAKE_LOGGED_KEY, todayStr());
+  } catch {
+    // 保存できない環境では、朝の間は帯が出続けるだけ
+  }
+  updateWakeStrip();
+}
+
+function wakeLoggedToday() {
+  try {
+    return localStorage.getItem(WAKE_LOGGED_KEY) === todayStr();
+  } catch {
+    return false;
+  }
+}
+
+function updateWakeStrip() {
+  const show = sleepStateKnown && isMorningNow() && !sleepActiveLog && !wakeLoggedToday() && !timerSubject;
+  document.getElementById("wake-now").classList.toggle("hidden", !show);
   positionNowDock();
 }
+setInterval(updateWakeStrip, 60000); // 朝の時間帯の始まり・終わりをまたいだ時に追従する
+
+document.getElementById("wake-now-btn").addEventListener("click", () => {
+  if (visiblePanels().length) return;
+  openWakeMoodPanel(null, "backfill");
+});
 
 function toDatetimeLocalValue(s) {
   return s ? s.replace(" ", "T").slice(0, 16) : "";
@@ -5820,6 +5891,10 @@ function setSleepActive(log) {
   cacheSleepActive();
 }
 
+// キャッシュでもサーバーでも、最初に睡眠の状態が描けた時に解ける(朝のパネルを他の読み込みより先に出すため、2026-11-06)
+let resolveSleepFirstPaint;
+const sleepFirstPaint = new Promise((resolve) => (resolveSleepFirstPaint = resolve));
+
 async function loadSleepActive() {
   const gen = sleepLocalGen;
   await apiCached(SLEEP_ACTIVE_PATH, (log) => {
@@ -5828,7 +5903,15 @@ async function loadSleepActive() {
       return;
     }
     sleepActiveLog = log;
+    sleepStateKnown = true;
+    // キャッシュで先に出した「寝ている」パネルが、本物の返事と食い違っていたら(別の端末で起きていた等)閉じる
+    const panel = document.getElementById("wake-mood-panel");
+    if (wakePanelMode === "pending" && !panel.classList.contains("hidden") && (!log || log.id !== wakePanelLog?.id)) {
+      panel.classList.add("hidden");
+      document.getElementById("wake-mood-backdrop").classList.add("hidden");
+    }
     renderSleepStatus();
+    resolveSleepFirstPaint();
   });
 }
 
@@ -5958,10 +6041,11 @@ function isMorningNow() {
 // 次に開いた時に必ず出し直す(スヌーズ・1日1回の制限・「記録済み」判定を無視する)
 let morningGateActive = false;
 
-async function maybeShowMorningPanel() {
+// prefetch: 起動時に先に投げておいた通信({gate, latest}のPromise)。省くと、ここで順番に取りに行く
+async function maybeShowMorningPanel(prefetch = {}) {
   if (!isMorningNow()) return;
   try {
-    morningGateActive = (await api("/api/morning-gate")).active;
+    morningGateActive = (await (prefetch.gate || api("/api/morning-gate"))).active;
   } catch {
     morningGateActive = false;
   }
@@ -5982,9 +6066,12 @@ async function maybeShowMorningPanel() {
     } catch {
       // 保存できない環境では毎回確認になるが、記録済みなら下の判定で出ない
     }
-    const [latest] = await api("/api/sleep-logs?limit=1");
+    const [latest] = await (prefetch.latest || api("/api/sleep-logs?limit=1"));
     const coveredSince = `${addDaysToDate(today, -1)} 18:00:00`;
-    if (latest && (latest.bedtime_at >= coveredSince || (latest.wake_at && latest.wake_at >= `${today} 00:00:00`))) return;
+    if (latest && (latest.bedtime_at >= coveredSince || (latest.wake_at && latest.wake_at >= `${today} 00:00:00`))) {
+      if (latest.wake_at) markWakeLoggedToday(); // 記録済みと確かめられたので、朝の「起床を記録」帯は出さない
+      return;
+    }
   }
   if (timerSubject || visiblePanels().length) return;
   try {
@@ -6118,6 +6205,7 @@ async function wakeUp() {
       method: "PUT",
       body: JSON.stringify({ wake_at }),
     });
+    markWakeLoggedToday();
     openWakeMoodPanel({ id: activeLog.id, bedtime_at: activeLog.bedtime_at, wake_at });
   } catch (err) {
     showToast("起床の記録に失敗しました。もう一度お試しください");
@@ -6538,6 +6626,7 @@ async function saveMorningSleep(mode, log, correctedWake, bed) {
     setSleepActive(null);
     try {
       await api(`/api/sleep-logs/${log.id}`, { method: "PUT", body: JSON.stringify({ wake_at }) });
+      markWakeLoggedToday();
     } catch (err) {
       showToast("起床の記録に失敗しました。もう一度お試しください");
     } finally {
@@ -6548,6 +6637,7 @@ async function saveMorningSleep(mode, log, correctedWake, bed) {
     try {
       const { id } = await api("/api/sleep-logs", { method: "POST", body: JSON.stringify({ bedtime_at: toLocalTimestamp(bed) }) });
       await api(`/api/sleep-logs/${id}`, { method: "PUT", body: JSON.stringify({ wake_at }) });
+      markWakeLoggedToday();
     } catch (err) {
       showToast("睡眠の記録に失敗しました。Sleepの履歴から追加できます");
     } finally {
@@ -8328,7 +8418,18 @@ async function hydrateFromCache() {
   // 以前は「ToDo→期限切れスキップ→残り15件」と段階ごとに前の完了を待っていたため、Scores・
   // 勉強ログ・カレンダーは最初の2段が終わるまで読み込みが始まりすらしなかった(2026-09-28)。
   // 今は全部同時に読み始め、起動画面だけは最初に見えるToDoタブの分が揃った時点で閉じる。
-  const critical = Promise.allSettled([loadTodos(), loadTodoStats()]);
+  const critical = Promise.allSettled([loadTodos({ paintCache: true }), loadTodoStats()]);
+  // 朝のパネル(起床入力)は、他の約18本の読み込みの終わりを待たず、睡眠の状態が(キャッシュでも)描けた時点で出す。
+  // 判定に使う通信は、ここで他と同時に投げておく(2026-11-06)
+  const sleepLoad = loadSleepActive();
+  const morningPrefetch = isMorningNow()
+    ? { gate: api("/api/morning-gate"), latest: api("/api/sleep-logs?limit=1") }
+    : {};
+  Object.values(morningPrefetch).forEach((p) => p.catch(() => {})); // 使われなくても未処理エラーにしない
+  Promise.race([sleepFirstPaint, sleepLoad.catch(() => {})])
+    .then(() => maybeShowMorningPanel(morningPrefetch))
+    .then(maybeShowMorningOverview)
+    .catch((err) => console.error("morning prompt failed:", err));
   const background = Promise.allSettled([
     loadTodayPanel(),
     loadStudySummary(),
@@ -8346,7 +8447,7 @@ async function hydrateFromCache() {
     loadActivationStats(),
     loadActivationPostReturnStats(),
     loadActivationMoodReasons(),
-    loadSleepActive(),
+    sleepLoad,
     loadCalendar({ refreshTodayPanel: false }),
   ]);
   // 人生ツリーはDrillへの問い合わせを含むので、起動の待ち合わせ(background)には入れず裏で読むだけにする
@@ -8369,10 +8470,13 @@ async function hydrateFromCache() {
   document.getElementById("boot-loading")?.classList.add("hidden");
 
   // スキップしたToDoは「今日の予定」やカレンダーにも出ているので、それらは同時読み込みの後で取り直す
-  if (await autoSkipOverdueTodos()) {
-    background.then(() => loadCalendar());
-  }
-  syncWorkoutTodos(); // 今日のワークアウトToDo(期限切れの分は上で確かめ済み)
+  // 待たずに進める(2026-11-06): スキップの送信やワークアウトの確かめ直しで、朝のパネルなどを遅らせない
+  autoSkipOverdueTodos()
+    .then((n) => {
+      if (n) background.then(() => loadCalendar());
+      return syncWorkoutTodos(); // 今日のワークアウトToDo(期限切れの分は上で確かめ済み)
+    })
+    .catch((err) => console.error("auto-skip failed:", err));
 
   const backgroundResults = await background;
   backgroundResults.filter((r) => r.status === "rejected").forEach((r) => console.error("init load failed:", r.reason));
@@ -8391,9 +8495,7 @@ async function hydrateFromCache() {
     history.replaceState(history.state, "", location.pathname + location.search);
     openLifeTree();
   }
-  maybeShowMorningPanel()
-    .then(maybeShowMorningOverview)
-    .catch((err) => console.error("morning prompt failed:", err));
+  // 朝のパネルは、上の「睡眠の状態が描けた時点」で先に出している(2026-11-06)
 })();
 
 // ---------- mood tab sub-tabs (2026-09-27) ----------

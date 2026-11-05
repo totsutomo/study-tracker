@@ -956,6 +956,11 @@
   <span class="now-strip-label" id="sleep-now-label"></span>
   <button type="button" id="sleep-now-wake-btn" class="now-strip-action">☀ I'm up</button>
 </div>
+<!-- 朝(5〜13時)で、まだ起床の記録がない間だけ出る帯(2026-11-06)。パネルの表示を待たずに1タップで入力へ進める -->
+<div id="wake-now" class="now-strip sleep-now hidden">
+  <span class="now-strip-label" id="wake-now-label">Morning · wake-up not logged yet</span>
+  <button type="button" id="wake-now-btn" class="now-strip-action">Log wake-up</button>
+</div>
 <div id="slack-now" class="now-strip slack-now hidden">
   <span class="now-strip-label" id="slack-now-label"></span>
   <button type="button" id="slack-now-return-btn" class="now-strip-action">Back to work</button>
