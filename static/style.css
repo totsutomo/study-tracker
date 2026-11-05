@@ -4920,3 +4920,202 @@ body.quick-open #tabbar {
 #category-list li {
   flex-wrap: wrap;
 }
+
+/* ---------- Study > Screen (2026-11-06) ----------
+   端末(スマホ・PC・タブレット)の使用時間の画面。PC・スマホ・タブレットの色は
+   --accent(PC) / --accent-secondary(スマホ) / --neutral-flag(タブレット)。色だけに頼らず、凡例と数字も必ず文字で出す */
+.screen-budget-banner {
+  cursor: pointer; /* 押すとStudy > Screenが開く */
+}
+
+.scr-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 2px 0 12px;
+}
+
+.scr-daynav {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.scr-nav-btn {
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  background: var(--card);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.scr-nav-btn:disabled,
+#scr-today-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.scr-date-label {
+  min-width: 140px;
+  text-align: center;
+  font-weight: 600;
+}
+
+#scr-today-btn {
+  min-height: 44px;
+}
+
+#scr-today-btn kbd {
+  margin-left: 4px;
+  font-size: 10px;
+  opacity: 0.7;
+}
+
+.scr-big {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 4px;
+}
+
+.scr-big-num {
+  font-size: 34px;
+  font-weight: 700;
+  line-height: 1.1;
+}
+
+.scr-big-unit,
+.scr-big-sub {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.scr-bar {
+  display: flex;
+  height: 10px;
+  margin: 10px 0;
+  background: var(--border);
+  border-radius: 5px;
+  overflow: hidden;
+}
+
+.scr-bar i {
+  display: block;
+  height: 100%;
+}
+
+.scr-legend {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  margin: 0;
+  padding: 0;
+  font-size: 13px;
+}
+
+.scr-swatch {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  margin-right: 6px;
+  border-radius: 2px;
+}
+
+.scr-dot {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  margin-right: 4px;
+  border-radius: 50%;
+  background: var(--nap);
+}
+
+.scr-shade-key {
+  font-size: 11px;
+  text-align: right;
+}
+
+.scr-facts {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.scr-facts li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+}
+
+.scr-facts li:last-child {
+  border-bottom: 0;
+}
+
+.scr-fact-label {
+  color: var(--text-muted);
+}
+
+.scr-fact-value {
+  text-align: right;
+  font-weight: 600;
+}
+
+.scr-app-head {
+  display: flex;
+  align-items: center;
+  margin: 14px 0 4px;
+  font-size: 13px;
+}
+
+.scr-app-head:first-child {
+  margin-top: 0;
+}
+
+.scr-app-row {
+  display: grid;
+  grid-template-columns: minmax(80px, 36%) minmax(0, 1fr) 34px;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 0;
+  font-size: 13px;
+}
+
+.scr-app-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scr-app-track {
+  height: 6px;
+  background: var(--border);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.scr-app-track i {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+}
+
+.scr-app-min {
+  text-align: right;
+  color: var(--text-muted);
+}
+
+.scr-empty,
+.scr-note {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: var(--text-muted);
+}

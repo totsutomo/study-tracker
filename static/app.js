@@ -3291,6 +3291,8 @@ async function loadScreenBudget() {
     // ネットワーク一時失敗時は前回の表示を維持する(daily-min-banner等と同じ方針)
   }
   loadEveningGate();
+  // Study > Screen を今日で開いている間は、帯と同じ30秒ごとの更新に合わせて取り直す
+  if (!scrDate && scrIsVisible()) loadScreenView().catch((err) => console.error("screen view refresh failed:", err));
 }
 
 // ---------- evening gate skip (2026-11-04) ----------
@@ -3408,6 +3410,408 @@ function renderScreenBudget(s) {
   banner.classList.remove("hidden");
   banner.classList.toggle("exhausted", remaining <= 0);
   banner.classList.toggle("low", remaining > 0 && remaining <= s.budget_minutes * 0.2);
+}
+
+// ---------- Screen view: Study > Screen (2026-11-06) ----------
+// 端末(スマホ・PC・タブレット)の使用時間を、時間帯別・アプリ別・日ごとの推移でまとめる画面。
+// データはサーバーの /api/screen-time/overview(合計・アプリ別・時間帯別・日ごとの合計と勉強分数)と、
+// 予算の内訳は既存の /api/screen-budget/current?date=。どちらもapiCachedなので、開くと前回の内容が先に出て、
+// 最新が届いたら差し替わる。今日を開いている間は、上の帯の30秒ごとの更新(loadScreenBudget)に合わせて取り直す。
+// 予算の計算・端末側の積算ルール(勉強アプリ・セッション中のPCは数えない)はサーバーと端末が正で、ここは見せるだけ。
+const SCR_DEVICES = ["pc", "phone", "tablet"];
+const SCR_DEVICE_NAME = { pc: "PC", phone: "Phone", tablet: "Tablet" };
+const SCR_DEVICE_COLOR = { pc: "var(--accent)", phone: "var(--accent-secondary)", tablet: "var(--neutral-flag)" };
+// 予算日は3時始まり。横軸は3時〜翌2時の24時間で、22時〜2時(5本)を夜ふかしの帯として薄く塗る
+const SCR_LATE_FROM_INDEX = 19; // (22 - 3)
+const SCR_APP_NAMES = {
+  // phone
+  "com.google.android.youtube": "YouTube", "com.spotify.music": "Spotify", "com.instagram.android": "Instagram",
+  "droom.sleepIfUCan": "Sleep If U Can", "com.android.chrome": "Chrome", "jp.naver.line.android": "LINE",
+  "com.whatsapp": "WhatsApp", "com.brave.browser": "Brave", "com.nothing.camera": "Camera",
+  "com.google.android.calculator": "Calculator", "com.google.android.apps.photos": "Photos",
+  "com.google.android.gm": "Gmail", "com.burockgames.timeclocker": "StayFree", "com.nothing.weather": "Weather",
+  "com.snapchat.android": "Snapchat", "com.android.settings": "Settings", "org.telegram.messenger": "Telegram",
+  "jp.studyplus.android.app": "Studyplus", "com.ichi2.anki": "AnkiDroid", "us.nobarriers.elsa": "ELSA Speak",
+  "com.openai.chatgpt": "ChatGPT", "com.anthropic.claude": "Claude", "com.totsu.jpblocker": "JpBlocker",
+  "com.microsoft.appmanager": "Link to Windows", "com.google.android.googlequicksearchbox": "Google",
+  "com.newchat.setlog": "SetLog", "com.android.intentresolver": "Share menu", "com.parallelcorp.piik": "Piik",
+  "jp.co.japantimes.www": "Japan Times", "com.facebook.katana": "Facebook",
+  // pc / tablet
+  "brave.exe": "Brave", "code.exe": "VS Code", "explorer.exe": "File Explorer", "telegram.exe": "Telegram",
+  "anki.exe": "Anki", "claude.exe": "Claude", "chatgpt.exe": "ChatGPT", "winword.exe": "Word",
+  "obsidian.exe": "Obsidian", "shellhost.exe": "Windows shell", "fluentflyout.exe": "FluentFlyout",
+};
+
+function scrAppName(key) {
+  if (key.startsWith("org.chromium.webapk.")) return "Web app (Chrome)";
+  const known = SCR_APP_NAMES[key] || SCR_APP_NAMES[key.toLowerCase()];
+  if (known) return known;
+  // 知らないものは、見分けがつく程度に短くして出す(com.foo.bar → Bar、baz.exe → Baz)
+  const base = key.replace(/\.exe$/i, "");
+  const last = base.split(".").pop() || base;
+  return last.charAt(0).toUpperCase() + last.slice(1);
+}
+
+let scrDate = null; // null = 今日(予算日)
+let scrOverview = null;
+let scrBudget = null;
+let scrLoadFailed = false;
+
+const scrToday = () => screenBudgetDateStr();
+const scrCurrentDate = () => scrDate || scrToday();
+const scrPanel = () => document.querySelector('.study-subpanel[data-sub="screen"]');
+const scrIsVisible = () => activeTabId() === "tab-study" && !scrPanel().classList.contains("hidden");
+const scrPad2 = (n) => String(n).padStart(2, "0");
+const scrHourLabel = (h) => `${scrPad2(h % 24)}:00–${scrPad2((h + 1) % 24)}:00`;
+const scrHourOfIndex = (i) => (SCREEN_BUDGET_DAY_START_HOUR + i) % 24;
+
+function scrDateLabel(dateStr) {
+  const d = new Date(`${dateStr}T00:00:00`);
+  const text = d.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" });
+  return dateStr === scrToday() ? `${text} · Today` : text;
+}
+
+async function loadScreenView() {
+  const date = scrCurrentDate();
+  renderScreenNav(date);
+  scrLoadFailed = false;
+  // 別の日へ移った直後は、前の日の数字を残さない(今の日付と合わないデータは「Loading…」になる)。
+  // 同じ日の取り直し(30秒ごと)は今の表示のまま。キャッシュがあればすぐ上書きされる
+  renderScreenView();
+  const stillCurrent = () => date === scrCurrentDate();
+  const results = await Promise.allSettled([
+    apiCached(`/api/screen-time/overview?date=${date}&days=7`, (o) => {
+      if (!stillCurrent()) return;
+      scrOverview = o;
+      renderScreenView();
+    }),
+    apiCached(`/api/screen-budget/current?date=${date}`, (b) => {
+      if (!stillCurrent()) return;
+      scrBudget = b;
+      renderScreenView();
+    }),
+  ]);
+  // 前回分もなく取得にも失敗した時だけエラー表示にする(30秒ごとの更新でまた試す)
+  if (stillCurrent() && results[0].status === "rejected" && scrOverview?.date !== date) {
+    scrLoadFailed = true;
+    renderScreenView();
+  }
+}
+
+function renderScreenNav(date) {
+  document.getElementById("scr-date-label").textContent = scrDateLabel(date);
+  document.getElementById("scr-next").disabled = date >= scrToday();
+  document.getElementById("scr-today-btn").disabled = date === scrToday();
+}
+
+let scrSelHour = null; // 時間帯グラフでタップした棒(30秒ごとの描き直しでも詳細を残す。日が変わったら外す)
+
+function scrGo(delta) {
+  const next = addDaysStr(scrCurrentDate(), delta);
+  if (next > scrToday()) return;
+  scrSelHour = null;
+  scrDate = next === scrToday() ? null : next;
+  loadScreenView().catch((err) => console.error("screen view load failed:", err));
+}
+
+function scrOpenDate(dateStr) {
+  scrSelHour = null;
+  scrDate = dateStr === scrToday() ? null : dateStr;
+  loadScreenView().catch((err) => console.error("screen view load failed:", err));
+}
+
+function openScreenView() {
+  switchTab("tab-study");
+  switchStudySubtab("screen");
+}
+
+document.getElementById("scr-prev").addEventListener("click", () => scrGo(-1));
+document.getElementById("scr-next").addEventListener("click", () => scrGo(1));
+document.getElementById("scr-today-btn").addEventListener("click", () => scrOpenDate(scrToday()));
+// 上の帯(Screen)を押すとこの画面へ。帯の中のボタン(夜のゲートのスキップ)は今までどおり
+document.getElementById("screen-budget-banner").addEventListener("click", (e) => {
+  if (e.target.closest("button")) return;
+  openScreenView();
+});
+
+// Study > Screen を開いている時のキー。←/→で前の日・次の日、Tで今日(Calendarと同じ割り当て)
+function handleScreenKey(e) {
+  if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey || !scrIsVisible()) return false;
+  if (e.key === "ArrowLeft") scrGo(-1);
+  else if (e.key === "ArrowRight") scrGo(1);
+  else if (e.key.toLowerCase() === "t") scrOpenDate(scrToday());
+  else return false;
+  return true;
+}
+
+function scrLocalTime(utcSqlite) {
+  // サーバーのupdated_atはSQLiteのdatetime('now')=UTC。端末のローカル時刻に直して HH:MM で出す
+  const d = new Date(`${utcSqlite.replace(" ", "T")}Z`);
+  return Number.isNaN(d.getTime()) ? "" : `${scrPad2(d.getHours())}:${scrPad2(d.getMinutes())}`;
+}
+
+function scrDeviceMinutes(o, device) {
+  return o.today[device]?.total_minutes ?? 0;
+}
+
+// 時間帯ごと(予算日の3時から24本)の端末別の分。by_hourが無い端末は全部0で、hasHourlyもfalse
+function scrHourlyByDevice(o) {
+  const out = {};
+  for (const dev of SCR_DEVICES) {
+    const byHour = o.today[dev]?.by_hour;
+    out[dev] = { has: !!byHour, minutes: Array.from({ length: 24 }, (_, i) => byHour?.[String(scrHourOfIndex(i))] || 0) };
+  }
+  return out;
+}
+
+function renderScreenView() {
+  const date = scrCurrentDate();
+  const o = scrOverview?.date === date ? scrOverview : null;
+  const b = scrBudget?.date === date ? scrBudget : null;
+  const summaryEl = document.getElementById("scr-summary");
+  if (!o) {
+    summaryEl.innerHTML = scrLoadFailed
+      ? `<p class="meta">Couldn't load screen time. It will try again in a moment.</p>`
+      : `<p class="meta">Loading…</p>`;
+    for (const id of ["scr-hour-chart", "scr-facts", "scr-days-chart", "scr-apps"]) document.getElementById(id).innerHTML = "";
+    return;
+  }
+  const hourly = scrHourlyByDevice(o);
+  renderScreenSummary(o, b);
+  renderScreenHourChart(o, hourly);
+  renderScreenFacts(o, b, hourly);
+  renderScreenDaysChart(o);
+  renderScreenApps(o);
+}
+
+function renderScreenSummary(o, b) {
+  const total = SCR_DEVICES.reduce((s, d) => s + scrDeviceMinutes(o, d), 0);
+  const budget = b?.budget_minutes || 0;
+  const scale = Math.max(budget, total, 1);
+  const left = budget - total;
+  const sub = !budget ? "" : left >= 0 ? ` · ${left} min left of ${budget}` : ` · over by ${-left} min (budget ${budget})`;
+  const segs = SCR_DEVICES.map((d) => {
+    const m = scrDeviceMinutes(o, d);
+    return m > 0 ? `<i style="width:${(m / scale) * 100}%;background:${SCR_DEVICE_COLOR[d]}"></i>` : "";
+  }).join("");
+  const legend = SCR_DEVICES.map((d) => {
+    const rec = o.today[d];
+    const text = rec ? `${rec.total_minutes} min` : "no data";
+    return `<li><span class="scr-swatch" style="background:${SCR_DEVICE_COLOR[d]}"></span>${SCR_DEVICE_NAME[d]} <b>${text}</b></li>`;
+  }).join("");
+  let note = "";
+  if (b) {
+    const br = b.breakdown;
+    note = `Budget ${b.budget_minutes} = base ${br.baseline_minutes} + study bonus ${br.study_bonus_minutes} + task bonus ${br.todo_bonus_minutes}`
+      + (br.capped ? ` (capped at ${br.daily_cap})` : "");
+    if (br.workout_penalty?.applied) note += `, −20% for no workout`;
+  }
+  document.getElementById("scr-summary").innerHTML = `
+    <div class="scr-big"><span class="scr-big-num">${total}</span><span class="scr-big-unit"> min used</span><span class="scr-big-sub">${sub}</span></div>
+    <div class="scr-bar" role="img" aria-label="${total} of ${budget || "?"} minutes used">${segs}</div>
+    <ul class="scr-legend">${legend}</ul>
+    ${note ? `<p class="meta scr-note">${escapeHtml(note)}</p>` : ""}`;
+}
+
+function renderScreenHourChart(o, hourly) {
+  const container = document.getElementById("scr-hour-chart");
+  const noteEl = document.getElementById("scr-hour-note");
+  const detailEl = document.getElementById("scr-hour-detail");
+  detailEl.textContent = "Tap a bar to see that hour";
+  const anyHourly = SCR_DEVICES.some((d) => hourly[d].has);
+  // 端末ごとに「時間帯別がどこまで記録されているか」を下に書く(導入前の分・未更新の端末が分かるように)
+  const notes = [];
+  for (const d of SCR_DEVICES) {
+    const rec = o.today[d];
+    if (!rec || rec.total_minutes <= 0) continue;
+    if (!hourly[d].has) {
+      notes.push(`${SCR_DEVICE_NAME[d]}: no hourly record (the app isn't updated yet, or this day is before 6 Nov)`);
+      continue;
+    }
+    const covered = hourly[d].minutes.reduce((s, m) => s + m, 0);
+    if (covered < rec.total_minutes - 5) {
+      notes.push(`${SCR_DEVICE_NAME[d]}: hourly record covers ${covered} of ${rec.total_minutes} min (the rest was recorded before hourly tracking started)`);
+    }
+  }
+  noteEl.textContent = notes.join(" · ");
+  noteEl.classList.toggle("hidden", !notes.length);
+  if (!anyHourly) {
+    container.innerHTML = `<p class="meta scr-empty">No hourly data for this day yet.</p>`;
+    return;
+  }
+
+  const wide = window.matchMedia("(min-width: 1024px)").matches;
+  const chartW = wide ? 480 : 320;
+  const chartH = wide ? 150 : 140;
+  const padLeft = 26, padTop = 8, padBottom = 14;
+  const plotW = chartW - padLeft - 2;
+  const plotH = chartH - padTop - padBottom;
+  const step = plotW / 24;
+  const barW = step - 2;
+  const hourTotals = Array.from({ length: 24 }, (_, i) => SCR_DEVICES.reduce((s, d) => s + hourly[d].minutes[i], 0));
+  const yMax = Math.max(60, ...hourTotals);
+  const y = (m) => padTop + plotH - (m / yMax) * plotH;
+
+  const grid = [0, 30, 60].filter((m) => m <= yMax).map((m) => `
+    <line x1="${padLeft}" y1="${y(m)}" x2="${chartW}" y2="${y(m)}" stroke="var(--border)" stroke-width="1" />
+    <text x="${padLeft - 4}" y="${y(m) + 3}" font-size="8" fill="var(--text-muted)" text-anchor="end">${m}</text>`).join("");
+  const lateBand = `<rect x="${padLeft + SCR_LATE_FROM_INDEX * step}" y="${padTop}" width="${(24 - SCR_LATE_FROM_INDEX) * step}" height="${plotH}" fill="var(--neutral-flag-dim)" />`;
+  const bars = hourTotals.map((_, i) => {
+    const x = padLeft + i * step;
+    let acc = 0;
+    const segs = SCR_DEVICES.map((d) => {
+      const m = hourly[d].minutes[i];
+      if (!m) return "";
+      const top = y(acc + m);
+      const h = y(acc) - top;
+      acc += m;
+      return `<rect x="${x}" y="${top}" width="${barW}" height="${h}" fill="${SCR_DEVICE_COLOR[d]}" rx="1.5" />`;
+    }).join("");
+    const label = i % 3 === 0
+      ? `<text x="${x + barW / 2}" y="${chartH - 2}" font-size="8" fill="var(--text-muted)" text-anchor="middle">${scrHourOfIndex(i)}</text>`
+      : "";
+    return `${segs}<rect x="${x}" y="${padTop}" width="${step}" height="${plotH}" fill="transparent" data-i="${i}" />${label}`;
+  }).join("");
+  // 今日を見ている時は、いまの時刻に点線を引く(これから来る時間帯が「使っていない」ように見えないように)
+  let nowMark = "";
+  if (o.date === scrToday()) {
+    const nowIndex = (new Date().getHours() - SCREEN_BUDGET_DAY_START_HOUR + 24) % 24;
+    const nx = padLeft + (nowIndex + 1) * step - 1;
+    nowMark = `<line x1="${nx}" y1="${padTop}" x2="${nx}" y2="${padTop + plotH}" stroke="var(--text-muted)" stroke-width="1" stroke-dasharray="3 3" />`
+      + `<text x="${nx - 3}" y="${padTop + 7}" font-size="8" fill="var(--text-muted)" text-anchor="end">now</text>`;
+  }
+  container.innerHTML = `<svg viewBox="0 0 ${chartW} ${chartH}" class="study-svg-chart" role="img" aria-label="Minutes of device use for each hour of the day">${lateBand}${grid}${bars}${nowMark}</svg>`;
+
+  const showHour = (i) => {
+    const parts = SCR_DEVICES.filter((d) => hourly[d].minutes[i] > 0).map((d) => `${SCR_DEVICE_NAME[d]} ${hourly[d].minutes[i]}`);
+    detailEl.textContent = `${scrHourLabel(scrHourOfIndex(i))}: ${hourTotals[i] ? `${parts.join(" · ")} (${hourTotals[i]} min)` : "no use"}`;
+  };
+  container.querySelectorAll("rect[data-i]").forEach((rect) => {
+    rect.addEventListener("click", () => {
+      scrSelHour = Number(rect.dataset.i);
+      showHour(scrSelHour);
+    });
+  });
+  if (scrSelHour !== null) showHour(scrSelHour);
+}
+
+function renderScreenFacts(o, b, hourly) {
+  const facts = [];
+  const total = SCR_DEVICES.reduce((s, d) => s + scrDeviceMinutes(o, d), 0);
+  const anyHourly = SCR_DEVICES.some((d) => hourly[d].has);
+
+  if (anyHourly) {
+    const hourTotals = Array.from({ length: 24 }, (_, i) => SCR_DEVICES.reduce((s, d) => s + hourly[d].minutes[i], 0));
+    const peak = Math.max(...hourTotals);
+    if (peak > 0) facts.push(["Busiest hour", `${scrHourLabel(scrHourOfIndex(hourTotals.indexOf(peak)))} · ${peak} min`]);
+    const late = hourTotals.slice(SCR_LATE_FROM_INDEX).reduce((s, m) => s + m, 0);
+    facts.push(["Late night (22:00–03:00)", late > 0 ? `${late} min` : "none"]);
+  }
+
+  let top = null;
+  for (const d of SCR_DEVICES) {
+    for (const [key, m] of Object.entries(o.today[d]?.by_app || {})) {
+      if (!top || m > top.m) top = { d, key, m };
+    }
+  }
+  if (top && top.m > 0) facts.push(["Top app", `${scrAppName(top.key)} · ${SCR_DEVICE_NAME[top.d]} · ${top.m} min`]);
+
+  const earlier = o.daily.filter((x) => x.date < o.date && x.total_minutes > 0);
+  if (earlier.length && total > 0) {
+    const avg = Math.round(earlier.reduce((s, x) => s + x.total_minutes, 0) / earlier.length);
+    const diff = total - avg;
+    // 今日は途中の数字なので、差は出さず平均だけ見せる(朝や昼に「大きく減った」と見えてしまうため)
+    facts.push(o.date === scrToday()
+      ? [`Average of the ${earlier.length} days before`, `${avg} min`]
+      : [`Vs the ${earlier.length} days before`, `${diff >= 0 ? "+" : "−"}${Math.abs(diff)} min (average ${avg})`]);
+  }
+
+  const day = o.daily.find((x) => x.date === o.date);
+  if (day) facts.push(["Study (timed) vs screen", `${day.study_minutes} min study · ${total} min screen`]);
+
+  if (o.date === scrToday()) {
+    const syncs = SCR_DEVICES.filter((d) => o.today[d]?.updated_at).map((d) => `${SCR_DEVICE_NAME[d]} ${scrLocalTime(o.today[d].updated_at)}`);
+    if (syncs.length) facts.push(["Last sync", syncs.join(" · ")]);
+  }
+  document.getElementById("scr-facts").innerHTML = facts.length
+    ? facts.map(([label, value]) => `<li><span class="scr-fact-label">${escapeHtml(label)}</span><span class="scr-fact-value">${escapeHtml(value)}</span></li>`).join("")
+    : `<li><span class="scr-fact-label">No data for this day</span></li>`;
+}
+
+function renderScreenDaysChart(o) {
+  const container = document.getElementById("scr-days-chart");
+  const detailEl = document.getElementById("scr-days-detail");
+  const wide = window.matchMedia("(min-width: 1024px)").matches;
+  const chartW = wide ? 400 : 320;
+  const chartH = 130;
+  const padLeft = 28, padTop = 8, padBottom = 24;
+  const plotW = chartW - padLeft - 2;
+  const plotH = chartH - padTop - padBottom;
+  const n = o.daily.length;
+  const step = plotW / n;
+  const barW = Math.min(step - 8, 34);
+  // 縦軸は60分単位に切り上げて、いちばん上の線(と真ん中の線)がグラフの中に収まるようにする
+  const yMax = Math.ceil(Math.max(60, ...o.daily.map((x) => Math.max(x.total_minutes, x.study_minutes))) / 60) * 60;
+  const y = (m) => padTop + plotH - (m / yMax) * plotH;
+  const gridVals = [0, Math.round(yMax / 2 / 30) * 30, yMax].filter((m, i, a) => a.indexOf(m) === i);
+
+  const grid = gridVals.map((m) => `
+    <line x1="${padLeft}" y1="${y(m)}" x2="${chartW}" y2="${y(m)}" stroke="var(--border)" stroke-width="1" />
+    <text x="${padLeft - 4}" y="${y(m) + 3}" font-size="8" fill="var(--text-muted)" text-anchor="end">${m}</text>`).join("");
+  const bars = o.daily.map((x, i) => {
+    const cx = padLeft + i * step + step / 2;
+    const selected = x.date === o.date;
+    let acc = 0;
+    const segs = SCR_DEVICES.map((d) => {
+      const m = x.devices[d] || 0;
+      if (!m) return "";
+      const top = y(acc + m);
+      const h = y(acc) - top;
+      acc += m;
+      return `<rect x="${cx - barW / 2}" y="${top}" width="${barW}" height="${h}" fill="${SCR_DEVICE_COLOR[d]}" rx="2" opacity="${selected ? 1 : 0.55}" />`;
+    }).join("");
+    const study = x.study_minutes > 0
+      ? `<circle cx="${cx}" cy="${y(x.study_minutes)}" r="3.2" fill="var(--nap)" stroke="var(--card)" stroke-width="1" />`
+      : "";
+    const wd = new Date(`${x.date}T00:00:00`).toLocaleDateString("en-GB", { weekday: "short" });
+    const label = `<text x="${cx}" y="${chartH - 12}" font-size="8" fill="${selected ? "var(--text)" : "var(--text-muted)"}" text-anchor="middle" ${selected ? 'font-weight="700"' : ""}>${wd}</text>`
+      + `<text x="${cx}" y="${chartH - 3}" font-size="7" fill="var(--text-muted)" text-anchor="middle">${Number(x.date.slice(8))}</text>`;
+    return `${segs}${study}${label}<rect x="${cx - step / 2}" y="${padTop}" width="${step}" height="${plotH + padBottom}" fill="transparent" data-date="${x.date}" />`;
+  }).join("");
+  container.innerHTML = `<svg viewBox="0 0 ${chartW} ${chartH}" class="study-svg-chart" role="img" aria-label="Minutes of device use for each of the last ${n} days">${grid}${bars}</svg>`;
+  container.querySelectorAll("rect[data-date]").forEach((rect) => {
+    rect.addEventListener("click", () => scrOpenDate(rect.dataset.date));
+  });
+
+  const sel = o.daily.find((x) => x.date === o.date);
+  if (sel) {
+    const parts = SCR_DEVICES.filter((d) => sel.devices[d] > 0).map((d) => `${SCR_DEVICE_NAME[d]} ${sel.devices[d]}`);
+    detailEl.textContent = `${scrDateLabel(sel.date)}: ${sel.total_minutes} min${parts.length ? ` (${parts.join(" · ")})` : ""} · study ${sel.study_minutes} min. Tap a day to open it`;
+  }
+}
+
+function renderScreenApps(o) {
+  const html = SCR_DEVICES.map((d) => {
+    const rec = o.today[d];
+    const head = `<h4 class="scr-app-head"><span class="scr-swatch" style="background:${SCR_DEVICE_COLOR[d]}"></span>${SCR_DEVICE_NAME[d]}${rec ? ` · ${rec.total_minutes} min` : ""}</h4>`;
+    if (!rec) return `${head}<p class="meta scr-empty">No data</p>`;
+    const apps = Object.entries(rec.by_app || {}).filter(([, m]) => m > 0).sort((a, b) => b[1] - a[1]);
+    if (!apps.length) return `${head}<p class="meta scr-empty">No app used for a full minute</p>`;
+    const max = apps[0][1];
+    const shown = apps.slice(0, 6);
+    const rest = apps.slice(6);
+    const rows = shown.map(([key, m]) => `
+      <div class="scr-app-row">
+        <span class="scr-app-name">${escapeHtml(scrAppName(key))}</span>
+        <span class="scr-app-track"><i style="width:${(m / max) * 100}%;background:${SCR_DEVICE_COLOR[d]}"></i></span>
+        <span class="scr-app-min">${m}</span>
+      </div>`).join("");
+    const more = rest.length
+      ? `<p class="meta scr-empty">+${rest.length} more · ${rest.reduce((s, [, m]) => s + m, 0)} min</p>`
+      : "";
+    return `${head}${rows}${more}`;
+  }).join("");
+  document.getElementById("scr-apps").innerHTML = html;
 }
 
 // ---------- Workout (2026-10-31) ----------
@@ -7972,6 +8376,9 @@ async function hydrateFromCache() {
 
   const backgroundResults = await background;
   backgroundResults.filter((r) => r.status === "rejected").forEach((r) => console.error("init load failed:", r.reason));
+  // Screen画面の先読み(2026-11-06): ほかの読み込みが落ち着いてから、今日の分をキャッシュへ入れておく。
+  // 初めて開いた時から前回の内容が即座に出る。画面には描かず(apiはキャッシュ書き込みだけする)通信も1本だけ
+  api(`/api/screen-time/overview?date=${screenBudgetDateStr()}&days=7`).catch(() => {});
 
   // 就寝リマインダーpush(main.pyのbedtime-reminder)のタップから、アプリ未起動時は
   // /#bedtime付きの新規ウィンドウとして開かれる。既存ウィンドウ再利用時はSWからのpostMessageで拾う。
@@ -8049,12 +8456,17 @@ async function loadWeeklyFeedback() {
 
 // Study: Log / Scores(2026-10-02、Scoresタブを統合)。Scoresはたまに見るだけなので覚えずに毎回Logから
 function switchStudySubtab(sub) {
+  // Screenは他のサブタブから来た時は今日から見せる(日をさかのぼっていても開き直せば今日に戻る)
+  const wasScreen = !scrPanel().classList.contains("hidden");
+  if (sub === "screen" && !wasScreen) scrDate = null;
   document.querySelectorAll("#study-subtabs .period-btn").forEach((b) => b.classList.toggle("active", b.dataset.sub === sub));
   syncSideSubs("tab-study", sub, document.querySelector(`#study-subtabs .period-btn[data-sub="${sub}"]`)?.textContent);
   document.querySelectorAll(".study-subpanel").forEach((p) => p.classList.toggle("hidden", p.dataset.sub !== sub));
   // Insightsはたまに見るだけなので、開いた時に読み込む(起動時の通信を増やさない)
   if (sub === "insights") loadInsightsMatrix().catch((err) => console.error("insights load failed:", err));
   if (sub === "insights") loadWeeklyFeedback().catch((err) => console.error("weekly feedback load failed:", err));
+  // 開いた時に取り直す。前回分(日ごとにキャッシュ)は即座に出る
+  if (sub === "screen") loadScreenView().catch((err) => console.error("screen view load failed:", err));
 }
 
 document.querySelectorAll("#study-subtabs .period-btn").forEach((b) => {
@@ -8982,6 +9394,11 @@ document.addEventListener("keydown", (e) => {
   }
 
   if (activeTabId() === "tab-calendar" && handleCalendarKey(e)) {
+    e.preventDefault();
+    return;
+  }
+
+  if (handleScreenKey(e)) {
     e.preventDefault();
     return;
   }

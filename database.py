@@ -175,6 +175,9 @@ CREATE TABLE IF NOT EXISTS screen_time_logs (
     total_minutes INTEGER NOT NULL,
     by_app TEXT,
     updated_at TEXT DEFAULT (datetime('now')),
+    -- 時間帯別(2026-11-06)。{"時(0-23, 端末のローカル時刻)": 分}のJSON。予算日は3時始まりなので
+    -- 0〜2時は日付の翌朝分。古いクライアントは送らないのでNULL(その時は上書きしない)
+    by_hour TEXT,
     PRIMARY KEY (date, device)
 );
 
@@ -588,6 +591,11 @@ def _migrate(conn):
             "SELECT date, 'phone', total_minutes, by_app, updated_at FROM screen_time_logs_old"
         )
         conn.execute("DROP TABLE screen_time_logs_old")
+
+    # 時間帯別の列(2026-11-06)。既存行はNULLのまま(過去分の時間帯は復元できない)
+    screen_time_cols = [row[1] for row in conn.execute("PRAGMA table_info(screen_time_logs)").fetchall()]
+    if screen_time_cols and "by_hour" not in screen_time_cols:
+        conn.execute("ALTER TABLE screen_time_logs ADD COLUMN by_hour TEXT")
 
     # eiken_writing_scoresをdate単独PKから(date, session)の複合PKへ移行(2026-09-26、1日複数回の練習に対応)。
     # screen_time_logsと同じリネーム→作り直し→コピー手順。既存行は全て session=1 として移す。

@@ -446,6 +446,7 @@ class ScreenTimeUpsert(BaseModel):
     total_minutes: int
     by_app: str | None = None  # optional JSON文字列(アプリ別内訳、パッケージ名→分)
     device: str = "phone"  # 'phone'(JpBlocker) / 'pc' / 'tablet'(FocusGuard)。省略時は後方互換でphone扱い
+    by_hour: str | None = None  # optional JSON文字列(時間帯別、"時(0-23)"→分)。古いクライアントは送らない
     # screen_budget_paramsのpayload形状はJSON文字列(他のaction_typeと同じくサーバーはパースせず素通し、
     # _write_screen_budget_paramsが受け取るキーはbaseline_minutes/study_ratio/todo_bonus_max/
     # daily_cap/study_packages。詳細はSCREEN_BUDGET_DEFAULTS周辺のコメント参照。
@@ -3125,17 +3126,43 @@ def upsert_screen_time(payload: ScreenTimeUpsert, token: str | None = None):
             status_code=400,
             detail=f"total_minutes out of range (0-1440): {payload.total_minutes}",
         )
+    by_hour = _sanitize_by_hour(payload.by_hour)
     conn = get_connection()
+    # by_hourを送らない古いクライアント(NULL)の時は、すでにある時間帯別を消さずに残す
     conn.execute(
-        "INSERT INTO screen_time_logs (date, device, total_minutes, by_app, updated_at) "
-        "VALUES (?, ?, ?, ?, datetime('now')) "
+        "INSERT INTO screen_time_logs (date, device, total_minutes, by_app, by_hour, updated_at) "
+        "VALUES (?, ?, ?, ?, ?, datetime('now')) "
         "ON CONFLICT(date, device) DO UPDATE SET total_minutes = excluded.total_minutes, "
-        "by_app = excluded.by_app, updated_at = excluded.updated_at",
-        (payload.date, payload.device, payload.total_minutes, payload.by_app),
+        "by_app = excluded.by_app, by_hour = COALESCE(excluded.by_hour, screen_time_logs.by_hour), "
+        "updated_at = excluded.updated_at",
+        (payload.date, payload.device, payload.total_minutes, payload.by_app, by_hour),
     )
     conn.commit()
     conn.close()
     return {"ok": True}
+
+
+def _sanitize_by_hour(raw: str | None) -> str | None:
+    """時間帯別のJSON文字列を検査して正規化する。壊れた値でDBを汚さないため、読めない・形が違う時は
+    保存せず(None=既存の値を残す)、時は0〜23だけ・1時間の分は0〜60に丸める。"""
+    if not raw:
+        return None
+    try:
+        parsed = json.loads(raw)
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    clean: dict[str, int] = {}
+    for key, value in parsed.items():
+        try:
+            hour, minutes = int(key), int(value)
+        except (TypeError, ValueError):
+            continue
+        if 0 <= hour <= 23 and minutes > 0:
+            clean[str(hour)] = min(minutes, 60)
+    # 空の時はNoneにして既存の値を残す(端末がまだ何も計っていない瞬間の送信で、その日の記録を消さないため)
+    return json.dumps(clean) if clean else None
 
 
 @app.get("/api/screen-time/{date}/by-app")
@@ -3144,20 +3171,80 @@ def screen_time_by_app(date: str, device: str = "phone"):
     # アプリ別内訳を見て原因を切り分けるためのデバッグ用エンドポイント。
     conn = get_connection()
     row = conn.execute(
-        "SELECT total_minutes, by_app, updated_at FROM screen_time_logs WHERE date = ? AND device = ?",
+        "SELECT total_minutes, by_app, updated_at, by_hour FROM screen_time_logs WHERE date = ? AND device = ?",
         (date, device),
     ).fetchone()
     conn.close()
     if row is None:
         return {"found": False}
-    total_minutes, by_app_raw, updated_at = row
+    total_minutes, by_app_raw, updated_at, by_hour_raw = row
     return {
         "found": True,
         "total_minutes": total_minutes,
         "updated_at": updated_at,
         "by_app_raw": by_app_raw,
         "by_app_parsed": json.loads(by_app_raw) if by_app_raw else None,
+        # FocusGuardが再起動した時に、その日の時間帯別も積算の初期値として読み込むために使う(2026-11-06)
+        "by_hour_parsed": json.loads(by_hour_raw) if by_hour_raw else None,
     }
+
+
+SCREEN_TIME_DEVICES = ("phone", "pc", "tablet")
+
+
+@app.get("/api/screen-time/overview")
+def screen_time_overview(date: str, days: int = 7):
+    """Compassの Study > Screen 画面用(2026-11-06)。dateは予算日("YYYY-MM-DD"、3時区切り)。
+    今日(date)の端末別の合計・アプリ別・時間帯別と、直近days日の端末別の日ごとの合計+その日の勉強分数を返す。
+    アプリ別・時間帯別は選んだ1日分だけ(日ごとの推移には合計だけ入れて、通信量を抑える)。
+    予算そのもの(残り分数や内訳)は重いので、既存の /api/screen-budget/current?date= を別に呼ぶ。"""
+    try:
+        end = datetime.fromisoformat(date).date()
+    except ValueError:
+        raise HTTPException(status_code=400, detail="date must be YYYY-MM-DD")
+    days = max(1, min(days, 60))
+    start = end - timedelta(days=days - 1)
+    conn = get_connection()
+    rows = conn.execute(
+        "SELECT date, device, total_minutes, by_app, by_hour, updated_at FROM screen_time_logs "
+        "WHERE date >= ? AND date <= ? ORDER BY date",
+        (start.isoformat(), end.isoformat()),
+    ).fetchall()
+    # 予算日(3時区切り)ごとのタイマー経由の勉強分数。予算の勉強ボーナスと同じ数え方(_compute_screen_budget_status)
+    study_rows = conn.execute(
+        f"SELECT date(datetime(logged_at, '-{SCREEN_BUDGET_DAY_START_HOUR} hours')) AS d, SUM(minutes) "
+        "FROM study_logs WHERE (timed = 1 OR start_trigger IS NOT NULL) "
+        f"AND datetime(logged_at) >= datetime(?, '+{SCREEN_BUDGET_DAY_START_HOUR} hours') "
+        f"AND datetime(logged_at) < datetime(?, '+{24 + SCREEN_BUDGET_DAY_START_HOUR} hours') "
+        "GROUP BY d",
+        (start.isoformat(), end.isoformat()),
+    ).fetchall()
+    conn.close()
+
+    study_by_date = {d: int(m or 0) for d, m in study_rows}
+    per_day: dict[str, dict[str, int]] = {}
+    today: dict[str, dict] = {}
+    for d, device, total, by_app_raw, by_hour_raw, updated_at in rows:
+        per_day.setdefault(d, {})[device] = total
+        if d == end.isoformat():
+            today[device] = {
+                "total_minutes": total,
+                "updated_at": updated_at,
+                "by_app": json.loads(by_app_raw) if by_app_raw else {},
+                # NULL=この日は時間帯別を送る版の端末がまだ動いていない(Noneのまま返し、画面で「記録なし」と出す)
+                "by_hour": json.loads(by_hour_raw) if by_hour_raw else None,
+            }
+    daily = []
+    for i in range(days):
+        d = (start + timedelta(days=i)).isoformat()
+        devices = {dev: per_day.get(d, {}).get(dev, 0) for dev in SCREEN_TIME_DEVICES}
+        daily.append({
+            "date": d,
+            "devices": devices,
+            "total_minutes": sum(devices.values()),
+            "study_minutes": study_by_date.get(d, 0),
+        })
+    return {"date": end.isoformat(), "days": days, "today": today, "daily": daily}
 
 
 @app.get("/api/screen-time/daily")

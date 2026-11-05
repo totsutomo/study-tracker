@@ -28,6 +28,7 @@ VIEWS = [
     ("tab-study", '.side-sub-btn[data-sub="log"]', "Study/Log"),
     ("tab-study", '.side-sub-btn[data-sub="scores"]', "Study/Scores"),
     ("tab-study", '.side-sub-btn[data-sub="insights"]', "Study/Insights"),
+    ("tab-study", '.side-sub-btn[data-sub="screen"]', "Study/Screen"),  # 2026-11-06
     ("tab-mood", '.side-sub-btn[data-sub="mood"]', "Mood/Mood"),
     ("tab-mood", '.side-sub-btn[data-sub="slacking"]', "Mood/Slacking"),
     ("tab-mood", '.side-sub-btn[data-sub="sleep"]', "Mood/Sleep"),

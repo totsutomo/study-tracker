@@ -77,6 +77,7 @@
     <button type="button" class="side-sub-btn active" data-sub="log">Log</button>
     <button type="button" class="side-sub-btn" data-sub="scores">Scores</button>
     <button type="button" class="side-sub-btn" data-sub="insights">Insights</button>
+    <button type="button" class="side-sub-btn" data-sub="screen">Screen</button>
   </div>
   <button class="tab-btn has-subs" data-tab="tab-mood">
     <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor"
@@ -318,6 +319,7 @@
       <button type="button" class="period-btn active" data-sub="log">Log</button>
       <button type="button" class="period-btn" data-sub="scores">Scores</button>
       <button type="button" class="period-btn" data-sub="insights">Insights</button>
+      <button type="button" class="period-btn" data-sub="screen">Screen</button>
     </div>
 
     <div class="study-subpanel" data-sub="log">
@@ -439,6 +441,52 @@
       </div>
       </div>
     </div>
+    </div>
+
+    <!-- Screen(2026-11-06): 端末(スマホ・PC・タブレット)の使用時間を、時間帯別・アプリ別・日ごとの推移でまとめる画面。
+         上の帯(Screen)を押してもここへ来る。予算の計算はサーバー(/api/screen-budget/current)が正で、ここは見せるだけ -->
+    <div class="study-subpanel hidden" data-sub="screen">
+      <div class="scr-head">
+        <div class="scr-daynav">
+          <button type="button" id="scr-prev" class="scr-nav-btn" aria-label="Previous day">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+          </button>
+          <span id="scr-date-label" class="scr-date-label"></span>
+          <button type="button" id="scr-next" class="scr-nav-btn" aria-label="Next day">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+          </button>
+        </div>
+        <button type="button" id="scr-today-btn" class="period-btn">Today <kbd>T</kbd></button>
+      </div>
+      <div class="pc-split">
+        <div class="pc-split-main">
+          <div class="chart-card" id="scr-summary-card">
+            <div id="scr-summary"><p class="meta">Loading…</p></div>
+          </div>
+          <div class="chart-card">
+            <div class="chart-header-row"><h3>By hour</h3><span class="meta scr-shade-key">Shaded: late night 22:00–03:00</span></div>
+            <div id="scr-hour-chart"></div>
+            <p class="meta" id="scr-hour-detail">Tap a bar to see that hour</p>
+            <p class="meta" id="scr-hour-note"></p>
+          </div>
+          <div class="chart-card">
+            <div class="chart-header-row"><h3>Last 7 days</h3><span class="meta scr-shade-key"><span class="scr-dot"></span> Study (timed)</span></div>
+            <div id="scr-days-chart"></div>
+            <p class="meta" id="scr-days-detail">Tap a day to open it</p>
+          </div>
+        </div>
+        <div class="pc-split-side">
+          <div class="chart-card">
+            <h3 class="drivers-heading">Highlights</h3>
+            <ul id="scr-facts" class="scr-facts"></ul>
+          </div>
+          <div class="chart-card">
+            <h3 class="drivers-heading">Apps</h3>
+            <div id="scr-apps"></div>
+            <p class="meta">Study apps (Anki, ELSA, Claude, ChatGPT…) are not counted. PC time during a Compass session is not counted either.</p>
+          </div>
+        </div>
+      </div>
     </div>
 
     <div class="study-subpanel hidden" data-sub="scores">
@@ -1183,7 +1231,9 @@
     <tr><td><kbd>↑</kbd> / <kbd>↓</kbd> then <kbd>Enter</kbd></td><td>Pick an event / task of the selected day and open it</td></tr>
     <tr><td><kbd>Delete</kbd></td><td>Delete the picked event</td></tr>
     <tr><th colspan="2">Study / Mood</th></tr>
-    <tr><td><kbd>[</kbd> / <kbd>]</kbd></td><td>Previous / next sub-tab (List · Tree, Log · Scores · Insights, Mood · Slacking · Sleep)</td></tr>
+    <tr><td><kbd>[</kbd> / <kbd>]</kbd></td><td>Previous / next sub-tab (List · Tree, Log · Scores · Insights · Screen, Mood · Slacking · Sleep)</td></tr>
+    <tr><td><kbd>←</kbd> / <kbd>→</kbd> (Study › Screen)</td><td>Previous / next day</td></tr>
+    <tr><td><kbd>T</kbd> (Study › Screen)</td><td>Jump to today</td></tr>
     <tr><td><kbd>1</kbd>–<kbd>9</kbd> / <kbd>0</kbd></td><td>Log mood (Mood tab and mood questions; <kbd>0</kbd> = 10), then <kbd>←</kbd><kbd>→</kbd><kbd>↑</kbd><kbd>↓</kbd> + <kbd>Enter</kbd> to pick tags, <kbd>Ctrl</kbd>+<kbd>Enter</kbd> = Done (saves)</td></tr>
     <tr><th colspan="2">Anywhere</th></tr>
     <tr><td><kbd>Space</kbd></td><td>Pause / resume the running timer</td></tr>
