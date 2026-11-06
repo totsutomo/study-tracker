@@ -5973,7 +5973,10 @@ function updateWakeSleptLabel() {
 }
 
 document.getElementById("wake-time-input").addEventListener("input", updateWakeSleptLabel);
-document.getElementById("wake-bed-input").addEventListener("input", updateWakeSleptLabel);
+document.getElementById("wake-bed-input").addEventListener("input", (e) => {
+  e.target.dataset.touched = "1"; // 手で直した値も、10日平均で上書きしない
+  updateWakeSleptLabel();
+});
 
 // 直近10日の「本寝」(昼寝・異常値を除く)の平均就寝時刻を5分単位のHH:MMで返す。記録が無ければ23:00
 const DEFAULT_BEDTIME = "23:00";
@@ -5996,6 +5999,61 @@ async function averageBedtimeLast10Days() {
   }
 }
 
+// 昨夜の最終使用時間帯(2026-11-07)。by_hourは「何時台に何分」までしか持たないので、
+// 時刻そのものではなく候補(その時間帯の頭・半ば・終わり)を出し、確定は本人がチップか手入力で行う。
+// 予算日は3時区切りで、0〜2時は前の予算日の夜に入る。並べる時は 0〜2時 を 24〜26時 として扱う。
+const BED_HINT_MIN_MINUTES = 3; // 通知やアラームで画面がついただけの時間帯は「使った」に数えない
+const BED_HINT_EVENING_FROM = 18; // 夕方までの使用は就寝の目安にならない
+async function lastNightPhoneUseHint() {
+  try {
+    const ov = await api(`/api/screen-time/overview?date=${addDaysToDate(todayStr(), -1)}&days=1`);
+    let best = null;
+    for (const [dev, info] of Object.entries(ov.today || {})) {
+      for (const [hourStr, minutes] of Object.entries(info.by_hour || {})) {
+        const hour = Number(hourStr);
+        if (minutes < BED_HINT_MIN_MINUTES) continue;
+        if (hour >= 3 && hour < BED_HINT_EVENING_FROM) continue;
+        const order = hour < 3 ? hour + 24 : hour;
+        // 同じ時間帯に複数端末を使っていたら、使用分数の多いほうを代表にする
+        if (!best || order > best.order || (order === best.order && minutes > best.minutes)) {
+          best = { order, hour, minutes, dev };
+        }
+      }
+    }
+    return best;
+  } catch {
+    return null;
+  }
+}
+
+function applyBedHint(hint) {
+  const row = document.getElementById("wake-bed-hint");
+  const chips = document.getElementById("wake-bed-hint-chips");
+  chips.textContent = "";
+  if (!hint || wakePanelMode !== "backfill") {
+    row.classList.add("hidden");
+    return;
+  }
+  const pad = (n) => String(n).padStart(2, "0");
+  const devName = { phone: "Phone", pc: "PC", tablet: "Tablet" }[hint.dev] || hint.dev;
+  document.getElementById("wake-bed-hint-label").textContent =
+    `Last ${devName} use: ${pad(hint.hour)}:00-${pad((hint.hour + 1) % 24)}:00 (${hint.minutes} min). Tap to set:`;
+  for (const [h, m] of [[hint.hour, 0], [hint.hour, 30], [(hint.hour + 1) % 24, 0]]) {
+    const hm = `${pad(h)}:${pad(m)}`;
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.textContent = hm;
+    btn.addEventListener("click", () => {
+      const bedInput = document.getElementById("wake-bed-input");
+      bedInput.value = hm;
+      bedInput.dataset.touched = "1"; // 後から届く10日平均で上書きされないように
+      updateWakeSleptLabel();
+    });
+    chips.appendChild(btn);
+  }
+  row.classList.remove("hidden");
+}
+
 function openWakeMoodPanel(log = null, mode = "recorded") {
   const panel = document.getElementById("wake-mood-panel");
   const backdrop = document.getElementById("wake-mood-backdrop");
@@ -6006,11 +6064,14 @@ function openWakeMoodPanel(log = null, mode = "recorded") {
   note.classList.toggle("hidden", mode !== "backfill");
   note.textContent = mode === "backfill" ? "No sleep log for last night. When did you go to bed?" : "";
   document.getElementById("wake-bed-row").classList.toggle("hidden", mode !== "backfill");
+  applyBedHint(null);
   if (mode === "backfill") {
+    lastNightPhoneUseHint().then(applyBedHint);
     const bedInput = document.getElementById("wake-bed-input");
     bedInput.value = DEFAULT_BEDTIME; // 平均が取れるまでの仮値。取れたら差し替える
+    delete bedInput.dataset.touched;
     averageBedtimeLast10Days().then((hm) => {
-      if (wakePanelMode === "backfill" && bedInput.value === DEFAULT_BEDTIME) {
+      if (wakePanelMode === "backfill" && bedInput.value === DEFAULT_BEDTIME && !bedInput.dataset.touched) {
         bedInput.value = hm;
         updateWakeSleptLabel();
       }

@@ -1154,6 +1154,11 @@
     <label for="wake-bed-input">Went to bed at</label>
     <input type="time" id="wake-bed-input">
   </div>
+  <!-- 昨夜の端末の最終使用時間帯から出す就寝時刻の候補(2026-11-07)。押すと上の入力欄に入る -->
+  <div class="wake-bed-hint hidden" id="wake-bed-hint">
+    <span class="meta" id="wake-bed-hint-label"></span>
+    <span id="wake-bed-hint-chips"></span>
+  </div>
   <div class="wake-time-row" id="wake-time-row">
     <label for="wake-time-input">Woke up at</label>
     <input type="time" id="wake-time-input">

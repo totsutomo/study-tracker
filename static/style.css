@@ -3297,6 +3297,42 @@ kbd {
   max-width: 130px;
 }
 
+/* 就寝時刻の候補(スクリーンタイムの最終使用時間帯から、2026-11-07) */
+.wake-bed-hint {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: -6px 0 14px;
+  font-size: 13px;
+}
+
+.wake-bed-hint.hidden {
+  display: none;
+}
+
+#wake-bed-hint-chips {
+  display: flex;
+  gap: 6px;
+}
+
+.wake-bed-hint button {
+  padding: 4px 10px;
+  margin-right: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--card);
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.wake-bed-hint button:hover,
+.wake-bed-hint button:focus-visible {
+  background: var(--accent-dim);
+  border-color: var(--accent);
+}
+
 /* ---------- morning overview (2026-11-04) ---------- */
 .mo-bars {
   display: flex;
