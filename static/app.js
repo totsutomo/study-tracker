@@ -6714,8 +6714,9 @@ async function saveMorningSleep(mode, log, correctedWake, bed) {
     }
   } else if (mode === "backfill" && bed) {
     try {
-      const { id } = await api("/api/sleep-logs", { method: "POST", body: JSON.stringify({ bedtime_at: toLocalTimestamp(bed) }) });
-      await api(`/api/sleep-logs/${id}`, { method: "PUT", body: JSON.stringify({ wake_at }) });
+      // 就寝と起床を1回で送る。2回に分けると、2回目が失敗した時に起床なしのログが残り、
+      // 「I'm up」の帯が消えなくなる(2026-11-09)
+      await api("/api/sleep-logs", { method: "POST", body: JSON.stringify({ bedtime_at: toLocalTimestamp(bed), wake_at }) });
       markWakeLoggedToday();
     } catch (err) {
       showToast("睡眠の記録に失敗しました。Sleepの履歴から追加できます");

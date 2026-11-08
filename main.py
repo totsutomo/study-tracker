@@ -434,6 +434,9 @@ class MoodConfigUpdate(BaseModel):
 
 class SleepLogCreate(BaseModel):
     bedtime_at: str  # "YYYY-MM-DD HH:MM:SS", client local time
+    # 起床まで分かっている穴埋め記録は1回で作る(2026-11-09)。「作成→起床を追記」の2段階だと、
+    # 2段目が失敗した時に起床なしの孤児ログが残り、いつまでも「寝ている」扱いになる
+    wake_at: str | None = None
 
 
 class SleepLogUpdate(BaseModel):
@@ -2866,8 +2869,8 @@ def sleep_log_stats(days: int = 30):
 def create_sleep_log(log: SleepLogCreate):
     conn = get_connection()
     cur = conn.execute(
-        "INSERT INTO sleep_logs (bedtime_at) VALUES (?)",
-        (log.bedtime_at,),
+        "INSERT INTO sleep_logs (bedtime_at, wake_at) VALUES (?, ?)",
+        (log.bedtime_at, log.wake_at),
     )
     conn.commit()
     new_id = cur.lastrowid
