@@ -2994,12 +2994,12 @@ GUARD_COMPONENT_LABELS = {
     "brave_private_block": "Braveのプライベートウィンドウ禁止",
     "jpblocker_accessibility": "JpBlockerのアプリブロック(ユーザー補助)",
     "jpblocker_device_admin": "JpBlockerの画面ロック(デバイス管理者)",
-    "stayfree_accessibility": "StayFree(ユーザー補助)",
     "jpblocker_dnd_access": "勉強中の通知オフ(JpBlockerのマナーモード権限)",
 }
 # これ以上連絡が無ければ「途絶えた」とみなす。スマホはほぼ常に電源が入っているので短く、
 # 学校のタブレットは週末に丸2日使わないことがあるので長く
 GUARD_SILENT_AFTER = {"phone": timedelta(hours=6), "pc": timedelta(hours=24), "tablet": timedelta(hours=72)}
+GUARD_REMIND_INTERVAL = timedelta(hours=12)
 
 
 class GuardReport(BaseModel):
@@ -3036,17 +3036,61 @@ def _guard_fmt_duration(delta: timedelta) -> str:
     return f"{minutes // 60}時間{minutes % 60}分" if minutes >= 60 else f"{minutes}分"
 
 
+def _guard_setting_get_dt(conn, key: str) -> datetime | None:
+    row = conn.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
+    if not row or not row[0]:
+        return None
+    try:
+        return datetime.fromisoformat(row[0])
+    except ValueError:
+        return None
+
+
+def _guard_setting_set(conn, key: str, value: str):
+    conn.execute(
+        "INSERT INTO settings (key, value) VALUES (?, ?) "
+        "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        (key, value),
+    )
+
+
 def _guard_check_silent(conn, now: datetime, reporting_device: str):
-    for row in conn.execute("SELECT device, last_seen FROM guard_devices WHERE silent_alerted = 0").fetchall():
-        device, last_seen = row[0], datetime.fromisoformat(row[1])
+    now_s = now.isoformat(timespec="seconds")
+    for row in conn.execute("SELECT device, last_seen, silent_alerted FROM guard_devices").fetchall():
+        device, last_seen_s, silent_alerted = row[0], row[1], row[2]
+        last_seen = datetime.fromisoformat(last_seen_s)
         limit = GUARD_SILENT_AFTER.get(device)
         if device == reporting_device or limit is None or now - last_seen < limit:
             continue
+        remind_key = f"guard_silent_reminded_at:{device}"
+        last_reminded = _guard_setting_get_dt(conn, remind_key)
+        if silent_alerted and last_reminded and now - last_reminded < GUARD_REMIND_INTERVAL:
+            continue
         conn.execute("UPDATE guard_devices SET silent_alerted = 1 WHERE device = ?", (device,))
+        _guard_setting_set(conn, remind_key, now_s)
         _guard_send_telegram(
             f"📵 {GUARD_DEVICE_LABELS.get(device, device)}から{_guard_fmt_duration(now - last_seen)}連絡がありません"
-            f"(最後: {_guard_fmt_time(last_seen)})。電源を切っているだけなら問題なし",
-            shared=False,
+            f"(最後: {_guard_fmt_time(last_seen)})。アンインストールされたか電源が切れている可能性があります",
+            shared=True,
+        )
+
+    # オフのまま放置されている部品も12時間おきに見張りグループへ再通知する
+    for row in conn.execute("SELECT device, component, changed_at FROM guard_components WHERE state = 'off'").fetchall():
+        device, component, changed_at_s = row[0], row[1], row[2]
+        if component not in GUARD_COMPONENT_LABELS:
+            continue
+        changed_at = datetime.fromisoformat(changed_at_s)
+        if now - changed_at < GUARD_REMIND_INTERVAL:
+            continue
+        remind_key = f"guard_off_reminded_at:{device}:{component}"
+        last_reminded = _guard_setting_get_dt(conn, remind_key)
+        if last_reminded and now - last_reminded < GUARD_REMIND_INTERVAL:
+            continue
+        _guard_setting_set(conn, remind_key, now_s)
+        label = f"{GUARD_DEVICE_LABELS.get(device, device)}: {GUARD_COMPONENT_LABELS[component]}"
+        _guard_send_telegram(
+            f"⚠️ {label} がオフのまま{_guard_fmt_duration(now - changed_at)}経過しています",
+            shared=True,
         )
 
 
@@ -3061,9 +3105,13 @@ def guard_report(payload: GuardReport, token: str | None = None):
     device_label = GUARD_DEVICE_LABELS[payload.device]
     conn = get_connection()
 
+    # 廃止されたstayfree_accessibilityの古い行が残っていれば掃除する
+    conn.execute("DELETE FROM guard_components WHERE component = 'stayfree_accessibility'")
+
     prev = conn.execute("SELECT silent_alerted FROM guard_devices WHERE device = ?", (payload.device,)).fetchone()
     if prev and prev[0]:
-        _guard_send_telegram(f"📶 {device_label}からの連絡が戻りました", shared=False)
+        _guard_send_telegram(f"📶 {device_label}からの連絡が戻りました", shared=True)
+        conn.execute("DELETE FROM settings WHERE key = ?", (f"guard_silent_reminded_at:{payload.device}",))
     conn.execute(
         "INSERT INTO guard_devices (device, last_seen, silent_alerted) VALUES (?, ?, 0) "
         "ON CONFLICT(device) DO UPDATE SET last_seen = excluded.last_seen, silent_alerted = 0",
@@ -3088,9 +3136,18 @@ def guard_report(payload: GuardReport, token: str | None = None):
             "INSERT INTO guard_events (device, component, state, at) VALUES (?, ?, ?, ?)",
             (payload.device, component, state, now_s),
         )
+        remind_key = f"guard_off_reminded_at:{payload.device}:{component}"
+        conn.execute("DELETE FROM settings WHERE key = ?", (remind_key,))
         label = f"{device_label}: {GUARD_COMPONENT_LABELS[component]}"
         if state == "off":
-            _guard_send_telegram(f"⚠️ {label} がオフになりました({_guard_fmt_time(now)})", shared=True)
+            if payload.device == "phone":
+                _guard_send_telegram(
+                    f"🚨⚠️ {label} がオフにされました({_guard_fmt_time(now)})。"
+                    f"この男は誘惑に負けて制限を外した意思の弱いクズ男です",
+                    shared=True,
+                )
+            else:
+                _guard_send_telegram(f"⚠️ {label} がオフになりました({_guard_fmt_time(now)})", shared=True)
         elif row:  # 初回の"on"は知らせない(導入したてで毎回届くだけなので)
             off_for = now - datetime.fromisoformat(row[1])
             _guard_send_telegram(f"✅ {label} がオンに戻りました(オフだった時間: {_guard_fmt_duration(off_for)})",
@@ -3100,6 +3157,54 @@ def guard_report(payload: GuardReport, token: str | None = None):
     conn.commit()
     conn.close()
     return {"ok": True}
+
+
+class GuardTamperReport(BaseModel):
+    device: str = "phone"
+    kind: str = "settings_guard"
+
+
+@app.post("/api/guard/tamper")
+def guard_tamper(payload: GuardTamperReport, token: str | None = None):
+    if not DEVICE_TOKEN or token != DEVICE_TOKEN:
+        raise HTTPException(status_code=403, detail="invalid token")
+    now = utc_now_naive()
+    now_nz = now.replace(tzinfo=timezone.utc).astimezone(NZ_TZ)
+    today_nz = now_nz.strftime("%Y-%m-%d")
+    time_str = now_nz.strftime("%m/%d %H:%M")
+
+    conn = get_connection()
+    raw = conn.execute("SELECT value FROM settings WHERE key = 'guard_tamper_state'").fetchone()
+    count = 0
+    if raw and raw[0]:
+        try:
+            data = json.loads(raw[0])
+            if data.get("date") == today_nz:
+                count = int(data.get("count", 0))
+        except (ValueError, TypeError):
+            count = 0
+    count += 1
+    _guard_setting_set(conn, "guard_tamper_state", json.dumps({"date": today_nz, "count": count}))
+    conn.commit()
+    conn.close()
+
+    if payload.kind == "device_admin_disable" or count == 2:
+        msg = (
+            f"🚨 【警告・本日{count}回目】とっつーがUtilityをアンインストールしようとしています。"
+            f"この男は誘惑に負けてすぐ制限を消そうとする意思の弱いクズ男です({time_str})"
+        )
+    elif count >= 3:
+        msg = (
+            f"🚨🚨 【連打検知・本日{count}回目】この意思の弱いクズ男が、"
+            f"目先のスマホ欲しさに目標を投げ出して必死にUtilityを消そうと連打しています(自動ブロック継続中 / {time_str})"
+        )
+    else:
+        msg = (
+            f"🚨 【見張り通報】とっつーが今、Utility(制限アプリ)の設定画面を開いて解除を試みました"
+            f"(自動ブロック済み・本日1回目 / {time_str})"
+        )
+    _guard_send_telegram(msg, shared=True)
+    return {"ok": True, "count": count}
 
 
 @app.get("/api/guard/status")
