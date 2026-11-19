@@ -471,6 +471,18 @@ class PendingChangeCreate(BaseModel):
     payload: str  # JSON文字列。中身はJpBlocker側のPendingActionと1:1対応、サーバーはパースしない
 
 
+class PhoneLockStartIn(BaseModel):
+    minutes: int
+    mode: str = "strict"  # "strict" | "study"
+    lock_id: str | None = None
+    source: str = "compass"  # "compass" | "utility"
+
+
+class PhoneLockUnlockIn(BaseModel):
+    token: str
+    pin: str
+
+
 WEEKDAY_CODES = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]  # index matches date.weekday()
 
 
@@ -3956,7 +3968,130 @@ __BODY__
 </html>"""
 
 
-def _render_approve_page(status: dict, pin_is_set: bool, pending: list[dict], token: str | None) -> str:
+def _read_phone_lock_raw(conn) -> dict | None:
+    row = conn.execute("SELECT value FROM settings WHERE key = 'phone_lock'").fetchone()
+    if row is None or not row[0]:
+        return None
+    try:
+        data = json.loads(row[0])
+        return data if isinstance(data, dict) else None
+    except json.JSONDecodeError:
+        return None
+
+
+def _read_revoked_phone_lock_ids(conn) -> list[str]:
+    row = conn.execute("SELECT value FROM settings WHERE key = 'phone_lock_revoked_ids'").fetchone()
+    if row is None or not row[0]:
+        return []
+    try:
+        data = json.loads(row[0])
+        return [str(x) for x in data if isinstance(x, str)][-20:] if isinstance(data, list) else []
+    except json.JSONDecodeError:
+        return []
+
+
+def _record_revoked_phone_lock_id(conn, lock_id: str | None):
+    if not lock_id:
+        return
+    ids = _read_revoked_phone_lock_ids(conn)
+    if lock_id not in ids:
+        ids.append(lock_id)
+    ids = ids[-20:]
+    conn.execute(
+        "INSERT INTO settings (key, value) VALUES ('phone_lock_revoked_ids', ?) "
+        "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        (json.dumps(ids),),
+    )
+
+
+def _phone_lock_status(conn) -> dict:
+    revoked = _read_revoked_phone_lock_ids(conn)
+    raw = _read_phone_lock_raw(conn)
+    if not raw or not raw.get("unlock_at"):
+        return {
+            "active": False,
+            "lock_id": None,
+            "mode": None,
+            "remaining_sec": 0,
+            "unlock_at_utc": None,
+            "unlock_at_nz": None,
+            "unlock_time_nz": None,
+            "source": None,
+            "revoked_ids": revoked,
+        }
+    try:
+        unlock_dt = datetime.fromisoformat(str(raw["unlock_at"]))
+    except ValueError:
+        return {
+            "active": False,
+            "lock_id": None,
+            "mode": None,
+            "remaining_sec": 0,
+            "unlock_at_utc": None,
+            "unlock_at_nz": None,
+            "unlock_time_nz": None,
+            "source": None,
+            "revoked_ids": revoked,
+        }
+    now_utc = utc_now_naive()
+    remaining_sec = int((unlock_dt - now_utc).total_seconds())
+    if remaining_sec <= 0:
+        return {
+            "active": False,
+            "lock_id": None,
+            "mode": None,
+            "remaining_sec": 0,
+            "unlock_at_utc": None,
+            "unlock_at_nz": None,
+            "unlock_time_nz": None,
+            "source": None,
+            "revoked_ids": revoked,
+        }
+    unlock_nz = unlock_dt.replace(tzinfo=timezone.utc).astimezone(NZ_TZ).replace(tzinfo=None)
+    mode = raw.get("mode") if raw.get("mode") in ("strict", "study") else "strict"
+    return {
+        "active": True,
+        "lock_id": raw.get("lock_id"),
+        "mode": mode,
+        "remaining_sec": remaining_sec,
+        "unlock_at_utc": unlock_dt.isoformat(timespec="seconds"),
+        "unlock_at_nz": unlock_nz.strftime("%Y-%m-%d %H:%M:%S"),
+        "unlock_time_nz": unlock_nz.strftime("%H:%M"),
+        "source": raw.get("source"),
+        "revoked_ids": revoked,
+    }
+
+
+def _render_phone_lock_approve_html(phone_lock: dict, pin_is_set: bool) -> str:
+    if not phone_lock.get("active"):
+        return ""
+    remaining_min = max(1, (int(phone_lock.get("remaining_sec") or 0) + 59) // 60)
+    mode_label = "完全ロック" if phone_lock.get("mode") == "strict" else "勉強アプリのみ許可"
+    unlock_time = html.escape(str(phone_lock.get("unlock_time_nz") or ""))
+    if not pin_is_set:
+        return (
+            '<div class="status locked">'
+            f'現在スマホロック中(残り約{remaining_min}分、{unlock_time}まで / {mode_label})。'
+            '解除するには下で先にPINを設定してください。'
+            '</div>'
+        )
+    return (
+        '<div class="pending-item" style="border-color:#c62828;background:#fdecea;margin-bottom:16px;">'
+        '<div class="type" style="color:#c62828;">スマホロックを今すぐ解除する</div>'
+        f'<p class="note" style="margin:4px 0 10px;color:#333;">現在ロック中: 残り約{remaining_min}分 ({unlock_time}まで・{mode_label})</p>'
+        '<input type="password" id="phoneLockUnlockPin" placeholder="PIN" autocomplete="off">'
+        '<button type="button" id="phoneLockUnlockBtn" style="background:#c62828;">スマホロックを今すぐ解除する</button>'
+        '</div>'
+    )
+
+
+def _render_approve_page(
+    status: dict,
+    pin_is_set: bool,
+    pending: list[dict],
+    token: str | None,
+    phone_lock: dict | None = None,
+) -> str:
     if status["active"]:
         remaining_min = max(
             0,
@@ -4042,13 +4177,31 @@ document.querySelectorAll('.cancel').forEach((btn) => {
 });
 """
 
+    phone_lock_html = _render_phone_lock_approve_html(phone_lock or {}, pin_is_set)
+    phone_lock_script = """
+const phoneLockUnlockBtn = document.getElementById('phoneLockUnlockBtn');
+if (phoneLockUnlockBtn) {
+  phoneLockUnlockBtn.addEventListener('click', async () => {
+    const pin = document.getElementById('phoneLockUnlockPin').value;
+    const res = await fetch('/approve/phone-lock/unlock', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({token: TOKEN, pin: pin}),
+    });
+    if (res.ok) { alert('スマホロックを解除しました'); location.reload(); }
+    else { alert('解除に失敗しました(PINを確認してください)'); }
+  });
+}
+"""
+
     body = (
         '<script>const TOKEN = ' + json.dumps(token) + ';</script>'
+        + phone_lock_html
         + approve_html
         + pin_manage_html
         + '<h2>反映待ちの変更</h2>'
         + _render_pending_html(pending)
-        + '<script>' + approve_script + pin_manage_script + cancel_script + '</script>'
+        + '<script>' + phone_lock_script + approve_script + pin_manage_script + cancel_script + '</script>'
     )
     return APPROVE_PAGE_SHELL.replace("__BODY__", body)
 
@@ -4060,12 +4213,13 @@ def approve_page(token: str | None = None):
     conn = get_connection()
     status = _unlock_status(conn)
     pin_is_set = _read_pin(conn) is not None
+    phone_lock = _phone_lock_status(conn)
     pending = rows_to_dicts(conn.execute(
         "SELECT id, action_type, payload, created_at, apply_after FROM pending_changes "
         "WHERE applied = 0 ORDER BY created_at ASC"
     ))
     conn.close()
-    return HTMLResponse(_render_approve_page(status, pin_is_set, pending, token))
+    return HTMLResponse(_render_approve_page(status, pin_is_set, pending, token, phone_lock))
 
 
 @app.post("/approve")
@@ -4085,6 +4239,79 @@ def approve_submit(payload: ApproveIn):
     conn.commit()
     conn.close()
     return {"ok": True, "expires_at": expires_at}
+
+
+@app.post("/approve/phone-lock/unlock")
+def approve_unlock_phone_lock(payload: PhoneLockUnlockIn):
+    if not APPROVAL_TOKEN or payload.token != APPROVAL_TOKEN:
+        raise HTTPException(status_code=403, detail="invalid token")
+    conn = get_connection()
+    if not _verify_pin(conn, payload.pin):
+        conn.close()
+        raise HTTPException(status_code=403, detail="invalid pin")
+    raw = _read_phone_lock_raw(conn)
+    if raw and raw.get("lock_id"):
+        _record_revoked_phone_lock_id(conn, str(raw["lock_id"]))
+    conn.execute("DELETE FROM settings WHERE key = 'phone_lock'")
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+@app.get("/api/phone-lock")
+def get_phone_lock_status():
+    conn = get_connection()
+    status = _phone_lock_status(conn)
+    conn.close()
+    return status
+
+
+@app.post("/api/phone-lock")
+def start_phone_lock(payload: PhoneLockStartIn):
+    if payload.minutes < 1 or payload.minutes > 720:
+        raise HTTPException(status_code=400, detail="minutes must be between 1 and 720")
+    if payload.mode not in ("strict", "study"):
+        raise HTTPException(status_code=400, detail="invalid mode")
+    source = payload.source if payload.source in ("compass", "utility") else "compass"
+    conn = get_connection()
+    revoked = _read_revoked_phone_lock_ids(conn)
+    if payload.lock_id and payload.lock_id in revoked:
+        status = _phone_lock_status(conn)
+        conn.close()
+        return {"ok": False, "revoked": True, **status}
+
+    now_utc = utc_now_naive()
+    new_unlock = now_utc + timedelta(minutes=payload.minutes)
+    current = _phone_lock_status(conn)
+    if current["active"] and current["unlock_at_utc"]:
+        # ロック中の短縮や「完全ロック→勉強アプリ許可」への緩和は本人操作では許さない
+        cur_unlock = datetime.fromisoformat(current["unlock_at_utc"])
+        final_unlock = max(cur_unlock, new_unlock)
+        final_mode = "strict" if ("strict" in (current["mode"], payload.mode)) else "study"
+        final_lock_id = current["lock_id"] or payload.lock_id or secrets.token_hex(8)
+        final_source = current["source"] or source
+    else:
+        final_unlock = new_unlock
+        final_mode = payload.mode
+        final_lock_id = payload.lock_id or secrets.token_hex(8)
+        final_source = source
+
+    record = {
+        "lock_id": final_lock_id,
+        "mode": final_mode,
+        "started_at": now_utc.isoformat(timespec="seconds"),
+        "unlock_at": final_unlock.isoformat(timespec="seconds"),
+        "source": final_source,
+    }
+    conn.execute(
+        "INSERT INTO settings (key, value) VALUES ('phone_lock', ?) "
+        "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        (json.dumps(record),),
+    )
+    conn.commit()
+    status = _phone_lock_status(conn)
+    conn.close()
+    return {"ok": True, "revoked": False, **status}
 
 
 @app.post("/approve/pin")
@@ -4827,6 +5054,13 @@ def focus_session_status(token: str | None = None):
     result["evening_gate_youtube_open"] = gate["skipped_today"] or gate["unlocked"]
     # 朝のゲート(2026-11-05): 今日の起床記録が入るまでCompass以外を開けない(通信エラー時はfalse=止めない側)
     result["morning_gate_active"] = _morning_gate_active(conn, nz_now_naive())
+    # 規定時間のスマホロック(2026-11-19): Compass/Utilityどちらから始めても共有し、美緒のPINでのみ途中解除可
+    pl = _phone_lock_status(conn)
+    result["phone_lock_active"] = pl["active"]
+    result["phone_lock_mode"] = pl["mode"]
+    result["phone_lock_remaining_sec"] = pl["remaining_sec"]
+    result["phone_lock_id"] = pl["lock_id"]
+    result["phone_lock_revoked_ids"] = pl["revoked_ids"]
     conn.close()
     return result
 

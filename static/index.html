@@ -133,6 +133,19 @@
   </div>
 </div>
 
+<div id="update-banner" class="update-banner hidden" role="status">
+  <div class="update-banner-text">
+    <span class="update-banner-label" id="update-banner-date"></span>
+    <strong id="update-banner-title"></strong>
+  </div>
+  <div class="update-banner-actions">
+    <button type="button" id="update-banner-open" class="update-banner-btn">What's new</button>
+    <button type="button" id="update-banner-close" class="update-banner-close" aria-label="Dismiss update notice">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+    </button>
+  </div>
+</div>
+
 <main id="app">
 
   <section id="tab-todo" class="tab-panel active">
@@ -965,6 +978,10 @@
   <span class="now-strip-label" id="slack-now-label"></span>
   <button type="button" id="slack-now-return-btn" class="now-strip-action">Back to work</button>
 </div>
+<div id="phone-lock-now" class="now-strip phone-lock-now hidden">
+  <span class="now-strip-label" id="phone-lock-now-label"></span>
+  <span class="now-strip-note">Unlock via Mio</span>
+</div>
 </div>
 
 <!-- ⚡記録メニュー(2026-10-02): 記録系の入口をここ1か所にまとめた。上から「よく使う順」 -->
@@ -992,6 +1009,10 @@
     <div class="quick-grid">
       <button type="button" id="quick-bed-btn" class="quick-tile quick-bed">🛏 Go to bed<kbd class="key-hint">B</kbd></button>
       <button type="button" id="quick-slack-btn" class="quick-tile quick-slack">🧭 Slacking<kbd class="key-hint">L</kbd></button>
+      <button type="button" id="quick-phone-lock-btn" class="quick-tile quick-phone-lock">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+        Phone lock<kbd class="key-hint">P</kbd>
+      </button>
     </div>
   </div>
   <div class="quick-section">
@@ -1029,6 +1050,21 @@
   <label class="checkbox-label start-clockonly-label">
     <input type="checkbox" id="start-reset-on-reopen"> Reset to 0:00 when reopened
   </label>
+  <label class="checkbox-label start-clockonly-label">
+    <input type="checkbox" id="start-phone-lock"> Lock phone during session
+  </label>
+  <div id="start-phone-lock-options" class="start-phone-lock-options hidden">
+    <div class="period-toggle" id="start-phone-lock-mode">
+      <button type="button" class="period-btn active" data-lock-mode="strict">Strict</button>
+      <button type="button" class="period-btn" data-lock-mode="study">Study apps ok</button>
+    </div>
+    <div class="due-row hidden" id="start-phone-lock-duration-row">
+      <button type="button" class="quick-date-btn" data-lock-minutes="25">25 min</button>
+      <button type="button" class="quick-date-btn" data-lock-minutes="45">45 min</button>
+      <button type="button" class="quick-date-btn" data-lock-minutes="60">60 min</button>
+      <input type="number" id="start-phone-lock-minutes" min="1" max="720" value="45" style="max-width:90px;">
+    </div>
+  </div>
   <div class="mood-reason-picker" id="start-trigger-picker">
     <button type="button" class="reason-btn" data-trigger="Scheduled time">Scheduled time</button>
     <button type="button" class="reason-btn" data-trigger="Felt motivated">Felt motivated</button>
@@ -1088,9 +1124,45 @@
   </div>
 
   <div class="settings-group">
-    <h3>App Info</h3>
+    <div class="app-info-head">
+      <h3>App Info</h3>
+      <button type="button" id="changelog-open-btn" class="secondary">View changelog</button>
+    </div>
     <p class="meta" id="settings-last-updated">Checking...</p>
+    <div id="settings-latest-release" class="latest-release-box"></div>
   </div>
+</div>
+
+<div id="phone-lock-backdrop" class="backdrop hidden"></div>
+<div id="phone-lock-panel" class="add-panel hidden" role="dialog" aria-label="Phone Lock">
+  <div class="panel-header">
+    <h3>Phone Lock</h3>
+    <button type="button" id="phone-lock-close" class="panel-close" aria-label="Close">×</button>
+  </div>
+  <form id="phone-lock-form">
+    <div class="due-row" id="phone-lock-presets">
+      <button type="button" class="quick-date-btn" data-minutes="15">15 min</button>
+      <button type="button" class="quick-date-btn" data-minutes="30">30 min</button>
+      <button type="button" class="quick-date-btn active" data-minutes="45">45 min</button>
+      <button type="button" class="quick-date-btn" data-minutes="60">60 min</button>
+      <input type="number" id="phone-lock-minutes" min="1" max="720" value="45" style="max-width:95px;" aria-label="Minutes">
+    </div>
+    <div class="period-toggle" id="phone-lock-mode-toggle" style="margin-top:10px;">
+      <button type="button" class="period-btn active" data-mode="strict">Strict (calls &amp; alarms only)</button>
+      <button type="button" class="period-btn" data-mode="study">Study apps ok</button>
+    </div>
+    <p class="meta" style="margin-top:10px;">Once started, early unlock requires Mio's PIN on the approval page.</p>
+    <button type="submit" id="phone-lock-submit" style="margin-top:12px;">Lock phone for 45 min</button>
+  </form>
+</div>
+
+<div id="changelog-backdrop" class="backdrop hidden"></div>
+<div id="changelog-panel" class="add-panel hidden" role="dialog" aria-label="Changelog">
+  <div class="panel-header">
+    <h3>Changelog</h3>
+    <button type="button" id="changelog-close" class="panel-close" aria-label="Close">×</button>
+  </div>
+  <div id="changelog-list" class="changelog-list"></div>
 </div>
 
 <!-- Slackingは押した瞬間に記録が始まる(2026-10-03、ホーム画面ショートカット・⚡とも質問なし)。
@@ -1222,7 +1294,7 @@
     <tr><td><kbd>,</kbd></td><td>Settings</td></tr>
     <tr><td><kbd>S</kbd></td><td>Open the ⚡ record menu</td></tr>
     <tr><td><kbd>S</kbd> then <kbd>1</kbd>–<kbd>9</kbd></td><td>Pick a subject to study, then <kbd>Enter</kbd> to start</td></tr>
-    <tr><td><kbd>S</kbd> then <kbd>B</kbd> / <kbd>L</kbd></td><td>Go to bed / start Slacking (while asleep / slacking: I'm up / Back to work)</td></tr>
+    <tr><td><kbd>S</kbd> then <kbd>B</kbd> / <kbd>L</kbd> / <kbd>P</kbd></td><td>Go to bed / start Slacking / Phone lock (while asleep / slacking: I'm up / Back to work)</td></tr>
     <tr><td><kbd>S</kbd> then <kbd>M</kbd>, <kbd>1</kbd>–<kbd>9</kbd> / <kbd>0</kbd></td><td>Log mood now (<kbd>0</kbd> = 10), then <kbd>Ctrl</kbd>+<kbd>Enter</kbd> = Done (saves; closing without Done discards)</td></tr>
     <tr><td><kbd>S</kbd> then <kbd>T</kbd> / <kbd>E</kbd></td><td>Add a ToDo / an event</td></tr>
     <tr><td><kbd>S</kbd> then <kbd>,</kbd></td><td>Record menu settings</td></tr>

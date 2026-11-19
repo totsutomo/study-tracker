@@ -417,6 +417,8 @@ const ICONS = {
   // スキップ(「翌日に持ち越さないが削除もしない」)用。メディアプレイヤーの「次へ送る」アイコンを流用
   skip:
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="5 4 15 12 5 20"/><line x1="19" y1="5" x2="19" y2="19"/></svg>',
+  lock:
+    '<svg class="inline-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>',
 };
 
 
@@ -826,7 +828,10 @@ async function syncWorkoutTodos({ fresh = false } = {}) {
 // 画面に戻ってきた時は、1分のキャッシュを使わずにすぐ確かめる。ワークアウトをホーム画面のアイコンから
 // 直接開いてやった場合も、戻った直後に済みにするため(未完了のワークアウトToDoがある時だけ通信する)
 document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "visible") syncWorkoutTodos({ fresh: true });
+  if (document.visibilityState === "visible") {
+    syncWorkoutTodos({ fresh: true });
+    loadPhoneLockStatus();
+  }
 });
 
 // 期限(due_date/due_time)を過ぎても未完了・未スキップのまま残っているToDoは、次にアプリを
@@ -1320,21 +1325,136 @@ function closeSettingsPanel() {
 document.getElementById("settings-close").addEventListener("click", closeSettingsPanel);
 settingsBackdrop.addEventListener("click", closeSettingsPanel);
 
+const RELEASES = [
+  {
+    id: "2026-11-19",
+    date: "19/11/2026",
+    title: "Phone lock & update notes",
+    items: [
+      "Added Phone Lock (Strict or Study apps ok) synced with Utility and unlockable only via Mio's PIN on /approve",
+      "Added a Lock phone option directly inside the study timer start panel",
+      "Added this update banner and full changelog history in Settings > App Info",
+    ],
+  },
+  {
+    id: "2026-11-06",
+    date: "06/11/2026",
+    title: "Study > Screen & faster morning launch",
+    items: [
+      "Added Study > Screen to inspect phone, PC, and tablet usage by hour, app, and 7-day trend",
+      "Morning wake-up prompt now opens immediately from cached sleep state and suggests bedtime chips from last night's phone use",
+    ],
+  },
+  {
+    id: "2026-11-04",
+    date: "04/11/2026",
+    title: "Evening gate & morning overview",
+    items: [
+      "Added morning 7-day study overview and evening YouTube/Instagram gate with 2 weekly skips",
+      "Added Sunday-start calendar, multi-day events, and fixed category colors",
+    ],
+  },
+];
+
+const SEEN_RELEASE_KEY = "compass:seenRelease";
+const LATEST_RELEASE = RELEASES[0];
+
+function hasUnseenRelease() {
+  try {
+    return localStorage.getItem(SEEN_RELEASE_KEY) !== LATEST_RELEASE.id;
+  } catch {
+    return false;
+  }
+}
+
+function markReleaseSeen() {
+  try {
+    localStorage.setItem(SEEN_RELEASE_KEY, LATEST_RELEASE.id);
+  } catch {
+    // 端末に書けなくても画面上の非表示は維持する
+  }
+}
+
+function formatBuildTime(iso) {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  const day = String(d.getDate()).padStart(2, "0");
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const year = d.getFullYear();
+  const h24 = d.getHours();
+  const ampm = h24 >= 12 ? "pm" : "am";
+  const h12 = h24 % 12 || 12;
+  const min = String(d.getMinutes()).padStart(2, "0");
+  return `${day}/${month}/${year}, ${h12}:${min} ${ampm}`;
+}
+
+function initUpdateNotice() {
+  const banner = document.getElementById("update-banner");
+  const dateEl = document.getElementById("update-banner-date");
+  const titleEl = document.getElementById("update-banner-title");
+  if (banner && dateEl && titleEl) {
+    dateEl.textContent = `Updated (${LATEST_RELEASE.date}):`;
+    titleEl.textContent = LATEST_RELEASE.title;
+    banner.classList.toggle("hidden", !hasUnseenRelease());
+  }
+  const latestBox = document.getElementById("settings-latest-release");
+  if (latestBox) {
+    latestBox.innerHTML = `
+      <div class="latest-release-head">
+        <span>${escapeHtml(LATEST_RELEASE.title)}</span>
+        <span class="meta">${escapeHtml(LATEST_RELEASE.date)}</span>
+      </div>
+      <ul class="latest-release-items">
+        ${LATEST_RELEASE.items.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}
+      </ul>`;
+  }
+}
+
+function openChangelogPanel() {
+  markReleaseSeen();
+  document.getElementById("update-banner")?.classList.add("hidden");
+  const list = document.getElementById("changelog-list");
+  if (list) {
+    list.innerHTML = RELEASES.map((rel, idx) => `
+      <div class="changelog-card">
+        <div class="changelog-card-head">
+          <span>${escapeHtml(rel.title)}${idx === 0 ? '<span class="changelog-badge">Latest</span>' : ""}</span>
+          <span class="meta">${escapeHtml(rel.date)}</span>
+        </div>
+        <ul>${rel.items.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>
+      </div>`).join("");
+  }
+  document.getElementById("changelog-backdrop")?.classList.remove("hidden");
+  document.getElementById("changelog-panel")?.classList.remove("hidden");
+}
+
+function closeChangelogPanel() {
+  document.getElementById("changelog-backdrop")?.classList.add("hidden");
+  document.getElementById("changelog-panel")?.classList.add("hidden");
+}
+
+document.getElementById("update-banner-open")?.addEventListener("click", openChangelogPanel);
+document.getElementById("update-banner-close")?.addEventListener("click", () => {
+  markReleaseSeen();
+  document.getElementById("update-banner")?.classList.add("hidden");
+});
+document.getElementById("changelog-open-btn")?.addEventListener("click", () => {
+  closeSettingsPanel();
+  openChangelogPanel();
+});
+document.getElementById("changelog-close")?.addEventListener("click", closeChangelogPanel);
+document.getElementById("changelog-backdrop")?.addEventListener("click", closeChangelogPanel);
+
 async function updateLastUpdated() {
   const el = document.getElementById("settings-last-updated");
   try {
     const { lastUpdated } = await api("/api/build-info");
-    el.textContent = `Last updated: ${new Date(lastUpdated).toLocaleString("en-NZ", {
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-    })}`;
+    el.textContent = `Last updated: ${formatBuildTime(lastUpdated)}`;
   } catch {
     el.textContent = "Last updated: unavailable";
   }
 }
+initUpdateNotice();
 updateLastUpdated();
 
 document.getElementById("todo-time-toggle").addEventListener("click", () => {
@@ -1610,6 +1730,10 @@ function openStartPanel(subject, todoId) {
   document.getElementById("start-clockonly").checked = prefs.clockOnly;
   document.getElementById("start-keep-awake").checked = prefs.keepAwake;
   document.getElementById("start-reset-on-reopen").checked = prefs.resetOnReopen;
+  document.getElementById("start-phone-lock").checked = !!prefs.phoneLock;
+  setStartPhoneLockMode(prefs.phoneLockMode || "strict");
+  document.getElementById("start-phone-lock-minutes").value = prefs.phoneLockMinutes || 45;
+  syncStartPhoneLockVisibility();
   startTrigger = null;
   document.querySelectorAll("#start-trigger-picker .reason-btn").forEach((b) => {
     b.classList.remove("active");
@@ -1631,7 +1755,40 @@ startBackdrop.addEventListener("click", closeStartPanel);
 
 // 端末ごとの使い勝手の記憶なのでlocalStorageで十分(画面スリープ防止などは端末によって欲しい値が違う)
 const START_PREFS_KEY = "startPrefs";
-const DEFAULT_START_PREFS = { mode: "countup", minutes: 25, clockOnly: false, keepAwake: false, resetOnReopen: false };
+const DEFAULT_START_PREFS = {
+  mode: "countup",
+  minutes: 25,
+  clockOnly: false,
+  keepAwake: false,
+  resetOnReopen: false,
+  phoneLock: false,
+  phoneLockMode: "strict",
+  phoneLockMinutes: 45,
+};
+let startPhoneLockMode = "strict";
+
+function setStartPhoneLockMode(mode) {
+  startPhoneLockMode = mode === "study" ? "study" : "strict";
+  document.querySelectorAll("#start-phone-lock-mode .period-btn").forEach((b) => {
+    b.classList.toggle("active", b.dataset.lockMode === startPhoneLockMode);
+  });
+}
+
+function syncStartPhoneLockVisibility() {
+  const checked = document.getElementById("start-phone-lock").checked;
+  document.getElementById("start-phone-lock-options").classList.toggle("hidden", !checked);
+  document.getElementById("start-phone-lock-duration-row").classList.toggle("hidden", !checked || startMode === "countdown");
+}
+
+document.getElementById("start-phone-lock").addEventListener("change", syncStartPhoneLockVisibility);
+document.querySelectorAll("#start-phone-lock-mode .period-btn").forEach((btn) => {
+  btn.addEventListener("click", () => setStartPhoneLockMode(btn.dataset.lockMode));
+});
+document.querySelectorAll("#start-phone-lock-duration-row [data-lock-minutes]").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    document.getElementById("start-phone-lock-minutes").value = btn.dataset.lockMinutes;
+  });
+});
 
 function loadStartPrefs(subject) {
   try {
@@ -1658,6 +1815,7 @@ function setStartMode(mode) {
     b.classList.toggle("active", b.dataset.mode === mode);
   });
   document.getElementById("start-duration-row").classList.toggle("hidden", mode !== "countdown");
+  syncStartPhoneLockVisibility();
 }
 
 document.querySelectorAll("#start-mode-toggle .period-btn").forEach((btn) => {
@@ -1686,9 +1844,18 @@ document.getElementById("start-begin-btn").addEventListener("click", () => {
   const clockOnly = document.getElementById("start-clockonly").checked;
   const keepAwake = document.getElementById("start-keep-awake").checked;
   const resetOnReopen = document.getElementById("start-reset-on-reopen").checked;
+  const phoneLock = document.getElementById("start-phone-lock").checked;
+  const countdownMinutes = parseInt(document.getElementById("start-duration-input").value, 10);
+  const phoneLockMinutes = startMode === "countdown"
+    ? countdownMinutes
+    : parseInt(document.getElementById("start-phone-lock-minutes").value, 10);
+  if (phoneLock && (!phoneLockMinutes || phoneLockMinutes < 1 || phoneLockMinutes > 720)) {
+    alert("Please enter a phone lock duration between 1 and 720 min");
+    return;
+  }
   let targetMs = null;
   if (startMode === "countdown") {
-    const minutes = parseInt(document.getElementById("start-duration-input").value, 10);
+    const minutes = countdownMinutes;
     if (!minutes || minutes <= 0) {
       alert("Please enter a duration (min)");
       return;
@@ -1704,12 +1871,18 @@ document.getElementById("start-begin-btn").addEventListener("click", () => {
   const trigger = startTrigger;
   saveStartPrefs(subject, {
     mode: startMode,
-    minutes: parseInt(document.getElementById("start-duration-input").value, 10) || DEFAULT_START_PREFS.minutes,
+    minutes: countdownMinutes || DEFAULT_START_PREFS.minutes,
     clockOnly,
     keepAwake,
     resetOnReopen,
+    phoneLock,
+    phoneLockMode: startPhoneLockMode,
+    phoneLockMinutes: parseInt(document.getElementById("start-phone-lock-minutes").value, 10) || 45,
   });
   closeStartPanel();
+  if (phoneLock) {
+    startPhoneLock(phoneLockMinutes, startPhoneLockMode).catch(() => {});
+  }
   beginSession(subject, todoId, startMode, targetMs, clockOnly, trigger, keepAwake, resetOnReopen);
 });
 
@@ -8494,6 +8667,7 @@ async function hydrateFromCache() {
   // ユーザー操作をきっかけにした再読込(上のloadScreenBudget呼び出し)だけでは反映が遅れる。
   // peer-session-bannerと同じ30秒ポーリングで補う。
   setInterval(loadScreenBudget, 30000);
+  setInterval(loadPhoneLockStatus, 30000);
 
   // 以前は「ToDo→期限切れスキップ→残り15件」と段階ごとに前の完了を待っていたため、Scores・
   // 勉強ログ・カレンダーは最初の2段が終わるまで読み込みが始まりすらしなかった(2026-09-28)。
@@ -8520,6 +8694,7 @@ async function hydrateFromCache() {
     loadHourlyChart(),
     loadGoalProgress(),
     loadScreenBudget(),
+    loadPhoneLockStatus(),
     loadWorkout(),
     loadScoresTab(),
     loadStudyDrivers(),
@@ -9061,6 +9236,13 @@ function renderQuickNow() {
         <button type="button" class="quick-now-btn" data-act="return">Back to work<kbd class="key-hint">L</kbd></button>
       </div>`);
   }
+  if (phoneLockUntilMs && Date.now() < phoneLockUntilMs) {
+    items.push(`
+      <div class="quick-now-card slack">
+        <div class="quick-now-text"><span>${ICONS.lock} ${escapeHtml(phoneLockLabel())}</span></div>
+        <span class="meta">Unlock via Mio</span>
+      </div>`);
+  }
   const list = document.getElementById("quick-now-list");
   const html = items.join("");
   // 押している最中に描き直すとタップが失われるため、中身が変わった時だけ差し替える
@@ -9119,6 +9301,136 @@ document.getElementById("quick-bed-btn").addEventListener("click", () => {
 document.getElementById("quick-slack-btn").addEventListener("click", () => {
   closeQuickPanel();
   startSlacking();
+});
+document.getElementById("quick-phone-lock-btn").addEventListener("click", () => {
+  closeQuickPanel();
+  openPhoneLockPanel();
+});
+
+// ---------- phone lock (2026-11-19) ----------
+
+let phoneLockUntilMs = 0;
+let phoneLockMode = "strict";
+let phoneLockUnlockTimeNz = "";
+let phoneLockTickInterval = null;
+let phoneLockPanelMode = "strict";
+
+function phoneLockLabel() {
+  const remMin = Math.max(1, Math.ceil((phoneLockUntilMs - Date.now()) / 60000));
+  const modeText = phoneLockMode === "strict" ? "Strict" : "Study apps ok";
+  const untilText = phoneLockUnlockTimeNz ? ` · until ${phoneLockUnlockTimeNz}` : "";
+  return `Phone locked · ${remMin} min left${untilText} · ${modeText}`;
+}
+
+function updatePhoneLockBanner() {
+  const strip = document.getElementById("phone-lock-now");
+  const active = phoneLockUntilMs > Date.now();
+  strip.classList.toggle("hidden", !active);
+  if (active) {
+    document.getElementById("phone-lock-now-label").innerHTML = `${ICONS.lock} ${escapeHtml(phoneLockLabel())}`;
+  }
+  positionNowDock();
+}
+
+function applyPhoneLockStatus(status) {
+  if (status && status.active && status.remaining_sec > 0) {
+    phoneLockUntilMs = Date.now() + status.remaining_sec * 1000;
+    phoneLockMode = status.mode === "study" ? "study" : "strict";
+    phoneLockUnlockTimeNz = status.unlock_time_nz || "";
+    if (!phoneLockTickInterval) {
+      phoneLockTickInterval = setInterval(() => {
+        if (Date.now() >= phoneLockUntilMs) {
+          phoneLockUntilMs = 0;
+          clearInterval(phoneLockTickInterval);
+          phoneLockTickInterval = null;
+        }
+        updatePhoneLockBanner();
+      }, 15000);
+    }
+  } else {
+    phoneLockUntilMs = 0;
+    phoneLockUnlockTimeNz = "";
+    if (phoneLockTickInterval) {
+      clearInterval(phoneLockTickInterval);
+      phoneLockTickInterval = null;
+    }
+  }
+  updatePhoneLockBanner();
+  renderQuickNow();
+}
+
+async function loadPhoneLockStatus() {
+  try {
+    const status = await api("/api/phone-lock");
+    applyPhoneLockStatus(status);
+  } catch {
+    // 読み込み失敗時は直近状態を保つ
+  }
+}
+
+async function startPhoneLock(minutes, mode) {
+  const res = await api("/api/phone-lock", {
+    method: "POST",
+    body: JSON.stringify({ minutes, mode, source: "compass" }),
+  });
+  applyPhoneLockStatus(res);
+  showToast(`Phone locked for ${minutes} min`);
+}
+
+function syncPhoneLockSubmitLabel() {
+  const mins = parseInt(document.getElementById("phone-lock-minutes").value, 10) || 0;
+  const btn = document.getElementById("phone-lock-submit");
+  btn.textContent = mins > 0 ? `Lock phone for ${mins} min` : "Lock phone";
+  document.querySelectorAll("#phone-lock-presets [data-minutes]").forEach((b) => {
+    b.classList.toggle("active", Number(b.dataset.minutes) === mins);
+  });
+}
+
+function setPhoneLockPanelMode(mode) {
+  phoneLockPanelMode = mode === "study" ? "study" : "strict";
+  document.querySelectorAll("#phone-lock-mode-toggle .period-btn").forEach((b) => {
+    b.classList.toggle("active", b.dataset.mode === phoneLockPanelMode);
+  });
+}
+
+function openPhoneLockPanel() {
+  syncPhoneLockSubmitLabel();
+  setPhoneLockPanelMode(phoneLockPanelMode);
+  document.getElementById("phone-lock-backdrop").classList.remove("hidden");
+  document.getElementById("phone-lock-panel").classList.remove("hidden");
+  document.getElementById("phone-lock-submit").focus({ preventScroll: true });
+}
+
+function closePhoneLockPanel() {
+  document.getElementById("phone-lock-backdrop").classList.add("hidden");
+  document.getElementById("phone-lock-panel").classList.add("hidden");
+}
+
+document.getElementById("phone-lock-close").addEventListener("click", closePhoneLockPanel);
+document.getElementById("phone-lock-backdrop").addEventListener("click", closePhoneLockPanel);
+document.querySelectorAll("#phone-lock-presets [data-minutes]").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    document.getElementById("phone-lock-minutes").value = btn.dataset.minutes;
+    syncPhoneLockSubmitLabel();
+  });
+});
+document.getElementById("phone-lock-minutes").addEventListener("input", syncPhoneLockSubmitLabel);
+document.querySelectorAll("#phone-lock-mode-toggle .period-btn").forEach((btn) => {
+  btn.addEventListener("click", () => setPhoneLockPanelMode(btn.dataset.mode));
+});
+document.getElementById("phone-lock-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const minutes = parseInt(document.getElementById("phone-lock-minutes").value, 10);
+  if (!minutes || minutes < 1 || minutes > 720) {
+    alert("Please enter a duration between 1 and 720 min");
+    return;
+  }
+  closePhoneLockPanel();
+  try {
+    await startPhoneLock(minutes, phoneLockPanelMode);
+  } catch (err) {
+    alert(err.message || "Failed to lock phone");
+  }
 });
 document.getElementById("quick-todo-btn").addEventListener("click", () => {
   closeQuickPanel();
@@ -9512,6 +9824,7 @@ document.addEventListener("keydown", (e) => {
     const btnId = {
       b: "quick-bed-btn",
       l: "quick-slack-btn",
+      p: "quick-phone-lock-btn",
       t: "quick-todo-btn",
       e: "quick-event-btn",
       ",": "quick-settings-btn",
