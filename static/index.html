@@ -5,10 +5,24 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>Compass</title>
 <link rel="manifest" href="/manifest.json">
-<meta name="theme-color" content="#12151c">
+<meta name="theme-color" content="#0f131a">
 <meta name="apple-mobile-web-app-title" content="Compass">
 <link rel="icon" href="/static/icon-512.png">
 <link rel="apple-touch-icon" href="/static/icon-maskable-512.png">
+<script>
+  (function () {
+    try {
+      var pref = localStorage.getItem("compass:theme") || "auto";
+      var eff = pref === "light" || pref === "dark"
+        ? pref
+        : (window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark");
+      document.documentElement.dataset.theme = eff;
+      document.documentElement.dataset.themePref = pref;
+      var meta = document.querySelector('meta[name="theme-color"]');
+      if (meta) meta.content = eff === "light" ? "#f4f6fa" : "#0f131a";
+    } catch (e) {}
+  })();
+</script>
 <link rel="stylesheet" href="/static/style.css">
   <!-- 本番エラー収集(Sentry)。起きたエラーを自動で記録し、週次点検でAIに読ませる。手元(localhost・LAN内)では送らない。
        普段はほぼ何も読み込まず、エラーが起きた時だけSentry本体を読み込む(Loader Script)。 -->
@@ -108,8 +122,12 @@
     </div>
     <div class="hud-live-row">
       <span id="mini-timer-time" class="hud-timer">00:00</span>
-      <button type="button" id="mini-pause-btn" class="icon-btn" aria-label="Pause/Resume">⏸</button>
-      <button type="button" id="mini-stop-btn" class="icon-btn" aria-label="Save and stop">⏹</button>
+      <button type="button" id="mini-pause-btn" class="icon-btn" aria-label="Pause/Resume">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
+      </button>
+      <button type="button" id="mini-stop-btn" class="icon-btn" aria-label="Save and stop">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>
+      </button>
     </div>
   </div>
   <div class="hud-side">
@@ -200,6 +218,10 @@
     <div class="todo-subpanel hidden" data-sub="tree">
       <div id="life-tree" class="lt"></div>
     </div>
+
+    <button type="button" id="todo-fab" class="fab-btn" aria-label="Add task" title="New task (N)">
+      <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+    </button>
 
   </section>
 
@@ -338,7 +360,7 @@
     <div class="study-subpanel" data-sub="log">
 
     <!-- Today/This monthの数字の行はすぐ下のGoalカードと同じ数字だったので消し、そこにしかなかったTotalだけここに残す(2026-10-04) -->
-    <h3 class="goal-heading"><span>Goal <span class="goal-total">· Total <span id="stat-total"></span></span></span> <button type="button" id="goal-edit-btn" class="link-btn">✎ Edit goals</button></h3>
+    <h3 class="goal-heading"><span>Goal <span class="goal-total">· Total <span id="stat-total"></span></span></span> <button type="button" id="goal-edit-btn" class="link-btn"><svg class="inline-icon" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg> Edit goals</button></h3>
     <div class="goal-cards-row">
       <div class="goal-progress-card">
         <div class="goal-progress-row">
@@ -469,7 +491,7 @@
             <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
           </button>
         </div>
-        <button type="button" id="scr-today-btn" class="period-btn">Today <kbd>T</kbd></button>
+        <button type="button" id="scr-today-btn" class="cal-today-btn">Today <kbd class="key-hint">T</kbd></button>
       </div>
       <div class="pc-split">
         <div class="pc-split-main">
@@ -730,8 +752,12 @@
           <span id="cal-month-label" class="cal-title"></span>
           <div class="cal-toolbar-actions">
             <button type="button" id="cal-today-btn" class="cal-today-btn" title="Today (T)">Today</button>
-            <button type="button" id="cal-prev" class="icon-btn" aria-label="Previous" title="Previous (←)">‹</button>
-            <button type="button" id="cal-next" class="icon-btn" aria-label="Next" title="Next (→)">›</button>
+            <button type="button" id="cal-prev" class="icon-btn cal-nav-btn" aria-label="Previous" title="Previous (←)">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg>
+            </button>
+            <button type="button" id="cal-next" class="icon-btn cal-nav-btn" aria-label="Next" title="Next (→)">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg>
+            </button>
             <div class="cal-view-toggle" id="cal-view-toggle">
               <button type="button" class="cal-view-btn active" data-view="month" aria-label="Month" title="Month (M)"><span class="cal-view-long">Month</span><span class="cal-view-short">M</span></button>
               <button type="button" class="cal-view-btn" data-view="week" aria-label="Week" title="Week (W)"><span class="cal-view-long">Week</span><span class="cal-view-short">W</span></button>
@@ -773,8 +799,8 @@
       </div>
     </div>
 
-    <button type="button" id="cal-fab" class="cal-fab" aria-label="Add event or task">
-      <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+    <button type="button" id="cal-fab" class="cal-fab fab-btn" aria-label="Add event or task" title="New event (N)">
+      <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
     </button>
 
   </section>
@@ -967,7 +993,10 @@
 <div id="now-dock" class="now-dock">
 <div id="sleep-now" class="now-strip sleep-now hidden">
   <span class="now-strip-label" id="sleep-now-label"></span>
-  <button type="button" id="sleep-now-wake-btn" class="now-strip-action">☀ I'm up</button>
+  <button type="button" id="sleep-now-wake-btn" class="now-strip-action">
+    <svg class="inline-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg>
+    I'm up
+  </button>
 </div>
 <!-- 朝(5〜13時)で、まだ起床の記録がない間だけ出る帯(2026-11-06)。パネルの表示を待たずに1タップで入力へ進める -->
 <div id="wake-now" class="now-strip sleep-now hidden">
@@ -994,9 +1023,15 @@
   </div>
   <div class="quick-section">
     <div class="quick-section-head">
-      <span>Study ▶</span>
+      <span class="quick-head-title">
+        <svg class="inline-icon" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="6 3 20 12 6 21 6 3"/></svg>
+        Study
+      </span>
       <span class="quick-head-note hidden" id="quick-study-note">Timer running</span>
-      <button type="button" id="quick-settings-btn" class="link-btn quick-settings-btn">⚙ Settings<kbd class="key-hint">,</kbd></button>
+      <button type="button" id="quick-settings-btn" class="link-btn quick-settings-btn">
+        <svg class="inline-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9c.26.6.77 1.03 1.51 1H21a2 2 0 0 1 0 4h-.09c-.74-.03-1.25.4-1.51 1z"/></svg>
+        Settings<kbd class="key-hint">,</kbd>
+      </button>
     </div>
     <div class="quick-subjects" id="quick-subjects"></div>
   </div>
@@ -1007,19 +1042,18 @@
   <div class="quick-section" id="quick-life-section">
     <div class="quick-section-head"><span>Life</span></div>
     <div class="quick-grid">
-      <button type="button" id="quick-bed-btn" class="quick-tile quick-bed">🛏 Go to bed<kbd class="key-hint">B</kbd></button>
-      <button type="button" id="quick-slack-btn" class="quick-tile quick-slack">🧭 Slacking<kbd class="key-hint">L</kbd></button>
-      <button type="button" id="quick-phone-lock-btn" class="quick-tile quick-phone-lock">
-        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-        Phone lock<kbd class="key-hint">P</kbd>
+      <button type="button" id="quick-bed-btn" class="quick-tile quick-bed">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+        <span>Go to bed<kbd class="key-hint">B</kbd></span>
       </button>
-    </div>
-  </div>
-  <div class="quick-section">
-    <div class="quick-section-head"><span>Add</span></div>
-    <div class="quick-grid">
-      <button type="button" id="quick-todo-btn" class="quick-tile">☑ ToDo<kbd class="key-hint">T</kbd></button>
-      <button type="button" id="quick-event-btn" class="quick-tile">▦ Event<kbd class="key-hint">E</kbd></button>
+      <button type="button" id="quick-slack-btn" class="quick-tile quick-slack">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+        <span>Slacking<kbd class="key-hint">L</kbd></span>
+      </button>
+      <button type="button" id="quick-phone-lock-btn" class="quick-tile quick-phone-lock">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+        <span>Phone lock<kbd class="key-hint">P</kbd></span>
+      </button>
     </div>
   </div>
 </div>
@@ -1027,7 +1061,7 @@
 <div id="start-backdrop" class="backdrop hidden"></div>
 <div id="start-panel" class="add-panel start-panel hidden">
   <div class="panel-header">
-    <h3 id="start-subject-name">Subject</h3>
+    <h3 id="start-subject-name">Start Study</h3>
     <button type="button" id="start-close" class="panel-close" aria-label="Close">×</button>
   </div>
   <div class="period-toggle" id="start-mode-toggle">
@@ -1041,17 +1075,12 @@
     <button type="button" class="quick-date-btn" data-minutes="60">60 min</button>
     <input type="number" id="start-duration-input" min="1" value="25" style="max-width:100px;">
   </div>
-  <label class="checkbox-label start-clockonly-label">
-    <input type="checkbox" id="start-clockonly"> Clock-only mode (pauses if you leave the screen)
-  </label>
-  <label class="checkbox-label start-clockonly-label">
-    <input type="checkbox" id="start-keep-awake"> Keep screen awake
-  </label>
-  <label class="checkbox-label start-clockonly-label">
-    <input type="checkbox" id="start-reset-on-reopen"> Reset to 0:00 when reopened
-  </label>
-  <label class="checkbox-label start-clockonly-label">
-    <input type="checkbox" id="start-phone-lock"> Lock phone during session
+  <label class="checkbox-label start-lock-card">
+    <span class="start-lock-label">
+      <svg class="inline-icon" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+      <span>Lock phone during session</span>
+    </span>
+    <input type="checkbox" id="start-phone-lock">
   </label>
   <div id="start-phone-lock-options" class="start-phone-lock-options hidden">
     <div class="period-toggle" id="start-phone-lock-mode">
@@ -1065,6 +1094,20 @@
       <input type="number" id="start-phone-lock-minutes" min="1" max="720" value="45" style="max-width:90px;">
     </div>
   </div>
+  <details class="start-options-fold" id="start-options-fold">
+    <summary><span>Options</span><span class="meta" id="start-options-summary">Default</span></summary>
+    <div class="start-options-body">
+      <label class="checkbox-label start-clockonly-label">
+        <input type="checkbox" id="start-clockonly"> Clock-only mode (pauses if you leave the screen)
+      </label>
+      <label class="checkbox-label start-clockonly-label">
+        <input type="checkbox" id="start-keep-awake"> Keep screen awake
+      </label>
+      <label class="checkbox-label start-clockonly-label">
+        <input type="checkbox" id="start-reset-on-reopen"> Reset to 0:00 when reopened
+      </label>
+    </div>
+  </details>
   <div class="mood-reason-picker" id="start-trigger-picker">
     <button type="button" class="reason-btn" data-trigger="Scheduled time">Scheduled time</button>
     <button type="button" class="reason-btn" data-trigger="Felt motivated">Felt motivated</button>
@@ -1082,6 +1125,14 @@
     <button type="button" id="settings-close" class="panel-close" aria-label="Close">×</button>
   </div>
 
+  <div class="settings-group">
+    <h3>Appearance</h3>
+    <div class="period-toggle theme-toggle" id="theme-toggle">
+      <button type="button" class="period-btn active" data-theme-pref="auto">Auto</button>
+      <button type="button" class="period-btn" data-theme-pref="dark">Dark</button>
+      <button type="button" class="period-btn" data-theme-pref="light">Light</button>
+    </div>
+  </div>
 
   <div class="settings-group">
     <h3>Category Management</h3>
@@ -1188,7 +1239,7 @@
   <h4>How do you feel now?</h4>
   <div id="return-mood-picker"></div>
   <div class="return-actions">
-    <button type="button" id="return-start-btn">▶ Start timer</button>
+    <button type="button" id="return-start-btn"><svg class="inline-icon" viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true"><polygon points="6 4 20 12 6 20 6 4"/></svg> Start timer</button>
     <button type="button" id="return-done-btn" class="secondary">Done</button>
   </div>
 </div>
@@ -1286,7 +1337,7 @@
   <form id="peer-stop-form" class="peer-stop-form">
     <div class="peer-stop-time"><span id="peer-stop-subject"></span> · <span id="peer-stop-elapsed"></span></div>
     <p class="meta hidden" id="peer-stop-legacy"></p>
-    <button type="submit" id="peer-stop-save">■ Stop &amp; save</button>
+    <button type="submit" id="peer-stop-save"><svg class="inline-icon" viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="2"/></svg> Stop &amp; save</button>
     <button type="button" id="peer-stop-discard" class="danger-outline">Discard</button>
   </form>
 </div>
@@ -1303,7 +1354,7 @@
     <tr><td><kbd>N</kbd></td><td>New task (ToDo) / new event (Calendar)</td></tr>
     <tr><td><kbd>/</kbd></td><td>Search tasks</td></tr>
     <tr><td><kbd>,</kbd></td><td>Settings</td></tr>
-    <tr><td><kbd>S</kbd></td><td>Open the ⚡ record menu</td></tr>
+    <tr><td><kbd>S</kbd></td><td>Open the Record menu</td></tr>
     <tr><td><kbd>S</kbd> then <kbd>1</kbd>–<kbd>9</kbd></td><td>Pick a subject to study, then <kbd>Enter</kbd> to start</td></tr>
     <tr><td><kbd>S</kbd> then <kbd>B</kbd> / <kbd>L</kbd> / <kbd>P</kbd></td><td>Go to bed / start Slacking / Phone lock (while asleep / slacking: I'm up / Back to work)</td></tr>
     <tr><td><kbd>S</kbd> then <kbd>M</kbd>, <kbd>1</kbd>–<kbd>9</kbd> / <kbd>0</kbd></td><td>Log mood now (<kbd>0</kbd> = 10), then <kbd>Ctrl</kbd>+<kbd>Enter</kbd> = Done (saves; closing without Done discards)</td></tr>

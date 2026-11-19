@@ -317,7 +317,7 @@ function undoableDelete(message, { apply, revert, commit }) {
       await commit();
     } catch (err) {
       revert();
-      showToast("保存に失敗しました。もう一度お試しください");
+      showToast("Couldn't save. Check your connection and try again.");
     }
   };
   entry.timer = setTimeout(entry.run, UNDO_WINDOW_MS);
@@ -348,7 +348,7 @@ async function optimistic(apply, revert, request) {
     return await request();
   } catch (err) {
     revert();
-    showToast("保存に失敗しました。もう一度お試しください");
+    showToast("Couldn't save. Check your connection and try again.");
     throw err;
   }
 }
@@ -408,10 +408,16 @@ const ICONS = {
     '<svg class="inline-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>',
   moon:
     '<svg class="inline-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>',
+  sun:
+    '<svg class="inline-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg>',
   clock:
     '<svg class="inline-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>',
   // 再生/削除ボタン用。.inline-iconの既定色(muted寄り)は使わず、ボタン自身のcolorをそのまま継承させる
-  play: '<svg viewBox="0 0 24 24" fill="currentColor"><polygon points="7 4 20 12 7 20 7 4"/></svg>',
+  play: '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><polygon points="7 4 20 12 7 20 7 4"/></svg>',
+  pause:
+    '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>',
+  stop:
+    '<svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>',
   trash:
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16"/><path d="M9 7V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2"/><path d="M18 7l-.9 12.1a2 2 0 0 1-2 1.9H8.9a2 2 0 0 1-2-1.9L6 7"/></svg>',
   // スキップ(「翌日に持ち越さないが削除もしない」)用。メディアプレイヤーの「次へ送る」アイコンを流用
@@ -419,6 +425,54 @@ const ICONS = {
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="5 4 15 12 5 20"/><line x1="19" y1="5" x2="19" y2="19"/></svg>',
   lock:
     '<svg class="inline-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>',
+  edit:
+    '<svg class="inline-icon" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>',
+  link:
+    '<svg class="inline-icon" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>',
+  compass:
+    '<svg class="inline-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/></svg>',
+  book:
+    '<svg class="inline-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>',
+  smartphone:
+    '<svg class="inline-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="2" width="14" height="20" rx="2" ry="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>',
+  smile:
+    '<svg class="inline-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/></svg>',
+  rain:
+    '<svg class="inline-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242"/><path d="M16 14v6"/><path d="M8 14v6"/><path d="M12 16v6"/></svg>',
+  thermo:
+    '<svg class="inline-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4v10.54a4 4 0 1 1-4 0V4a2 2 0 0 1 4 0Z"/></svg>',
+  target:
+    '<svg class="inline-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>',
+  search:
+    '<svg class="inline-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>',
+  xCircle:
+    '<svg class="inline-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>',
+  star:
+    '<svg class="inline-icon" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>',
+  battery:
+    '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="16" height="10" rx="2"/><line x1="22" y1="11" x2="22" y2="13"/><line x1="6" y1="11" x2="6" y2="13"/></svg>',
+  zap:
+    '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>',
+  user:
+    '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>',
+  meh:
+    '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="8" y1="15" x2="16" y2="15"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/></svg>',
+  heart:
+    '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/></svg>',
+  award:
+    '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="6"/><path d="M15.477 12.89 17 22l-5-3-5 3 1.523-9.11"/></svg>',
+  activity:
+    '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>',
+  layers:
+    '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>',
+  bookOpen:
+    '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>',
+  messageCircle:
+    '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/></svg>',
+  users:
+    '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>',
+  home:
+    '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>',
 };
 
 
@@ -1198,10 +1252,10 @@ function renderCategoryItem(cat, list) {
   li.innerHTML = `
     <button type="button" class="cat-color-dot" style="background:${colorFor(cat.name)}" title="Color" aria-label="Change color"></button>
     <input type="text" class="category-name-input" value="${escapeHtml(cat.name)}">
-    <label class="checkbox-label" title="このカテゴリのToDoをスマホ利用時間・ToDo達成率の計算に含める">
+    <label class="checkbox-label" title="Count tasks in this category toward screen budget & completion rate">
       <input type="checkbox" class="category-study-toggle" ${cat.counts_as_study ? "checked" : ""}> Study
     </label>
-    <button class="delete-btn" title="Delete">×</button>
+    <button class="delete-btn" title="Delete" aria-label="Delete ${escapeHtml(cat.name)}">×</button>
   `;
   const input = li.querySelector(".category-name-input");
   const colorDot = li.querySelector(".cat-color-dot");
@@ -1235,7 +1289,7 @@ function renderCategoryItem(cat, list) {
           if (prev) categoryColorMap[cat.name] = prev;
           colorDot.style.background = colorFor(cat.name);
           renderCalendarView();
-          showToast("色の変更に失敗しました。もう一度お試しください");
+          showToast("Couldn't change color. Try again.");
         }
       });
     });
@@ -1245,6 +1299,7 @@ function renderCategoryItem(cat, list) {
   studyToggle.addEventListener("change", async () => {
     const prev = cat.counts_as_study;
     cat.counts_as_study = studyToggle.checked ? 1 : 0;
+    renderQuickSubjects(allCategories);
     renderTodos(); // 「Not counted」表示を即時に切り替える
     try {
       await api(`/api/categories/${cat.id}`, {
@@ -1254,8 +1309,9 @@ function renderCategoryItem(cat, list) {
     } catch (err) {
       cat.counts_as_study = prev;
       studyToggle.checked = !!prev;
+      renderQuickSubjects(allCategories);
       renderTodos();
-      showToast("設定の変更に失敗しました。もう一度お試しください");
+      showToast("Couldn't update setting. Try again.");
     }
   });
   input.addEventListener("change", async () => {
@@ -1271,7 +1327,7 @@ function renderCategoryItem(cat, list) {
       loadTodos();
     } catch (err) {
       cat.name = oldName;
-      showToast("カテゴリ名の変更に失敗しました。もう一度お試しください");
+      showToast("Couldn't rename category. Try again.");
     } finally {
       loadCategories();
     }
@@ -1285,7 +1341,7 @@ function renderCategoryItem(cat, list) {
     try {
       await api(`/api/categories/${cat.id}`, { method: "DELETE" });
     } catch (err) {
-      showToast("削除に失敗しました。もう一度お試しください");
+      showToast("Couldn't delete. Check your connection and try again.");
     } finally {
       loadCategories();
     }
@@ -1301,7 +1357,7 @@ guardedSubmit(document.getElementById("category-form"), async (e) => {
     await api("/api/categories", { method: "POST", body: JSON.stringify({ name }) });
   } catch (err) {
     document.getElementById("category-name").value = name;
-    showToast(`「${name}」の追加に失敗しました。もう一度お試しください`);
+    showToast(`Couldn't add "${name}". Try again.`);
   } finally {
     loadCategories();
   }
@@ -1326,6 +1382,16 @@ document.getElementById("settings-close").addEventListener("click", closeSetting
 settingsBackdrop.addEventListener("click", closeSettingsPanel);
 
 const RELEASES = [
+  {
+    id: "2026-11-20",
+    date: "20/11/2026",
+    title: "UI refresh, Light mode & instant Phone Lock",
+    items: [
+      "Refined Deep Navy palette with full Light / Dark / Auto theme support in Settings > Appearance",
+      "Unified Lucide line icons, added + FAB on ToDo, streamlined the Record menu and Start Study options, and fixed Scores card overflow",
+      "Phone Lock on Android now triggers local lock immediately via Utility before syncing with the server",
+    ],
+  },
   {
     id: "2026-11-19",
     date: "19/11/2026",
@@ -1550,7 +1616,7 @@ guardedSubmit(document.getElementById("todo-form"), async (e) => {
   } catch (err) {
     allTodos = allTodos.filter((t) => t !== tempTodo);
     renderTodos();
-    showToast(`「${title}」の追加に失敗しました。もう一度お試しください`);
+    showToast(`Couldn't add "${title}". Try again.`);
   }
 });
 
@@ -1675,7 +1741,9 @@ function escapeHtml(str) {
 // 右下▶のミニメニューの2か所にあったが、記録の入口を⚡1か所にまとめたため、ここだけにした
 function renderQuickSubjects(cats) {
   const container = document.getElementById("quick-subjects");
-  container.innerHTML = cats
+  const studyCats = (cats || []).filter((c) => c.counts_as_study);
+  const visibleCats = studyCats.length ? studyCats : (cats || []);
+  container.innerHTML = visibleCats
     .map(
       (c) =>
         `<button type="button" class="subject-btn" data-subject="${escapeHtml(c.name)}" style="--subject-color:${colorFor(c.name)}">${escapeHtml(c.name)}</button>`
@@ -1715,13 +1783,27 @@ let startTrigger = null;
 const startBackdrop = document.getElementById("start-backdrop");
 const startPanel = document.getElementById("start-panel");
 
+function syncStartOptionsSummary() {
+  const el = document.getElementById("start-options-summary");
+  if (!el) return;
+  const active = [];
+  if (document.getElementById("start-clockonly").checked) active.push("Clock-only");
+  if (document.getElementById("start-keep-awake").checked) active.push("Keep awake");
+  if (document.getElementById("start-reset-on-reopen").checked) active.push("Reset");
+  el.textContent = active.length ? active.join(" · ") : "Default";
+}
+
+["start-clockonly", "start-keep-awake", "start-reset-on-reopen"].forEach((id) => {
+  document.getElementById(id)?.addEventListener("change", syncStartOptionsSummary);
+});
+
 function openStartPanel(subject, todoId) {
   if (timerSubject) {
-    alert("A timer is already running");
+    showToast("A timer is already running");
     return;
   }
   pendingStart = { subject, todoId };
-  document.getElementById("start-subject-name").textContent = subject;
+  document.getElementById("start-subject-name").textContent = `Start Study · ${subject}`;
   // 前回その科目で選んだモード・時間・チェック項目を復元する(毎回選び直す手間を省く、2026-09-27)。
   // 「きっかけ」は毎回その時の理由を記録するためのものなので、あえて復元しない
   const prefs = loadStartPrefs(subject);
@@ -1734,6 +1816,9 @@ function openStartPanel(subject, todoId) {
   setStartPhoneLockMode(prefs.phoneLockMode || "strict");
   document.getElementById("start-phone-lock-minutes").value = prefs.phoneLockMinutes || 45;
   syncStartPhoneLockVisibility();
+  syncStartOptionsSummary();
+  const fold = document.getElementById("start-options-fold");
+  if (fold) fold.open = false;
   startTrigger = null;
   document.querySelectorAll("#start-trigger-picker .reason-btn").forEach((b) => {
     b.classList.remove("active");
@@ -1850,14 +1935,14 @@ document.getElementById("start-begin-btn").addEventListener("click", () => {
     ? countdownMinutes
     : parseInt(document.getElementById("start-phone-lock-minutes").value, 10);
   if (phoneLock && (!phoneLockMinutes || phoneLockMinutes < 1 || phoneLockMinutes > 720)) {
-    alert("Please enter a phone lock duration between 1 and 720 min");
+    showToast("Enter a phone lock duration between 1 and 720 min");
     return;
   }
   let targetMs = null;
   if (startMode === "countdown") {
     const minutes = countdownMinutes;
     if (!minutes || minutes <= 0) {
-      alert("Please enter a duration (min)");
+      showToast("Enter a countdown duration (min)");
       return;
     }
     targetMs = minutes * 60000;
@@ -2332,7 +2417,7 @@ function applyResetOnReopenIfNeeded() {
     syncFocusSessionServer(isPaused ? null : Math.round(sessionTargetMs / 1000), timerSubject);
   }
   updateFocusDisplay();
-  showToast("タイマーをリセットしました");
+  showToast("Timer reset to 0:00");
   return true;
 }
 
@@ -2553,7 +2638,7 @@ function hideMiniBar() {
 
 function updateMiniStatus() {
   document.getElementById("mini-timer-status").textContent = isPaused ? "Paused" : "";
-  document.getElementById("mini-pause-btn").textContent = isPaused ? "▶" : "⏸";
+  document.getElementById("mini-pause-btn").innerHTML = isPaused ? ICONS.play : ICONS.pause;
   document.getElementById("status-strip").classList.toggle("paused", isPaused);
 }
 
@@ -2775,7 +2860,7 @@ async function flushPendingStudyLogs() {
     flushingPendingStudyLogs = false;
   }
   if (sent) {
-    showToast(`未送信だった学習記録を${sent}件保存しました`);
+    showToast(`Synced ${sent} unsent study log(s)`);
     loadStudySummary();
     loadStudyLogList();
     loadStudyChart();
@@ -2930,7 +3015,7 @@ async function finishSession(elapsedMinutes) {
       }
     })
     .catch(() =>
-      showToast(`「${subject}」の記録を送れませんでした。端末に保存したので次回起動時に再送します`)
+      showToast(`Couldn't send "${subject}" log. Saved locally to retry next time.`)
     );
   // サーバーの保存と再集計を待つと表示が変わるまで数秒〜十数秒かかるため、終えた分を手元の
   // 表示に先に足しておく。正しい数字はこの後の再読み込みで上書きされる(2026-09-29)
@@ -3475,7 +3560,7 @@ function renderGoalProgress(p) {
   if (p.today_vocab_count) echoParts.push(`Vocab ${p.today_vocab_count}`);
   if (p.today_reading_pages) echoParts.push(`Reading ${p.today_reading_pages}p`);
   if (echoParts.length) {
-    activityEcho.textContent = `🔗 Today's cross-app activity: ${echoParts.join(" ・ ")}`;
+    activityEcho.innerHTML = `${ICONS.link} Today's cross-app activity: ${escapeHtml(echoParts.join(" · "))}`;
     activityEcho.classList.remove("hidden");
   } else {
     activityEcho.classList.add("hidden");
@@ -4144,21 +4229,21 @@ function renderWorkout(w) {
 // 記録の入口(Moodタブ・⚡・寝る前・起床時・Back to work)は全部このcreateMoodPickerを使い、
 // どこから付けた記録かはkind(wake / moment / day / slacking)で区別する。
 const MOOD_TAGS = [
-  { tag: "Tired", icon: "😮‍💨" },
-  { tag: "Stressed", icon: "😰" },
-  { tag: "Lonely", icon: "🧍" },
-  { tag: "Meh", icon: "🌀" },
-  { tag: "Calm", icon: "😌" },
-  { tag: "Proud", icon: "💪" },
-  { tag: "Moved", icon: "🏃" },
-  { tag: "Too much", icon: "📋" },
-  { tag: "Study", icon: "📚" },
-  { tag: "English", icon: "🗣" },
-  { tag: "Friends", icon: "👫" },
-  { tag: "Family", icon: "🏡" },
+  { tag: "Tired", icon: ICONS.battery },
+  { tag: "Stressed", icon: ICONS.zap },
+  { tag: "Lonely", icon: ICONS.user },
+  { tag: "Meh", icon: ICONS.meh },
+  { tag: "Calm", icon: ICONS.heart },
+  { tag: "Proud", icon: ICONS.award },
+  { tag: "Moved", icon: ICONS.activity },
+  { tag: "Too much", icon: ICONS.layers },
+  { tag: "Study", icon: ICONS.bookOpen },
+  { tag: "English", icon: ICONS.messageCircle },
+  { tag: "Friends", icon: ICONS.users },
+  { tag: "Family", icon: ICONS.home },
 ];
 const MOOD_OTHER_TAG = "Other";
-const MOOD_KIND_ICON = { wake: "☀", day: "🌙", slacking: "🧭" };
+const MOOD_KIND_ICON = { wake: ICONS.sun, day: ICONS.moon, slacking: ICONS.compass };
 const MOOD_LOW_SCORE = 4; // これ以下を付けたら「今日の最低ライン」と▶を出す(Phase 3)
 
 // Otherから自動で増えたボタン・天気の場所。/api/mood/overviewの返事で更新する
@@ -4170,8 +4255,12 @@ function moodTagIcon(tag) {
 }
 
 function moodTagLabel(tag) {
+  return tag;
+}
+
+function moodTagHtml(tag) {
   const icon = moodTagIcon(tag);
-  return `${icon ? `${icon} ` : ""}${tag}`;
+  return `${icon ? `${icon} ` : ""}${escapeHtml(tag)}`;
 }
 
 // 対応するボタンがない古い理由(Felt motivated等)は、tagsが空のままreasonを表示する
@@ -4324,7 +4413,7 @@ function createMoodPicker(container, opts) {
       } catch (err) {
         entry.score = prev;
         render();
-        showToast("気分の記録に失敗しました。もう一度お試しください");
+        showToast("Couldn't save mood. Try again.");
       }
       changed();
       return;
@@ -4347,7 +4436,7 @@ function createMoodPicker(container, opts) {
     } catch (err) {
       entry = null;
       render();
-      showToast("気分の記録に失敗しました。もう一度お試しください");
+      showToast("Couldn't save mood. Try again.");
     }
     changed();
   }
@@ -4372,7 +4461,7 @@ function createMoodPicker(container, opts) {
     } catch (err) {
       Object.assign(entry, prev);
       render();
-      showToast("保存に失敗しました。もう一度お試しください");
+      showToast("Couldn't save. Check your connection and try again.");
     }
     changed();
   }
@@ -4510,11 +4599,11 @@ function dailyMoodFromLogs(logs) {
   return result;
 }
 
-function formatMoodEntryLine(e) {
-  const time = (e.logged_at || "").slice(11, 16);
+function formatMoodEntryHtml(e) {
+  const time = escapeHtml((e.logged_at || "").slice(11, 16));
   const kindIcon = MOOD_KIND_ICON[e.kind] ? `${MOOD_KIND_ICON[e.kind]} ` : "";
-  const labels = moodEntryLabels(e);
-  return `${kindIcon}${time} · ${e.score}${labels.length ? ` · ${labels.join(", ")}` : ""}`;
+  const labels = moodEntryLabels(e).map(escapeHtml);
+  return `${kindIcon}${time} · ${escapeHtml(String(e.score))}${labels.length ? ` · ${labels.join(", ")}` : ""}`;
 }
 
 function renderMoodChips(logs) {
@@ -4530,7 +4619,7 @@ function renderMoodChips(logs) {
     todays
       .map(
         (e) =>
-          `<button type="button" class="mood-chip${e.id === moodEditingId ? " active" : ""}" data-id="${e.id ?? ""}">${escapeHtml(formatMoodEntryLine(e))}</button>`
+          `<button type="button" class="mood-chip${e.id === moodEditingId ? " active" : ""}" data-id="${e.id ?? ""}">${formatMoodEntryHtml(e)}</button>`
       )
       .join("");
 }
@@ -4604,7 +4693,7 @@ function renderMoodTagStats(o) {
   const list = document.getElementById("mood-reason-stats");
   list.innerHTML = o.tag_stats.length
     ? o.tag_stats
-        .map((r) => `<li>${escapeHtml(r.tag === MOOD_OTHER_TAG ? "Other…" : moodTagLabel(r.tag))} · ${r.count}× · avg ${r.avg_score}</li>`)
+        .map((r) => `<li>${r.tag === MOOD_OTHER_TAG ? "Other…" : moodTagHtml(r.tag)} · ${r.count}× · avg ${r.avg_score}</li>`)
         .join("")
     : "<li>No tags yet</li>";
   // Otherの割合 = ボタンが合っていない率。高ければボタンを見直す目安にする
@@ -4707,7 +4796,7 @@ document.getElementById("mood-location-select").addEventListener("change", async
     showToast(`Weather location: ${e.target.selectedOptions[0].textContent}`);
   } catch (err) {
     e.target.value = moodConfig.location;
-    showToast("保存に失敗しました。もう一度お試しください");
+    showToast("Couldn't save. Check your connection and try again.");
   }
 });
 
@@ -4720,7 +4809,7 @@ document.getElementById("mood-custom-tags").addEventListener("click", async (e) 
     renderMoodSettings();
     moodTabPicker?.refresh();
   } catch (err) {
-    showToast("削除に失敗しました。もう一度お試しください");
+    showToast("Couldn't delete. Check your connection and try again.");
   }
 });
 
@@ -4781,14 +4870,14 @@ function compareHalves(rows, xKey, yKey) {
 }
 
 const DRIVER_DEFS = {
-  sleep: { icon: "😴", name: "Sleep", hi: "More sleep", lo: "Less sleep", fmt: (v) => formatShortDuration(v) },
-  study: { icon: "📚", name: "Study", hi: "More study", lo: "Less study", fmt: (v) => formatShortDuration(v) },
-  screen: { icon: "📱", name: "Screen time", hi: "More screen", lo: "Less screen", fmt: (v) => formatShortDuration(v) },
-  mood: { icon: "🙂", name: "Mood", hi: "Better mood", lo: "Worse mood", fmt: (v) => v.toFixed(1) },
-  slacking: { icon: "🧭", name: "Slacking", hi: "Slacked", lo: "No slacking", fmt: (v) => `${v} days` },
-  rain: { icon: "🌧", name: "Rain", hi: "Rainy days", lo: "Dry days", fmt: (v) => `${v} days` },
-  sun: { icon: "☀", name: "Sunshine", hi: "Sunnier", lo: "Less sun", fmt: (v) => `${v.toFixed(1)} h` },
-  temp: { icon: "🌡", name: "Temperature (high)", hi: "Warmer", lo: "Cooler", fmt: (v) => `${v.toFixed(1)}°C` },
+  sleep: { icon: ICONS.moon, name: "Sleep", hi: "More sleep", lo: "Less sleep", fmt: (v) => formatShortDuration(v) },
+  study: { icon: ICONS.book, name: "Study", hi: "More study", lo: "Less study", fmt: (v) => formatShortDuration(v) },
+  screen: { icon: ICONS.smartphone, name: "Screen time", hi: "More screen", lo: "Less screen", fmt: (v) => formatShortDuration(v) },
+  mood: { icon: ICONS.smile, name: "Mood", hi: "Better mood", lo: "Worse mood", fmt: (v) => v.toFixed(1) },
+  slacking: { icon: ICONS.compass, name: "Slacking", hi: "Slacked", lo: "No slacking", fmt: (v) => `${v} days` },
+  rain: { icon: ICONS.rain, name: "Rain", hi: "Rainy days", lo: "Dry days", fmt: (v) => `${v} days` },
+  sun: { icon: ICONS.sun, name: "Sunshine", hi: "Sunnier", lo: "Less sun", fmt: (v) => `${v.toFixed(1)} h` },
+  temp: { icon: ICONS.thermo, name: "Temperature (high)", hi: "Warmer", lo: "Cooler", fmt: (v) => `${v.toFixed(1)}°C` },
 };
 
 function renderDrivers(containerId, rows, target, keys) {
@@ -4995,13 +5084,13 @@ guardedSubmit(document.getElementById("goal-minutes-form"), async (e) => {
     loadGoalProgress();
     setGoalEditing(false);
   } catch (err) {
-    showToast("目標設定の保存に失敗しました。もう一度お試しください");
+    showToast("Couldn't save goals. Try again.");
   }
 });
 
 function setGoalEditing(editing) {
   document.getElementById("goal-minutes-form").classList.toggle("hidden", !editing);
-  document.getElementById("goal-edit-btn").textContent = editing ? "Cancel" : "✎ Edit goals";
+  document.getElementById("goal-edit-btn").innerHTML = editing ? "Cancel" : `${ICONS.edit} Edit goals`;
   if (editing) document.getElementById("daily-goal-input").focus({ preventScroll: true });
 }
 
@@ -5418,11 +5507,11 @@ function renderDiaryScoreChart(allRows) {
   }[view];
   const { xOf, yOf, xLabels, svg } = scoreChartFrame(rows.length, scale.ticks, scale.top);
 
-  const seriesDefs = view === "overall" ? [{ key: "overall", color: "#4f7cdb", width: 1.5, dots: true }]
+  const seriesDefs = view === "overall" ? [{ key: "overall", color: "var(--accent)", width: 1.5, dots: true }]
     : view === "language" ? [{ key: "language", color: "#e0a030", width: 1.5, dots: true }]
     : view === "errors" ? [{ key: "per100w", color: "#e5555c", width: 1.5, dots: true }]
     : [
-        { key: "task", color: "#4f7cdb", width: 1.2 },
+        { key: "task", color: "var(--accent)", width: 1.2 },
         { key: "coherence", color: "#4a9c72", width: 1.2 },
         { key: "lexical", color: "#e0a030", width: 1.2 },
         { key: "grammar", color: "#e5555c", width: 1.2 },
@@ -5458,7 +5547,7 @@ function renderStackScores(rows) {
   const legend = document.getElementById("stack-score-legend");
   if (!rows.length) {
     statsEl.innerHTML = "";
-    container.innerHTML = `<p class="meta">まだ記録なし(Stackで復習すると自動で入ります)</p>`;
+    container.innerHTML = `<p class="meta">No records yet (syncs automatically when you review in Stack)</p>`;
     legend.innerHTML = "";
     return;
   }
@@ -5519,7 +5608,7 @@ function renderVocabStats(data) {
   if (!data.configured) {
     cellsEl.innerHTML = "";
     barEl.innerHTML = "";
-    container.innerHTML = `<p class="meta">vocab-appとの接続が未設定(サーバーの環境変数VOCAB_APP_SYNC_TOKENにvocab-appのSYNC_TOKENを入れると表示されます)</p>`;
+    container.innerHTML = `<p class="meta">Not connected to vocab-app yet (set VOCAB_APP_SYNC_TOKEN on the server)</p>`;
     return;
   }
   const { words, ratings } = data;
@@ -5550,7 +5639,7 @@ function renderVocabStats(data) {
     : "";
 
   if (!ratings.length) {
-    container.innerHTML = `<p class="meta">まだ評価の記録なし(vocab-appで復習すると入ります)</p>`;
+    container.innerHTML = `<p class="meta">No rating logs yet (recorded as you review in vocab-app)</p>`;
     return;
   }
   const { xOf, yOf: yAt, xLabels, svg } = scoreChartFrame(ratings.length, [0, 25, 50, 75, 100], 100, "%");
@@ -5577,16 +5666,16 @@ function renderHitotsubashiScoreChart(rows) {
   const legend = document.getElementById("hitotsubashi-score-legend");
   const legendItem = (color, label) => `<span class="legend-item"><span class="legend-dot" style="background:${color};"></span>${label}</span>`;
   if (!rows.length) {
-    container.innerHTML = `<p class="meta">まだ記録なし</p>`;
+    container.innerHTML = `<p class="meta">No records yet</p>`;
     legend.innerHTML = "";
     return;
   }
   const { xOf, yOf, xLabels, svg } = scoreChartFrame(rows.length, [0, 25, 50, 75, 100], 100);
 
   const seriesDefs = hitotsubashiScoreView === "overall"
-    ? [{ key: "overall", color: "#4f7cdb", width: 1.5, label: "Overall" }]
+    ? [{ key: "overall", color: "var(--accent)", width: 1.5, label: "Overall" }]
     : [
-        { key: "content", color: "#4f7cdb", width: 1.2, label: "Content" },
+        { key: "content", color: "var(--accent)", width: 1.2, label: "Content" },
         { key: "organization", color: "#4a9c72", width: 1.2, label: "Organization" },
         { key: "language", color: "#e5555c", width: 1.2, label: "Language" },
       ];
@@ -5716,7 +5805,7 @@ async function startSlacking() {
     if (activationActiveLog === log) cacheActivationActive();
   } catch (err) {
     if (activationActiveLog === log) setActivationActive(null);
-    showToast("記録の開始に失敗しました。もう一度お試しください");
+    showToast("Couldn't start logging. Try again.");
     return;
   }
   showToast(
@@ -5752,7 +5841,7 @@ async function returnActivation() {
       body: JSON.stringify({ returned_at: returnedAt }),
     });
   } catch (err) {
-    showToast("復帰の記録に失敗しました。もう一度お試しください");
+    showToast("Couldn't log return. Try again.");
   } finally {
     refreshActivation(); // 成功・失敗いずれも正本で確定させる(失敗時はここでActiveに戻る)
   }
@@ -6460,7 +6549,7 @@ async function wakeUp() {
     markWakeLoggedToday();
     openWakeMoodPanel({ id: activeLog.id, bedtime_at: activeLog.bedtime_at, wake_at });
   } catch (err) {
-    showToast("起床の記録に失敗しました。もう一度お試しください");
+    showToast("Couldn't log wake-up. Try again.");
   } finally {
     loadSleepActive(); // 成功・失敗いずれも正本で確定(失敗時はここでまだ就寝中に戻る)
     loadSleepPanel();
@@ -6484,7 +6573,7 @@ guardedSubmit(document.getElementById("sleep-lock-form"), async () => {
     await api("/api/settings", { method: "PUT", body: JSON.stringify({ sleep_lock_until: value }) });
     showToast(`Phone lock ends at ${value}`);
   } catch (err) {
-    showToast("解除時刻の保存に失敗しました。もう一度お試しください");
+    showToast("Couldn't save unlock time. Try again.");
   }
 });
 
@@ -6692,7 +6781,7 @@ function renderSleepLogList(logs) {
         loadSleepPanel();
       } catch (err) {
         li.querySelector(".sleep-edit-row").classList.remove("hidden");
-        showToast("保存に失敗しました。もう一度お試しください");
+        showToast("Couldn't save. Check your connection and try again.");
       }
     });
     li.querySelector(".delete-btn").addEventListener("click", () => {
@@ -6754,7 +6843,7 @@ async function renderBedtimeCarryoverList() {
       } catch (err) {
         list.appendChild(li);
         toggleBedtimeCarryoverEmpty();
-        showToast(`「${t.title}」の変更に失敗しました。もう一度お試しください`);
+        showToast(`Couldn't update "${t.title}". Try again.`);
       }
     });
     li.querySelector('[data-action="keep"]').addEventListener("click", () => {
@@ -6829,7 +6918,7 @@ guardedSubmit(document.getElementById("bedtime-sabori-form"), async (e) => {
     loadActivationList();
   } catch (err) {
     li.remove();
-    showToast("記録に失敗しました。もう一度お試しください");
+    showToast("Couldn't save record. Try again.");
   }
 });
 
@@ -6850,7 +6939,7 @@ async function goToBed() {
     loadSleepPanel();
   } catch (err) {
     if (sleepActiveLog === log) setSleepActive(null);
-    showToast("就寝の記録に失敗しました。もう一度お試しください");
+    showToast("Couldn't log bedtime. Try again.");
   }
 }
 
@@ -6880,7 +6969,7 @@ async function saveMorningSleep(mode, log, correctedWake, bed) {
       await api(`/api/sleep-logs/${log.id}`, { method: "PUT", body: JSON.stringify({ wake_at }) });
       markWakeLoggedToday();
     } catch (err) {
-      showToast("起床の記録に失敗しました。もう一度お試しください");
+      showToast("Couldn't log wake-up. Try again.");
     } finally {
       loadSleepActive();
       loadSleepPanel();
@@ -6892,7 +6981,7 @@ async function saveMorningSleep(mode, log, correctedWake, bed) {
       await api("/api/sleep-logs", { method: "POST", body: JSON.stringify({ bedtime_at: toLocalTimestamp(bed), wake_at }) });
       markWakeLoggedToday();
     } catch (err) {
-      showToast("睡眠の記録に失敗しました。Sleepの履歴から追加できます");
+      showToast("Couldn't save sleep log. You can add it in Sleep › History.");
     } finally {
       loadSleepActive();
       loadSleepPanel();
@@ -6918,7 +7007,7 @@ document.getElementById("wake-mood-save").addEventListener("click", async () => 
         await api(`/api/sleep-logs/${log.id}`, { method: "PUT", body: JSON.stringify({ wake_at: corrected }) });
         loadSleepPanel();
       } catch (err) {
-        showToast("起床時刻の修正に失敗しました。Sleepの履歴から直せます");
+        showToast("Couldn't update wake time. You can fix it in Sleep › History.");
       }
     }
   }
@@ -7673,7 +7762,7 @@ function renderCalDayDetail() {
         li.classList.toggle("done", !!t.done);
         checkbox.checked = !!t.done;
         renderCalGrid();
-        showToast("保存に失敗しました。もう一度お試しください");
+        showToast("Couldn't save. Check your connection and try again.");
       }
     });
     li.addEventListener("click", () => {
@@ -8114,7 +8203,7 @@ async function submitQuickTask() {
     calTodosCache = calTodosCache.filter((t) => t !== tempTodo);
     renderTodos();
     renderCalendarView();
-    showToast(`「${title}」の追加に失敗しました。もう一度お試しください`);
+    showToast(`Couldn't add "${title}". Try again.`);
   }
 }
 
@@ -8162,7 +8251,7 @@ guardedSubmit(document.getElementById("event-form"), async (e) => {
     loadCalendar();
   } catch (err) {
     local.restore();
-    showToast(`「${title}」の追加に失敗しました。もう一度お試しください`);
+    showToast(`Couldn't add "${title}". Try again.`);
   }
 });
 
@@ -8300,7 +8389,7 @@ function renderCopyweekList() {
   const conflictCount = copyweekRows.filter((r) => r.conflict).length;
   conflictNote.classList.toggle("hidden", conflictCount === 0);
   if (conflictCount > 0) {
-    conflictNote.textContent = `⚠ ${conflictCount} event(s) overlap with an existing schedule on that day. Adjust the time, or confirm to create them alongside the existing ones.`;
+    conflictNote.textContent = `${conflictCount} event(s) overlap with an existing schedule on that day. Adjust the time, or confirm to create them alongside the existing ones.`;
   }
 
   list.innerHTML = copyweekRows
@@ -8392,7 +8481,7 @@ guardedClick(document.getElementById("copyweek-commit"), async () => {
     );
     showToast(`Copied ${copiedCount} event(s).`);
   } catch (err) {
-    showToast("一部の予定のコピーに失敗しました。カレンダーを確認してください");
+    showToast("Some events couldn't be copied. Check the calendar.");
   } finally {
     if (document.getElementById("tab-calendar").classList.contains("active")) loadCalendar();
   }
@@ -8520,7 +8609,7 @@ guardedSubmit(document.getElementById("event-detail-form"), async (e) => {
     loadCalendar();
   } catch (err) {
     local.restore();
-    showToast(`「${title}」の保存に失敗しました。もう一度お試しください`);
+    showToast(`Couldn't save "${title}". Try again.`);
   }
 });
 
@@ -8836,6 +8925,7 @@ function switchTodoSubtab(sub) {
   document.querySelectorAll("#todo-subtabs .period-btn").forEach((b) => b.classList.toggle("active", b.dataset.sub === sub));
   syncSideSubs("tab-todo", sub, sub === "tree" ? "Tree" : "List"); // ボタンの文字には数字も入るので名前は直接渡す
   document.querySelectorAll(".todo-subpanel").forEach((p) => p.classList.toggle("hidden", p.dataset.sub !== sub));
+  document.getElementById("todo-fab")?.classList.toggle("hidden", sub !== "list");
   // 開いた時に数字(ToDoの件数・自動の現在値)を取り直す。前回分は即座に出る
   if (sub === "tree") loadLifeTree().catch((err) => console.error("life tree load failed:", err));
 }
@@ -8856,7 +8946,7 @@ function openLifeTree() {
 // 計画が崩れると一気にやる気をなくしやすい本人向けに、警告は赤ではなく琥珀色で、事実だけを書く
 // (Geminiのレビュー、2026-10-30)。固定の文言は英語、目標の中身(本人・AIが書いたもの)は日本語のまま。
 
-const LT_KIND_ICON = { achieve: "🎯", maintain: "♻", explore: "🔍", avoid: "✕" };
+const LT_KIND_ICON = { achieve: ICONS.target, maintain: ICONS.repeat, explore: ICONS.search, avoid: ICONS.xCircle };
 let lifeTreeChipKey = "";
 
 function lifeTreeIndex() {
@@ -9083,7 +9173,7 @@ function renderLifeTree() {
   if (avoids.length) {
     cards.push({
       weight: 2.7,
-      html: `<div class="lt-branch closed"><div class="lt-head">✕ Not doing</div>
+      html: `<div class="lt-branch closed"><div class="lt-head">${ICONS.xCircle} Not doing</div>
         <div class="lt-keeps">${avoids.map((g) => `<span>${escapeHtml(g.title)}</span>`).join("")}</div></div>`,
     });
   }
@@ -9097,7 +9187,7 @@ function renderLifeTree() {
       ${items.map((it) => `<button type="button" class="lt-alert-item" data-goal-id="${it.id}"><span>${escapeHtml(it.title)}</span><span>${escapeHtml(it.reason)}</span></button>`).join("")}
     </div>
     <div class="lt-star">
-      <div class="lt-star-lab">★ North star</div>
+      <div class="lt-star-lab">${ICONS.star} North star</div>
       <div class="lt-star-text">${star.text ? escapeHtml(star.text) : "Not written yet"}</div>
       ${star.note ? `<div class="lt-star-note">${escapeHtml(star.note)}</div>` : ""}
     </div>
@@ -9203,7 +9293,7 @@ function renderQuickPanel() {
   document.getElementById("quick-study-note").classList.toggle("hidden", !running);
   document.getElementById("quick-bed-btn").classList.toggle("hidden", !!sleepActiveLog);
   document.getElementById("quick-slack-btn").classList.toggle("hidden", !!activationActiveLog);
-  document.getElementById("quick-life-section").classList.toggle("hidden", !!sleepActiveLog && !!activationActiveLog);
+  document.getElementById("quick-life-section").classList.remove("hidden");
   renderQuickMood();
 }
 
@@ -9218,15 +9308,15 @@ function renderQuickNow() {
           <span class="meta">${escapeHtml(timerSubject)} · ${mode}${isPaused ? " · Paused" : ""}</span>
           <span class="quick-now-time">${escapeHtml(document.getElementById("mini-timer-time").textContent)}</span>
         </div>
-        <button type="button" class="secondary quick-now-btn" data-act="pause" aria-label="Pause/Resume">${isPaused ? "▶" : "⏸"}</button>
-        <button type="button" class="quick-now-btn" data-act="stop">■ Stop</button>
+        <button type="button" class="secondary quick-now-btn" data-act="pause" aria-label="Pause/Resume">${isPaused ? ICONS.play : ICONS.pause}</button>
+        <button type="button" class="quick-now-btn" data-act="stop">${ICONS.stop} Stop</button>
       </div>`);
   }
   if (sleepActiveLog) {
     items.push(`
       <div class="quick-now-card sleep">
         <div class="quick-now-text"><span>${ICONS.moon} ${sleepElapsedLabel()}</span></div>
-        ${sleepLockedOnThisDevice() ? "" : `<button type="button" class="quick-now-btn" data-act="wake">☀ I'm up<kbd class="key-hint">B</kbd></button>`}
+        ${sleepLockedOnThisDevice() ? "" : `<button type="button" class="quick-now-btn" data-act="wake">${ICONS.sun} I'm up<kbd class="key-hint">B</kbd></button>`}
       </div>`);
   }
   if (activationActiveLog) {
@@ -9369,16 +9459,70 @@ async function loadPhoneLockStatus() {
   }
 }
 
+function generateLockId() {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return `lock-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function triggerAndroidLocalPhoneLock(lockId, mode, minutes, untilTime) {
+  if (!/Android/i.test(navigator.userAgent || "")) return;
+  try {
+    const params = new URLSearchParams({ mode: mode === "study" ? "study" : "strict", lock_id: lockId });
+    if (untilTime) params.set("until", untilTime);
+    else if (minutes) params.set("minutes", String(minutes));
+    const url = `jpblocker://phone-lock?${params.toString()}`;
+    const a = document.createElement("a");
+    a.href = url;
+    a.style.display = "none";
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => a.remove(), 500);
+  } catch {
+    // Utility未インストール等の場合でもサーバー側保存は継続
+  }
+}
+
 async function startPhoneLock(minutes, mode, untilTime = null) {
-  const payload = untilTime
-    ? { until_time: untilTime, mode, source: "compass" }
-    : { minutes, mode, source: "compass" };
-  const res = await api("/api/phone-lock", {
-    method: "POST",
-    body: JSON.stringify(payload),
+  const lockId = generateLockId();
+  const normalizedMode = mode === "study" ? "study" : "strict";
+  const estMinutes = untilTime ? (untilTimeMinutesDiff(untilTime) || 45) : (minutes || 45);
+  const estUnlockTime = untilTime || (() => {
+    const d = new Date(Date.now() + estMinutes * 60000);
+    return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  })();
+
+  // 1) サーバー応答を待たずに画面とAndroid端末内ロックを即座に発火させる
+  const optimisticRemainingSec = Math.max(
+    phoneLockUntilMs > Date.now() ? Math.ceil((phoneLockUntilMs - Date.now()) / 1000) : 0,
+    estMinutes * 60,
+  );
+  const optimisticMode = (phoneLockUntilMs > Date.now() && phoneLockMode === "strict") ? "strict" : normalizedMode;
+  applyPhoneLockStatus({
+    active: true,
+    remaining_sec: optimisticRemainingSec,
+    mode: optimisticMode,
+    unlock_time_nz: estUnlockTime,
+    lock_id: lockId,
   });
-  applyPhoneLockStatus(res);
-  showToast(untilTime ? `Phone locked until ${untilTime}` : `Phone locked for ${minutes} min`);
+  showToast(untilTime ? `Phone locked until ${untilTime}` : `Phone locked for ${estMinutes} min`);
+  triggerAndroidLocalPhoneLock(lockId, normalizedMode, minutes, untilTime);
+
+  // 2) バックグラウンドでサーバーへ同期(keepaliveで画面ロック直後でも通信が途切れにくいようにする)
+  const payload = untilTime
+    ? { until_time: untilTime, mode: normalizedMode, lock_id: lockId, source: "compass" }
+    : { minutes, mode: normalizedMode, lock_id: lockId, source: "compass" };
+  try {
+    const res = await api("/api/phone-lock", {
+      method: "POST",
+      keepalive: true,
+      body: JSON.stringify(payload),
+    });
+    applyPhoneLockStatus(res);
+  } catch (err) {
+    // Android側(Utility)のsyncPendingToServerでも再送されるため、ここでは状態を消さない
+  }
 }
 
 function defaultUntilTimeValue() {
@@ -9476,41 +9620,65 @@ document.getElementById("phone-lock-form").addEventListener("submit", async (e) 
     const val = document.getElementById("phone-lock-until-input").value;
     const diff = untilTimeMinutesDiff(val);
     if (!diff || diff > 720) {
-      alert("Please choose a time within the next 12 hours");
+      showToast("Choose a time within the next 12 hours");
       return;
     }
     closePhoneLockPanel();
-    try {
-      await startPhoneLock(null, phoneLockPanelMode, val);
-    } catch (err) {
-      alert(err.message || "Failed to lock phone");
-    }
+    await startPhoneLock(null, phoneLockPanelMode, val);
     return;
   }
   const minutes = parseInt(document.getElementById("phone-lock-minutes").value, 10);
   if (!minutes || minutes < 1 || minutes > 720) {
-    alert("Please enter a duration between 1 and 720 min");
+    showToast("Enter a duration between 1 and 720 min");
     return;
   }
   closePhoneLockPanel();
-  try {
-    await startPhoneLock(minutes, phoneLockPanelMode);
-  } catch (err) {
-    alert(err.message || "Failed to lock phone");
-  }
+  await startPhoneLock(minutes, phoneLockPanelMode);
 });
-document.getElementById("quick-todo-btn").addEventListener("click", () => {
-  closeQuickPanel();
+document.getElementById("todo-fab")?.addEventListener("click", () => {
   openTodoAddPanel();
-});
-document.getElementById("quick-event-btn").addEventListener("click", () => {
-  closeQuickPanel();
-  openEventAddPanel();
 });
 document.getElementById("quick-settings-btn").addEventListener("click", () => {
   closeQuickPanel();
   openSettingsPanel();
 });
+
+// ---------- appearance (Dark / Light / Auto, 2026-11-20) ----------
+const THEME_STORAGE_KEY = "compass:theme";
+
+function resolveEffectiveTheme(pref) {
+  if (pref === "light" || pref === "dark") return pref;
+  return window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+}
+
+function applyThemePref(pref, { persist = true } = {}) {
+  const normalized = pref === "light" || pref === "dark" ? pref : "auto";
+  const eff = resolveEffectiveTheme(normalized);
+  document.documentElement.dataset.theme = eff;
+  document.documentElement.dataset.themePref = normalized;
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.content = eff === "light" ? "#f4f6fa" : "#0f131a";
+  document.querySelectorAll("#theme-toggle [data-theme-pref]").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.themePref === normalized);
+  });
+  if (persist) {
+    try {
+      localStorage.setItem(THEME_STORAGE_KEY, normalized);
+    } catch {}
+  }
+}
+
+document.querySelectorAll("#theme-toggle [data-theme-pref]").forEach((btn) => {
+  btn.addEventListener("click", () => applyThemePref(btn.dataset.themePref));
+});
+try {
+  applyThemePref(localStorage.getItem(THEME_STORAGE_KEY) || "auto", { persist: false });
+  window.matchMedia?.("(prefers-color-scheme: light)")?.addEventListener("change", () => {
+    if ((document.documentElement.dataset.themePref || "auto") === "auto") {
+      applyThemePref("auto", { persist: false });
+    }
+  });
+} catch {}
 
 // 帯の文字部分をタップしたら⚡メニューを開く(ボタン部分はそれぞれの操作)
 ["sleep-now", "slack-now"].forEach((id) => {
@@ -9888,19 +10056,19 @@ document.addEventListener("keydown", (e) => {
       }
       return;
     }
-    const btnId = {
-      b: "quick-bed-btn",
-      l: "quick-slack-btn",
-      p: "quick-phone-lock-btn",
-      t: "quick-todo-btn",
-      e: "quick-event-btn",
-      ",": "quick-settings-btn",
+    const quickAction = {
+      b: () => document.getElementById("quick-bed-btn")?.click(),
+      l: () => document.getElementById("quick-slack-btn")?.click(),
+      p: () => document.getElementById("quick-phone-lock-btn")?.click(),
+      t: () => { closeQuickPanel(); openTodoAddPanel(); },
+      e: () => { closeQuickPanel(); openEventAddPanel(); },
+      ",": () => document.getElementById("quick-settings-btn")?.click(),
     }[key];
-    if (btnId) {
+    if (quickAction) {
       e.preventDefault(); // 開いたパネルのタイトル欄に文字が入らないように
       endSubjectPick();
       endMoodPick();
-      document.getElementById(btnId).click();
+      quickAction();
       return;
     }
   }
