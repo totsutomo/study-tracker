@@ -5484,6 +5484,17 @@ body.quick-open #tabbar {
 
 /* ---------- Phone Lock ---------- */
 
+.lock-a11y-token {
+  display: inline-block;
+  font-size: 1px;
+  line-height: 1px;
+  opacity: 0.01;
+  max-width: 2px;
+  overflow: hidden;
+  pointer-events: none;
+  user-select: none;
+}
+
 .phone-lock-now {
   border-left-color: var(--danger);
   cursor: default;

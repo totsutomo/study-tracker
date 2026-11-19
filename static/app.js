@@ -9402,6 +9402,8 @@ document.getElementById("quick-phone-lock-btn").addEventListener("click", () => 
 let phoneLockUntilMs = 0;
 let phoneLockMode = "strict";
 let phoneLockUnlockTimeNz = "";
+let phoneLockId = "";
+let phoneLockTriggeredAtMs = 0;
 let phoneLockTickInterval = null;
 let phoneLockPanelMode = "strict";
 let phoneLockPanelKind = "duration";
@@ -9413,12 +9415,24 @@ function phoneLockLabel() {
   return `Phone locked · ${remMin} min left${untilText} · ${modeText}`;
 }
 
+function phoneLockAccessibilityMarker() {
+  if (!phoneLockId || !phoneLockTriggeredAtMs || phoneLockUntilMs <= Date.now()) return "";
+  return `[[JPBLOCKER_LOCK:${phoneLockId}|${phoneLockMode}|${Math.round(phoneLockUntilMs)}|${phoneLockTriggeredAtMs}|${phoneLockUnlockTimeNz || ""}]]`;
+}
+
 function updatePhoneLockBanner() {
   const strip = document.getElementById("phone-lock-now");
   const active = phoneLockUntilMs > Date.now();
   strip.classList.toggle("hidden", !active);
   if (active) {
-    document.getElementById("phone-lock-now-label").innerHTML = `${ICONS.lock} ${escapeHtml(phoneLockLabel())}`;
+    const marker = phoneLockAccessibilityMarker();
+    if (marker) strip.setAttribute("aria-label", `${phoneLockLabel()} ${marker}`);
+    else strip.removeAttribute("aria-label");
+    document.getElementById("phone-lock-now-label").innerHTML =
+      `${ICONS.lock} ${escapeHtml(phoneLockLabel())}` +
+      (marker ? ` <span class="lock-a11y-token">${escapeHtml(marker)}</span>` : "");
+  } else {
+    strip.removeAttribute("aria-label");
   }
   positionNowDock();
 }
@@ -9428,6 +9442,7 @@ function applyPhoneLockStatus(status) {
     phoneLockUntilMs = Date.now() + status.remaining_sec * 1000;
     phoneLockMode = status.mode === "study" ? "study" : "strict";
     phoneLockUnlockTimeNz = status.unlock_time_nz || "";
+    if (status.lock_id) phoneLockId = status.lock_id;
     if (!phoneLockTickInterval) {
       phoneLockTickInterval = setInterval(() => {
         if (Date.now() >= phoneLockUntilMs) {
@@ -9441,6 +9456,8 @@ function applyPhoneLockStatus(status) {
   } else {
     phoneLockUntilMs = 0;
     phoneLockUnlockTimeNz = "";
+    phoneLockId = "";
+    phoneLockTriggeredAtMs = 0;
     if (phoneLockTickInterval) {
       clearInterval(phoneLockTickInterval);
       phoneLockTickInterval = null;
@@ -9493,7 +9510,10 @@ async function startPhoneLock(minutes, mode, untilTime = null) {
     return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
   })();
 
-  // 1) サーバー応答を待たずに画面とAndroid端末内ロックを即座に発火させる
+  // 1) サーバー応答を待たずに画面バナー(+AccessibilityService用マーカー)を即座に出す。
+  //    Utilityのユーザー補助サービスがこのマーカーを0.1秒で画面から直接読み取って即ロックする。
+  phoneLockId = lockId;
+  phoneLockTriggeredAtMs = Date.now();
   const optimisticRemainingSec = Math.max(
     phoneLockUntilMs > Date.now() ? Math.ceil((phoneLockUntilMs - Date.now()) / 1000) : 0,
     estMinutes * 60,
@@ -9506,8 +9526,14 @@ async function startPhoneLock(minutes, mode, untilTime = null) {
     unlock_time_nz: estUnlockTime,
     lock_id: lockId,
   });
+  const marker = phoneLockAccessibilityMarker();
+  if (marker) {
+    document.title = `Compass ${marker}`;
+    setTimeout(() => {
+      if (document.title.includes(lockId)) document.title = "Compass";
+    }, 15000);
+  }
   showToast(untilTime ? `Phone locked until ${untilTime}` : `Phone locked for ${estMinutes} min`);
-  triggerAndroidLocalPhoneLock(lockId, normalizedMode, minutes, untilTime);
 
   // 2) バックグラウンドでサーバーへ同期(keepaliveで画面ロック直後でも通信が途切れにくいようにする)
   const payload = untilTime
