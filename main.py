@@ -472,7 +472,8 @@ class PendingChangeCreate(BaseModel):
 
 
 class PhoneLockStartIn(BaseModel):
-    minutes: int
+    minutes: int | None = None
+    until_time: str | None = None  # "HH:MM" in NZ local time
     mode: str = "strict"  # "strict" | "study"
     lock_id: str | None = None
     source: str = "compass"  # "compass" | "utility"
@@ -4266,12 +4267,32 @@ def get_phone_lock_status():
     return status
 
 
+def _resolve_phone_lock_unlock_utc(minutes: int | None, until_time: str | None) -> datetime:
+    if until_time is not None:
+        m = re.fullmatch(r"(\d{1,2}):(\d{2})", until_time.strip())
+        if not m:
+            raise HTTPException(status_code=400, detail="invalid until_time format (HH:MM)")
+        hour, minute = int(m.group(1)), int(m.group(2))
+        if not (0 <= hour <= 23 and 0 <= minute <= 59):
+            raise HTTPException(status_code=400, detail="invalid until_time value")
+        now_nz = nz_now_naive()
+        target_nz = now_nz.replace(hour=hour, minute=minute, second=0, microsecond=0)
+        if target_nz <= now_nz:
+            target_nz += timedelta(days=1)
+        diff_sec = (target_nz - now_nz).total_seconds()
+        if diff_sec <= 0 or diff_sec > 720 * 60:
+            raise HTTPException(status_code=400, detail="lock duration must be within 12 hours")
+        return target_nz.replace(tzinfo=NZ_TZ).astimezone(timezone.utc).replace(tzinfo=None)
+    if minutes is None or minutes < 1 or minutes > 720:
+        raise HTTPException(status_code=400, detail="minutes must be between 1 and 720")
+    return utc_now_naive() + timedelta(minutes=minutes)
+
+
 @app.post("/api/phone-lock")
 def start_phone_lock(payload: PhoneLockStartIn):
-    if payload.minutes < 1 or payload.minutes > 720:
-        raise HTTPException(status_code=400, detail="minutes must be between 1 and 720")
     if payload.mode not in ("strict", "study"):
         raise HTTPException(status_code=400, detail="invalid mode")
+    new_unlock = _resolve_phone_lock_unlock_utc(payload.minutes, payload.until_time)
     source = payload.source if payload.source in ("compass", "utility") else "compass"
     conn = get_connection()
     revoked = _read_revoked_phone_lock_ids(conn)
@@ -4281,7 +4302,6 @@ def start_phone_lock(payload: PhoneLockStartIn):
         return {"ok": False, "revoked": True, **status}
 
     now_utc = utc_now_naive()
-    new_unlock = now_utc + timedelta(minutes=payload.minutes)
     current = _phone_lock_status(conn)
     if current["active"] and current["unlock_at_utc"]:
         # ロック中の短縮や「完全ロック→勉強アプリ許可」への緩和は本人操作では許さない

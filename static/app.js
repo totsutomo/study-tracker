@@ -1331,7 +1331,7 @@ const RELEASES = [
     date: "19/11/2026",
     title: "Phone lock & update notes",
     items: [
-      "Added Phone Lock (Strict or Study apps ok) synced with Utility and unlockable only via Mio's PIN on /approve",
+      "Added Phone Lock (duration or until clock time, Strict or Study apps ok) with automatic Do Not Disturb and Mio PIN unlock on /approve",
       "Added a Lock phone option directly inside the study timer start panel",
       "Added this update banner and full changelog history in Settings > App Info",
     ],
@@ -9314,6 +9314,7 @@ let phoneLockMode = "strict";
 let phoneLockUnlockTimeNz = "";
 let phoneLockTickInterval = null;
 let phoneLockPanelMode = "strict";
+let phoneLockPanelKind = "duration";
 
 function phoneLockLabel() {
   const remMin = Math.max(1, Math.ceil((phoneLockUntilMs - Date.now()) / 60000));
@@ -9368,22 +9369,67 @@ async function loadPhoneLockStatus() {
   }
 }
 
-async function startPhoneLock(minutes, mode) {
+async function startPhoneLock(minutes, mode, untilTime = null) {
+  const payload = untilTime
+    ? { until_time: untilTime, mode, source: "compass" }
+    : { minutes, mode, source: "compass" };
   const res = await api("/api/phone-lock", {
     method: "POST",
-    body: JSON.stringify({ minutes, mode, source: "compass" }),
+    body: JSON.stringify(payload),
   });
   applyPhoneLockStatus(res);
-  showToast(`Phone locked for ${minutes} min`);
+  showToast(untilTime ? `Phone locked until ${untilTime}` : `Phone locked for ${minutes} min`);
+}
+
+function defaultUntilTimeValue() {
+  const d = new Date(Date.now() + 60 * 60000);
+  const hh = String(d.getHours()).padStart(2, "0");
+  return `${hh}:00`;
+}
+
+function untilTimeMinutesDiff(hhmm) {
+  const m = /^(\d{2}):(\d{2})$/.exec(hhmm || "");
+  if (!m) return null;
+  const now = new Date();
+  const target = new Date(now);
+  target.setHours(Number(m[1]), Number(m[2]), 0, 0);
+  if (target <= now) target.setDate(target.getDate() + 1);
+  return Math.max(1, Math.round((target - now) / 60000));
 }
 
 function syncPhoneLockSubmitLabel() {
-  const mins = parseInt(document.getElementById("phone-lock-minutes").value, 10) || 0;
   const btn = document.getElementById("phone-lock-submit");
+  if (phoneLockPanelKind === "until") {
+    const val = document.getElementById("phone-lock-until-input").value;
+    const diff = untilTimeMinutesDiff(val);
+    const preview = document.getElementById("phone-lock-until-preview");
+    if (!diff) {
+      preview.textContent = "Pick an unlock time.";
+      btn.textContent = "Lock phone";
+    } else if (diff > 720) {
+      preview.textContent = "Max lock duration is 12 hours.";
+      btn.textContent = "Lock phone";
+    } else {
+      preview.textContent = `Locks for ${formatLogDuration(diff)} (until ${val})`;
+      btn.textContent = `Lock phone until ${val}`;
+    }
+    return;
+  }
+  const mins = parseInt(document.getElementById("phone-lock-minutes").value, 10) || 0;
   btn.textContent = mins > 0 ? `Lock phone for ${mins} min` : "Lock phone";
   document.querySelectorAll("#phone-lock-presets [data-minutes]").forEach((b) => {
     b.classList.toggle("active", Number(b.dataset.minutes) === mins);
   });
+}
+
+function setPhoneLockPanelKind(kind) {
+  phoneLockPanelKind = kind === "until" ? "until" : "duration";
+  document.querySelectorAll("#phone-lock-kind-toggle .period-btn").forEach((b) => {
+    b.classList.toggle("active", b.dataset.kind === phoneLockPanelKind);
+  });
+  document.getElementById("phone-lock-presets").classList.toggle("hidden", phoneLockPanelKind !== "duration");
+  document.getElementById("phone-lock-until-row").classList.toggle("hidden", phoneLockPanelKind !== "until");
+  syncPhoneLockSubmitLabel();
 }
 
 function setPhoneLockPanelMode(mode) {
@@ -9394,7 +9440,9 @@ function setPhoneLockPanelMode(mode) {
 }
 
 function openPhoneLockPanel() {
-  syncPhoneLockSubmitLabel();
+  const untilInput = document.getElementById("phone-lock-until-input");
+  if (!untilInput.value) untilInput.value = defaultUntilTimeValue();
+  setPhoneLockPanelKind(phoneLockPanelKind);
   setPhoneLockPanelMode(phoneLockPanelMode);
   document.getElementById("phone-lock-backdrop").classList.remove("hidden");
   document.getElementById("phone-lock-panel").classList.remove("hidden");
@@ -9408,6 +9456,9 @@ function closePhoneLockPanel() {
 
 document.getElementById("phone-lock-close").addEventListener("click", closePhoneLockPanel);
 document.getElementById("phone-lock-backdrop").addEventListener("click", closePhoneLockPanel);
+document.querySelectorAll("#phone-lock-kind-toggle .period-btn").forEach((btn) => {
+  btn.addEventListener("click", () => setPhoneLockPanelKind(btn.dataset.kind));
+});
 document.querySelectorAll("#phone-lock-presets [data-minutes]").forEach((btn) => {
   btn.addEventListener("click", () => {
     document.getElementById("phone-lock-minutes").value = btn.dataset.minutes;
@@ -9415,11 +9466,27 @@ document.querySelectorAll("#phone-lock-presets [data-minutes]").forEach((btn) =>
   });
 });
 document.getElementById("phone-lock-minutes").addEventListener("input", syncPhoneLockSubmitLabel);
+document.getElementById("phone-lock-until-input").addEventListener("input", syncPhoneLockSubmitLabel);
 document.querySelectorAll("#phone-lock-mode-toggle .period-btn").forEach((btn) => {
   btn.addEventListener("click", () => setPhoneLockPanelMode(btn.dataset.mode));
 });
 document.getElementById("phone-lock-form").addEventListener("submit", async (e) => {
   e.preventDefault();
+  if (phoneLockPanelKind === "until") {
+    const val = document.getElementById("phone-lock-until-input").value;
+    const diff = untilTimeMinutesDiff(val);
+    if (!diff || diff > 720) {
+      alert("Please choose a time within the next 12 hours");
+      return;
+    }
+    closePhoneLockPanel();
+    try {
+      await startPhoneLock(null, phoneLockPanelMode, val);
+    } catch (err) {
+      alert(err.message || "Failed to lock phone");
+    }
+    return;
+  }
   const minutes = parseInt(document.getElementById("phone-lock-minutes").value, 10);
   if (!minutes || minutes < 1 || minutes > 720) {
     alert("Please enter a duration between 1 and 720 min");

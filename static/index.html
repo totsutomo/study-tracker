@@ -1140,6 +1140,10 @@
     <button type="button" id="phone-lock-close" class="panel-close" aria-label="Close">×</button>
   </div>
   <form id="phone-lock-form">
+    <div class="period-toggle" id="phone-lock-kind-toggle" style="margin-bottom:10px;">
+      <button type="button" class="period-btn active" data-kind="duration">Duration</button>
+      <button type="button" class="period-btn" data-kind="until">Until time</button>
+    </div>
     <div class="due-row" id="phone-lock-presets">
       <button type="button" class="quick-date-btn" data-minutes="15">15 min</button>
       <button type="button" class="quick-date-btn" data-minutes="30">30 min</button>
@@ -1147,11 +1151,15 @@
       <button type="button" class="quick-date-btn" data-minutes="60">60 min</button>
       <input type="number" id="phone-lock-minutes" min="1" max="720" value="45" style="max-width:95px;" aria-label="Minutes">
     </div>
+    <div id="phone-lock-until-row" class="hidden" style="margin-top:4px;">
+      <input type="time" id="phone-lock-until-input" aria-label="Unlock time">
+      <p class="meta" id="phone-lock-until-preview" style="margin:6px 0 0;"></p>
+    </div>
     <div class="period-toggle" id="phone-lock-mode-toggle" style="margin-top:10px;">
       <button type="button" class="period-btn active" data-mode="strict">Strict (calls &amp; alarms only)</button>
       <button type="button" class="period-btn" data-mode="study">Study apps ok</button>
     </div>
-    <p class="meta" style="margin-top:10px;">Once started, early unlock requires Mio's PIN on the approval page.</p>
+    <p class="meta" style="margin-top:10px;">Turns on Do Not Disturb automatically. Once started, early unlock requires Mio's PIN on the approval page.</p>
     <button type="submit" id="phone-lock-submit" style="margin-top:12px;">Lock phone for 45 min</button>
   </form>
 </div>
