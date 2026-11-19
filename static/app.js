@@ -9404,13 +9404,13 @@ function syncPhoneLockSubmitLabel() {
     const diff = untilTimeMinutesDiff(val);
     const preview = document.getElementById("phone-lock-until-preview");
     if (!diff) {
-      preview.textContent = "Pick an unlock time.";
+      preview.textContent = "Pick a time";
       btn.textContent = "Lock phone";
     } else if (diff > 720) {
-      preview.textContent = "Max lock duration is 12 hours.";
+      preview.textContent = "Max 12 hr";
       btn.textContent = "Lock phone";
     } else {
-      preview.textContent = `Locks for ${formatLogDuration(diff)} (until ${val})`;
+      preview.textContent = `${formatLogDuration(diff)} · until ${val}`;
       btn.textContent = `Lock phone until ${val}`;
     }
     return;
