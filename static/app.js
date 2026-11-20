@@ -1807,7 +1807,10 @@ function openStartPanel(subject, todoId) {
   // 前回その科目で選んだモード・時間・チェック項目を復元する(毎回選び直す手間を省く、2026-09-27)。
   // 「きっかけ」は毎回その時の理由を記録するためのものなので、あえて復元しない
   const prefs = loadStartPrefs(subject);
-  setStartMode(prefs.mode);
+  // 前回たまたまCountdownを使った設定が記憶され、次回以降も意図せずCountdown(例: 105:00)から
+  // 始まって「前回の続きから再開している」と錯覚するのを防ぐため、開く時は毎回Timer(countup)を初期選択にする。
+  // Countdownに切り替えた時の分数(prefs.minutes)や他のオプションはそのまま記憶・復元する(2026-11-20)
+  setStartMode("countup");
   document.getElementById("start-duration-input").value = prefs.minutes;
   document.getElementById("start-clockonly").checked = prefs.clockOnly;
   document.getElementById("start-keep-awake").checked = prefs.keepAwake;
@@ -2558,6 +2561,14 @@ function openFocusOverlay() {
   document.getElementById("focus-timer").style.color = color;
   document.getElementById("focus-ring-fill").style.stroke = color;
   document.getElementById("focus-pause-label").textContent = "Pause";
+  const modeBadge = document.getElementById("focus-mode-badge");
+  if (modeBadge) {
+    const isCd = sessionMode === "countdown";
+    modeBadge.textContent = isCd && sessionTargetMs
+      ? `Countdown · ${Math.round(sessionTargetMs / 60000)}m`
+      : "Countdown";
+    modeBadge.classList.toggle("hidden", !isCd);
+  }
   document.getElementById("focus-clockonly-badge").classList.toggle("hidden", !sessionClockOnly);
   document.getElementById("focus-keepawake-badge").classList.toggle("hidden", !sessionKeepAwake);
   const overlay = document.getElementById("focus-overlay");
@@ -2601,7 +2612,8 @@ document.getElementById("focus-minimize-btn").addEventListener("click", minimize
 function showMiniBar() {
   const bar = document.getElementById("mini-timer-bar");
   bar.classList.remove("hidden");
-  document.getElementById("mini-timer-subject").textContent = timerSubject;
+  document.getElementById("mini-timer-subject").textContent =
+    sessionMode === "countdown" ? `${timerSubject} · Countdown` : timerSubject;
   const strip = document.getElementById("status-strip");
   strip.classList.add("live");
   strip.style.setProperty("--subject-color", colorFor(timerSubject));
