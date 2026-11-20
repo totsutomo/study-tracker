@@ -838,13 +838,13 @@ function renderTodos() {
 async function loadTodos({ paintCache = false } = {}) {
   let fresh = false;
   if (paintCache) {
-    cacheGet("/api/todos").then((cached) => {
+    cacheGet("/api/todos?recent_days=30").then((cached) => {
       if (fresh || !Array.isArray(cached)) return;
       allTodos = cached.map((t) => (!t.done && !t.skipped && isOverdue(t) && !isWorkoutTodo(t) ? { ...t, skipped: true } : t));
       renderTodos();
     });
   }
-  allTodos = await api("/api/todos");
+  allTodos = await api("/api/todos?recent_days=30");
   fresh = true;
   renderTodos();
 }
@@ -885,6 +885,7 @@ document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible") {
     syncWorkoutTodos({ fresh: true });
     loadPhoneLockStatus();
+    loadScreenBudget();
   }
 });
 
@@ -2197,7 +2198,9 @@ async function checkPeerSession() {
 function startPeerSessionPolling() {
   checkPeerSession();
   if (!peerSessionPollInterval) {
-    peerSessionPollInterval = setInterval(checkPeerSession, 30000);
+    peerSessionPollInterval = setInterval(() => {
+      if (!document.hidden) checkPeerSession();
+    }, 30000);
   }
 }
 
@@ -6498,7 +6501,7 @@ async function buildMorningOverviewHtml() {
   const [daily, activations, todos, settings] = await Promise.all([
     api("/api/study-logs/daily?days=15"),
     api("/api/activation-logs?limit=100"),
-    api("/api/todos"),
+    api("/api/todos?recent_days=14"),
     api("/api/settings").catch(() => ({})),
   ]);
   const minimum = settings.daily_minimum_minutes || 0;
@@ -6827,7 +6830,7 @@ function toggleBedtimeCarryoverEmpty() {
 }
 
 async function renderBedtimeCarryoverList() {
-  const todos = await api("/api/todos");
+  const todos = await api("/api/todos?recent_days=7");
   const today = todayStr();
   const carryover = todos.filter((t) => !t.done && t.due_date === today);
   const list = document.getElementById("bedtime-carryover-list");
@@ -7204,7 +7207,7 @@ async function fetchCalMonth(key) {
 // マス目に出すのは「Show on calendar」がONで、スキップしていないものだけ(calGridTodos)
 async function fetchCalTodos() {
   const seq = ++calTodosFetchSeq;
-  const todos = await api("/api/todos");
+  const todos = await api("/api/todos?recent_days=60");
   if (seq !== calTodosFetchSeq) return;
   calTodosCache = todos.filter((t) => t.due_date);
 }
@@ -7236,7 +7239,7 @@ function rebuildCalCaches() {
 async function hydrateCalendarFromCache() {
   const results = await Promise.all([...neededCalMonthKeys()].map(hydrateCalMonthFromCache));
   if (!calTodosCache.length) {
-    const todos = await cacheGet("/api/todos");
+    const todos = await cacheGet("/api/todos?recent_days=60");
     if (todos && !calTodosCache.length) calTodosCache = todos.filter((t) => t.due_date);
   }
   if (!results.some(Boolean)) return false;
@@ -8733,7 +8736,7 @@ document.getElementById("export-data-btn").addEventListener("click", () => {
 // ここで描けなくても・描いた内容が古くても実害はない(すぐ上書きされる)。
 async function hydrateFromCache() {
   const [todos, stats] = await Promise.all([
-    cacheGet("/api/todos"),
+    cacheGet("/api/todos?recent_days=30"),
     cacheGet("/api/todos/stats"),
   ]);
   let hydrated = false;
@@ -8767,8 +8770,12 @@ async function hydrateFromCache() {
   // PC/タブレットの利用時間はこの端末を操作していなくても裏で増えていくため、
   // ユーザー操作をきっかけにした再読込(上のloadScreenBudget呼び出し)だけでは反映が遅れる。
   // peer-session-bannerと同じ30秒ポーリングで補う。
-  setInterval(loadScreenBudget, 30000);
-  setInterval(loadPhoneLockStatus, 30000);
+  setInterval(() => {
+    if (!document.hidden) loadScreenBudget();
+  }, 30000);
+  setInterval(() => {
+    if (!document.hidden) loadPhoneLockStatus();
+  }, 30000);
 
   // 以前は「ToDo→期限切れスキップ→残り15件」と段階ごとに前の完了を待っていたため、Scores・
   // 勉強ログ・カレンダーは最初の2段が終わるまで読み込みが始まりすらしなかった(2026-09-28)。

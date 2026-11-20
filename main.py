@@ -18,6 +18,7 @@ from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel
@@ -26,6 +27,7 @@ from pywebpush import WebPushException, webpush
 from database import CATEGORY_COLOR_PALETTE, get_connection, init_db, row_to_dict, rows_to_dicts
 
 app = FastAPI(title="Compass")
+app.add_middleware(GZipMiddleware, minimum_size=500)
 
 # サーバー(Render)はUTCで動くが、とっつーは常にNZ(Pacific/Auckland、標準時UTC+12/
 # 夏時間UTC+13)にいる単一ユーザー向けアプリ。study_logs.logged_at/activation_logs.
@@ -517,16 +519,35 @@ def next_due_after_close(due_date: str | None, recurrence: str) -> date | None:
 STUDY_TODO_FILTER = "category IN (SELECT name FROM categories WHERE counts_as_study = 1)"
 
 @app.get("/api/todos")
-def list_todos():
+def list_todos(recent_days: int | None = None):
     conn = get_connection()
-    cur = conn.execute(
-        """
-        SELECT * FROM todos
-        ORDER BY done ASC, (due_date IS NULL) ASC, due_date ASC,
-                 CASE priority WHEN 'high' THEN 0 WHEN 'medium' THEN 1 WHEN 'low' THEN 2 ELSE 1 END ASC,
-                 created_at DESC
-        """
-    )
+    if recent_days is not None and recent_days > 0:
+        cutoff_date = (nz_today() - timedelta(days=recent_days)).isoformat()
+        cutoff_utc = (
+            datetime.now(timezone.utc) - timedelta(days=recent_days)
+        ).strftime("%Y-%m-%d %H:%M:%S")
+        cur = conn.execute(
+            """
+            SELECT * FROM todos
+            WHERE (done = 0 AND skipped = 0)
+               OR due_date >= ?
+               OR completed_at >= ?
+               OR created_at >= ?
+            ORDER BY done ASC, (due_date IS NULL) ASC, due_date ASC,
+                     CASE priority WHEN 'high' THEN 0 WHEN 'medium' THEN 1 WHEN 'low' THEN 2 ELSE 1 END ASC,
+                     created_at DESC
+            """,
+            (cutoff_date, cutoff_utc, cutoff_utc),
+        )
+    else:
+        cur = conn.execute(
+            """
+            SELECT * FROM todos
+            ORDER BY done ASC, (due_date IS NULL) ASC, due_date ASC,
+                     CASE priority WHEN 'high' THEN 0 WHEN 'medium' THEN 1 WHEN 'low' THEN 2 ELSE 1 END ASC,
+                     created_at DESC
+            """
+        )
     result = rows_to_dicts(cur)
     conn.close()
     return result
@@ -5415,7 +5436,15 @@ def push_check(token: str | None = None):
 
 # ---------- static frontend ----------
 
-app.mount("/static", StaticFiles(directory="static"), name="static")
+class CachedStaticFiles(StaticFiles):
+    async def get_response(self, path: str, scope):
+        resp = await super().get_response(path, scope)
+        if resp.status_code == 200 and "cache-control" not in resp.headers:
+            resp.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        return resp
+
+
+app.mount("/static", CachedStaticFiles(directory="static"), name="static")
 
 # デプロイのたびに変わるLAST_UPDATEDをapp.js/style.cssのURLに付与し、
 # ブラウザのキャッシュに古いJSが残ったままにならないようにする。
