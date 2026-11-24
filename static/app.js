@@ -5259,6 +5259,11 @@ async function loadScoresTab() {
       lastVocabStats = data;
       renderVocabStats(data);
     }],
+    // Canon(古文・漢文PWA)の進捗・正答率推移
+    ["/api/canon-stats?days=14", "canon-stats-chart", (data) => {
+      lastCanonStats = data;
+      renderCanonStats(data);
+    }],
   ];
   // 各カードのデータが届くたびにまとめ表も描き直す(まとめ表は時間以外のデータを各カードから借りる)
   const withOverview = (render) => (data) => { render(data); renderOverview(); };
@@ -5283,8 +5288,11 @@ async function loadScoresTab() {
 // (2026-10-02、drill-sync廃止でCompassに解いた数が残らなくなったため)。▲▼は同じ長さの直前の期間との比較。
 
 const DRILL_URL = "https://drill-tracker.vercel.app";
+const CANON_URL = "https://canon-phi-five.vercel.app";
+const CANON_TOTALS = { all: 659, wayaku: 46, kindai: 15, kanbun: 131 };
 let lastVocabStats = null;
 let lastDrillStats = null;
+let lastCanonStats = null;
 let overviewData = null;
 let overviewDays = [7, 30].includes(Number(localStorage.getItem("overviewDays")))
   ? Number(localStorage.getItem("overviewDays"))
@@ -5385,10 +5393,25 @@ function overviewResult(subject, starts, days) {
     const cur = acc(stackRows.filter((r) => inCur(r.date)));
     const prev = acc(stackRows.filter((r) => inPrev(r.date)));
     const latest = stackRows[stackRows.length - 1];
+    let sub = `Mastered ${latest.mastered} / ${latest.total}`;
+    if (subject === "kobun" && lastCanonStats) {
+      const cPct = Math.round(((lastCanonStats.cleared_total || 0) / CANON_TOTALS.all) * 100);
+      sub += ` · Canon ${cPct}%`;
+    }
     return {
       main: `Stack accuracy <span class="overview-num">${cur == null ? "--" : `${Math.round(cur)}%`}</span>${overviewDelta(cur, prev, "pt")}`,
-      sub: `Mastered ${latest.mastered} / ${latest.total}`,
+      sub,
       target: "scores-card-stack",
+    };
+  }
+
+  if (subject === "kobun" && lastCanonStats) {
+    const r7 = lastCanonStats.recent7 || {};
+    const cPct = Math.round(((lastCanonStats.cleared_total || 0) / CANON_TOTALS.all) * 100);
+    return {
+      main: `Canon 7d <span class="overview-num">${r7.accuracy == null ? "--" : `${Math.round(r7.accuracy)}%`}</span>${overviewDelta(r7.accuracy, r7.prev_accuracy, "pt")}`,
+      sub: `Cleared ${lastCanonStats.cleared_total || 0} / ${CANON_TOTALS.all} (${cPct}%)`,
+      target: "scores-card-canon",
     };
   }
 
@@ -5671,6 +5694,54 @@ function renderVocabStats(data) {
 function renderHitotsubashiScoreStats(rows) {
   const el = document.getElementById("scores-hitotsubashi-latest");
   el.textContent = rows.length ? Math.round(rows[rows.length - 1].overall) : "--";
+}
+
+function renderCanonStats(data) {
+  const cellsEl = document.getElementById("canon-stats-cells");
+  const barsEl = document.getElementById("canon-progress-bars");
+  const container = document.getElementById("canon-stats-chart");
+  if (!cellsEl || !barsEl || !container) return;
+
+  const cleared = Number(data?.cleared_total || 0);
+  const buckets = data?.buckets || {};
+  const r7 = data?.recent7 || {};
+  const pct = (n, d) => (d ? `${Math.round((n / d) * 100)}%` : "0%");
+  const diffTxt = r7.accuracy_diff == null
+    ? (r7.total ? `${r7.total} Qs` : "")
+    : `${r7.accuracy_diff >= 0 ? "+" : ""}${r7.accuracy_diff}pt · ${r7.total} Qs`;
+
+  cellsEl.innerHTML = [
+    ["Cleared", `${cleared} / ${CANON_TOTALS.all}`, pct(cleared, CANON_TOTALS.all)],
+    ["Accuracy · 7d", r7.accuracy == null ? "--" : `${r7.accuracy}%`, diffTxt],
+    ["Kindai (Hitotsubashi)", `${buckets.kobun_wajiko_kindai || 0} / ${CANON_TOTALS.kindai}`, pct(buckets.kobun_wajiko_kindai || 0, CANON_TOTALS.kindai)],
+  ].map(([label, value, sub]) =>
+    `<div class="stat-cell"><span class="stat-label">${label}</span><span class="stat-value">${value}</span>` +
+    (sub ? `<span class="stat-label">${sub}</span>` : "") + `</div>`).join("");
+
+  const bars = [
+    ["Common Test Wayaku", buckets.kobun_wayaku || 0, CANON_TOTALS.wayaku, "var(--accent)"],
+    ["Hitotsubashi Kindai", buckets.kobun_wajiko_kindai || 0, CANON_TOTALS.kindai, "var(--accent-secondary)"],
+    ["Kanbun", buckets.kanbun_quiz || 0, CANON_TOTALS.kanbun, "var(--tag-c)"],
+  ];
+  barsEl.innerHTML = `<div style="display:grid;gap:6px;margin:8px 0 10px;">` + bars.map(([label, done, total, color]) => {
+    const w = total ? Math.min(100, Math.round((done / total) * 100)) : 0;
+    return `<div><div style="display:flex;justify-content:space-between;font-size:12px;color:var(--text-muted);margin-bottom:3px;"><span>${label}</span><span>${done}/${total} (${w}%)</span></div>` +
+      `<div style="height:6px;border-radius:999px;background:var(--border);overflow:hidden;"><div style="width:${w}%;height:100%;background:${color};"></div></div></div>`;
+  }).join("") + `</div>`;
+
+  const daily = (data?.daily || []).filter((d) => d.total > 0 && d.accuracy != null);
+  if (!daily.length) {
+    container.innerHTML = `<p class="meta">No attempts yet (syncs automatically when you practice in Canon)</p>`;
+    return;
+  }
+  const { xOf, yOf, xLabels, svg } = scoreChartFrame(daily.length, [0, 25, 50, 75, 100], 100, "%");
+  const color = "var(--accent-secondary)";
+  const d = daily.map((r, i) => `${i === 0 ? "M" : "L"}${xOf(i).toFixed(1)},${yOf(r.accuracy).toFixed(1)}`).join(" ");
+  const dots = daily.map((r, i) =>
+    `<circle cx="${xOf(i).toFixed(1)}" cy="${yOf(r.accuracy).toFixed(1)}" r="2.5" fill="${color}"><title>${r.date}: ${r.accuracy}% (${r.correct}/${r.total})</title></circle>`).join("");
+  container.innerHTML = svg(
+    `<path d="${d}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"></path>${dots}` +
+    xLabels((i) => formatMonthDay(daily[i].date)));
 }
 
 // 一橋ライティングは各観点0-100点。Overallは総合点に出題形式ごとの色の点を重ね、形式別の得意・不得意を見分けられるようにする

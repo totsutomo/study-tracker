@@ -1878,6 +1878,31 @@ def drill_stats(days: int = 7):
     return value
 
 
+# ScoresタブのCanon(古文・漢文)カード用(2026-11-24)。Canon(Vercel)の集計APIから取得し短時間キャッシュする。
+CANON_API_ORIGIN = os.environ.get("CANON_API_ORIGIN", "https://canon-phi-five.vercel.app")
+CANON_STATS_CACHE_SECONDS = 60
+_canon_stats_cache: dict = {}
+
+
+@app.get("/api/canon-stats")
+def canon_stats(days: int = 14):
+    days = max(7, min(days, 90))
+    today = nz_today().isoformat()
+    key = (today, days)
+    now = time.time()
+    cached = _canon_stats_cache.get(key)
+    if cached and now - cached[0] <= CANON_STATS_CACHE_SECONDS:
+        return cached[1]
+    try:
+        with urllib.request.urlopen(f"{CANON_API_ORIGIN}/api/stats?days={days}", timeout=15) as res:
+            value = json.loads(res.read().decode("utf-8"))
+    except (urllib.error.URLError, TimeoutError, ValueError) as e:
+        raise HTTPException(status_code=502, detail=f"canon unreachable: {e}")
+    _canon_stats_cache.clear()
+    _canon_stats_cache[key] = (now, value)
+    return value
+
+
 # 3アプリ統合ヒートマップ(Studyタブ)用の日次集計。start_triggerのプレフィックスで
 # 発生元アプリを判定する: "vocab-app:*" / "drill-tracker:*" / それ以外はCompass純正
 # (手動記録・フォーカスセッション等)。新規テーブルは作らずstudy_logsだけで完結させる。
